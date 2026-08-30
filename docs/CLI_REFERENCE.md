@@ -1227,10 +1227,11 @@ bd reopen [id...] [flags]
 
 ### bd search
 
-Search issues across title and ID (excludes closed issues by default).
+Search issues across title, description, and ID (all statuses, including closed).
 
 ID-like queries (e.g., "bd-123", "hq-319") use fast exact/prefix matching.
-Text queries search titles. Use --desc-contains for description search.
+Text queries search titles, descriptions, and IDs. Use --desc-contains,
+--notes-contains, or --external-contains for targeted field search.
 Use --status all to include closed issues.
 
 Examples:
