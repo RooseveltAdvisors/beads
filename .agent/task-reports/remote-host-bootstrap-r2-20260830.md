@@ -70,3 +70,49 @@ For each host in order (dev, srv, svc):
 - All three doctor runs also passed the required-tool probe through the running
   worker (each check line re-derived after --fix).
 - No blockers encountered; zero secret material handled.
+
+## Scope expansion follow-up (inbox 001 + 002, 2026-08-30T02:0xZ)
+
+Firstmate inbox 001 (captain scope expansion) asked for gpu harness parity on
+all three hosts plus /usr/local/bin symlinks via sudo -n; inbox 002 then
+narrowed scope: the harness-parity layer (cursor-agent/bd installs +
+/usr/local/bin symlinks) was reassigned to a dedicated crewmate
+(harness-parity-20260830), leaving this task to finish svc doctor-green only.
+
+State at close:
+
+- dev: parity fully applied and verified per inbox 001 before the narrowing
+  (cursor-agent 2026.08.25-3e8eec8 + versions dir mirrored, bd 1.2.2 copied,
+  5 symlinks in /usr/local/bin, bare-shell command -v resolves all five to
+  /usr/local/bin, readlink targets match ~/.local/bin, doctor --fix green,
+  bare-PATH doctor green with check herdr=ok: /usr/local/bin/herdr).
+- srv: parity fully applied and verified the same way before the narrowing
+  (cursor-agent versions 2026.08.11-e8db854 + 2026.08.25-3e8eec8 mirrored,
+  bd 1.2.2, 5 symlinks in /usr/local/bin, bare-shell resolution verified,
+  doctor green). No cursor-agent/bd installs beyond the copy, no services
+  touched.
+- svc: parity layer NOT applied (per inbox 002, deferred to
+  harness-parity-20260830). Seed-gate evidence below.
+
+Harness-parity crewmate note: dev and srv already carry the exact gpu layout
+(herdr 0.8.2, treehouse 2.3.0, tasks-axi 0.2.5 npm-global + wrapper,
+cursor-agent 2026.08.25-3e8eec8 via versions tree, bd 1.2.2 (6c124203e),
+symlinked into /usr/local/bin -> ~/.local/bin, sudo -n used). Only svc still
+needs the parity install.
+
+## Final per-host doctor evidence (2026-08-30T02:1xZ)
+
+- dev (yuan): direct seed-gate invocation and fm-on entrypoint both print
+  `ok: remote second-mate readiness confirmed on this host` (exit 0);
+  entrypoint=yes, entrypoint-link=ok, herdr-server=ok, remote-job-probe=ok.
+- srv (yuan): same verdict direct and through the entrypoint protocol
+  (exit 0), entrypoint=yes, all checks ok.
+- svc (jon): direct seed-gate invocation (PATH=/home/jon/.local/bin:$PATH)
+  and the entrypoint protocol both print
+  `ok: remote second-mate readiness confirmed on this host`, exit 0,
+  entrypoint=yes, entrypoint-link=ok, remote-job-probe=ok,
+  herdr-server=ok: session fm-remote is running.
+
+svc bare default PATH still misses ~/.local/bin (Ubuntu default PATH does not
+include it), which is the launch-context gap scheduled for the parity crewmate
+on svc via /usr/local/bin symlinks.
