@@ -127,6 +127,40 @@ func TestEmbeddedLegacyRecurrenceMetadataImportRoundTrip(t *testing.T) {
 	}
 }
 
+// TestEmbeddedUpdateClearAllConflictsWithSetFlag pins the clear-all conflict:
+// `--repeat=` combined with a set request in one update fails explicitly and
+// leaves the stored recurrence contract untouched.
+func TestEmbeddedUpdateClearAllConflictsWithSetFlag(t *testing.T) {
+	if os.Getenv("BEADS_TEST_EMBEDDED_DOLT") != "1" {
+		t.Skip("set BEADS_TEST_EMBEDDED_DOLT=1 to run embedded dolt recurrence tests")
+	}
+	t.Parallel()
+
+	bd := buildEmbeddedBD(t)
+	dir, _, _ := bdInit(t, bd, "--prefix", "rcc")
+	created := bdCreate(t, bd, dir,
+		"Recurring conflict target",
+		"--assignee", "jr-voice",
+		"--repeat", "daily",
+		"--recurrence-start", "2026-09-08",
+		"--recurrence-tz", "UTC",
+	)
+
+	out := bdUpdateFail(t, bd, dir, created.ID, "--repeat=", "--recurrence-start=2026-10-01")
+	if !strings.Contains(out, "clears the whole recurrence contract") {
+		t.Fatalf("output missing clear-all conflict refusal:\n%s", out)
+	}
+	var details struct {
+		Metadata map[string]string `json:"metadata"`
+	}
+	if err := json.Unmarshal(parseShowJSON(t, bdShowJSON(t, bd, dir, created.ID)), &details); err != nil {
+		t.Fatal(err)
+	}
+	if details.Metadata["repeat"] != "daily" || details.Metadata["recurrence_start"] != "2026-09-08" {
+		t.Fatalf("failed conflict update corrupted the stored contract: %v", details.Metadata)
+	}
+}
+
 func TestEmbeddedRecurringTaskValidation(t *testing.T) {
 	if os.Getenv("BEADS_TEST_EMBEDDED_DOLT") != "1" {
 		t.Skip("set BEADS_TEST_EMBEDDED_DOLT=1 to run embedded dolt recurrence tests")

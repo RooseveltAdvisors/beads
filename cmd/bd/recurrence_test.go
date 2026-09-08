@@ -46,9 +46,23 @@ func TestApplyCreateRecurrenceFlagsDailyBlog(t *testing.T) {
 func TestRecurrenceMetadataEditsClearDefinition(t *testing.T) {
 	t.Parallel()
 	cmd := recurrenceTestCommand(t, "--repeat=")
-	set, unset := recurrenceMetadataEdits(cmd)
+	set, unset, err := recurrenceMetadataEdits(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(set) != 0 || len(unset) != 4 {
 		t.Fatalf("set=%v unset=%v, want complete recurrence removal", set, unset)
+	}
+}
+
+func TestRecurrenceMetadataEditsClearAllConflictsWithSetFlag(t *testing.T) {
+	t.Parallel()
+	for _, flag := range []string{"--recurrence-start=2026-10-01", "--recurrence-end=2026-12-31", "--recurrence-tz=UTC"} {
+		cmd := recurrenceTestCommand(t, "--repeat=", flag)
+		_, _, err := recurrenceMetadataEdits(cmd)
+		if err == nil || !strings.Contains(err.Error(), "clears the whole recurrence contract") {
+			t.Fatalf("recurrenceMetadataEdits(--repeat=, %s) error = %v, want clear-all conflict refusal", flag, err)
+		}
 	}
 }
 

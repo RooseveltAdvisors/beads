@@ -60,17 +60,22 @@ func applyCreateRecurrenceFlags(cmd *cobra.Command, metadata json.RawMessage, as
 	return encoded, nil
 }
 
-func recurrenceMetadataEdits(cmd *cobra.Command) (set, unset []string) {
+func recurrenceMetadataEdits(cmd *cobra.Command) (set, unset []string, err error) {
 	clearAll := cmd.Flags().Changed("repeat")
 	if clearAll {
 		repeat, _ := cmd.Flags().GetString("repeat")
 		clearAll = strings.TrimSpace(repeat) == ""
 	}
 	if clearAll {
+		for _, field := range recurrenceFlags[1:] {
+			if cmd.Flags().Changed(field.flag) {
+				return nil, nil, fmt.Errorf("--repeat='' clears the whole recurrence contract and cannot be combined with --%s", field.flag)
+			}
+		}
 		for _, field := range recurrenceFlags {
 			unset = append(unset, field.key)
 		}
-		return nil, unset
+		return nil, unset, nil
 	}
 	for _, field := range recurrenceFlags {
 		if !cmd.Flags().Changed(field.flag) {
@@ -84,5 +89,5 @@ func recurrenceMetadataEdits(cmd *cobra.Command) (set, unset []string) {
 			set = append(set, field.key+"="+value)
 		}
 	}
-	return set, unset
+	return set, unset, nil
 }
