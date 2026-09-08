@@ -71,9 +71,9 @@ func TestBuildIssueFilterClauses_QueryAsIssueID(t *testing.T) {
 	if len(clauses) != 1 {
 		t.Fatalf("expected 1 clause, got %d", len(clauses))
 	}
-	// ID-like query produces 4 args: exact match, prefix, title LIKE, external_ref LIKE
-	if len(args) != 4 {
-		t.Errorf("expected 4 args for ID-like query, got %d: %v", len(args), args)
+	// ID-like query produces 5 args: exact match, prefix, title LIKE, description LIKE, external_ref LIKE
+	if len(args) != 5 {
+		t.Errorf("expected 5 args for ID-like query, got %d: %v", len(args), args)
 	}
 }
 
@@ -87,9 +87,9 @@ func TestBuildIssueFilterClauses_QueryAsText(t *testing.T) {
 	if len(clauses) != 1 {
 		t.Fatalf("expected 1 clause, got %d", len(clauses))
 	}
-	// Text query produces 2 args: title LIKE, id LIKE
-	if len(args) != 2 {
-		t.Errorf("expected 2 args for text query, got %d: %v", len(args), args)
+	// Text query produces 3 args: title LIKE, description LIKE, id LIKE
+	if len(args) != 3 {
+		t.Errorf("expected 3 args for text query, got %d: %v", len(args), args)
 	}
 }
 
@@ -561,9 +561,9 @@ func TestBuildIssueFilterClauses_CombinedFilters(t *testing.T) {
 	if len(clauses) != 6 {
 		t.Errorf("expected 6 clauses for combined filter, got %d: %v", len(clauses), clauses)
 	}
-	// query text(2) + status(1) + priority(1) + label(1) + created_after(1) = 6
-	if len(args) != 6 {
-		t.Errorf("expected 6 args, got %d", len(args))
+	// query text(3) + status(1) + priority(1) + label(1) + created_after(1) = 7
+	if len(args) != 7 {
+		t.Errorf("expected 7 args, got %d", len(args))
 	}
 }
 

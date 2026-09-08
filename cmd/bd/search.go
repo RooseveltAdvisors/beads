@@ -18,10 +18,11 @@ var searchCmd = &cobra.Command{
 	Use:     "search [query]",
 	GroupID: "issues",
 	Short:   "Search issues by text query",
-	Long: `Search issues across title and ID (all statuses, including closed).
+	Long: `Search issues across title, description, and ID (all statuses, including closed).
 
 ID-like queries (e.g., "bd-123", "hq-319") use fast exact/prefix matching.
-Text queries search titles. Use --desc-contains for description search.
+Text queries search titles, descriptions, and IDs. Use --desc-contains,
+--notes-contains, or --external-contains for targeted field search.
 Use --status open (etc.) to narrow; closed issues are included by default
 so "was this already filed/fixed?" cannot silently answer no. Matches
 beyond --limit are dropped status-blind, so when hunting live work in a

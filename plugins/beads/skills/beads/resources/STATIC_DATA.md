@@ -48,7 +48,8 @@ When using bd for static data (terminology, glossaries, reference information):
 - Workaround: `bd list | grep -i "api endpoint"` to find ID first
 - This is why dual format (bd + markdown) is recommended for reference data
 
-**No search by content:**
-- bd searches by ID, title filters, status, labels
-- For full-text search across descriptions/notes, use `bd search` or `bd sql`
+**Searching by content:**
+- `bd search` searches ID, title, and description text by default
+- `bd list` filters by ID, title, status, labels (no description search)
+- For targeted full-text search, use `bd search` or `bd sql`
 - Example: `bd search "authentication"` or `bd sql "SELECT id, title FROM issues WHERE description LIKE '%authentication%'"`
