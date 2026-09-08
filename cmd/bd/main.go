@@ -19,6 +19,11 @@ import (
 	"syscall"
 	"time"
 
+	// Embed the IANA timezone database so explicit recurrence timezones work
+	// in minimal standalone environments (scratch/alpine containers) with no
+	// host zoneinfo.
+	_ "time/tzdata"
+
 	"github.com/spf13/cobra"
 	"github.com/subosito/gotenv"
 

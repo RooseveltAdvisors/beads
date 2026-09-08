@@ -48,10 +48,7 @@ func ClaimIssueInTx(ctx context.Context, tx DBTX, id string, actor string) (*Cla
 	if err != nil {
 		return nil, fmt.Errorf("failed to get issue for claim: %w", err)
 	}
-	recurrence, err := types.ParseRecurrence(oldIssue.Metadata, oldIssue.Assignee)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", storage.ErrValidation, err)
-	}
+	recurrence := types.ParseRecurrenceLenient(oldIssue.Metadata, oldIssue.Assignee)
 	claimAssignee := actor
 	if recurrence != nil {
 		claimAssignee = oldIssue.Assignee

@@ -1,8 +1,10 @@
 package types
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -117,6 +119,60 @@ func ParseRecurrence(metadata json.RawMessage, assignee string) (*Recurrence, er
 		}
 	}
 	return &Recurrence{Schedule: repeat, Start: start, End: end, Timezone: tz}, nil
+}
+
+// ParseRecurrenceLenient is the claim-time form of ParseRecurrence: metadata
+// that cannot form a valid recurrence (a pre-existing issue's legacy or
+// malformed use of the generic keys) is inert, yielding nil exactly like a
+// one-off instead of a validation error that would block dispatch. Write
+// paths use the strict ParseRecurrence.
+func ParseRecurrenceLenient(metadata json.RawMessage, assignee string) *Recurrence {
+	recurrence, _ := ParseRecurrence(metadata, assignee)
+	return recurrence
+}
+
+// RecurrenceKeysEqual reports whether the recurrence metadata keys hold the
+// same values in before and after. It distinguishes a write that leaves a
+// pre-existing (never-valid) recurrence blob untouched from one that is
+// trying to shape the keys into a recurrence.
+func RecurrenceKeysEqual(before, after json.RawMessage) bool {
+	beforeKeys, okBefore := recurrenceKeyMap(before)
+	afterKeys, okAfter := recurrenceKeyMap(after)
+	if !okBefore || !okAfter {
+		return okBefore == okAfter
+	}
+	if len(beforeKeys) != len(afterKeys) {
+		return false
+	}
+	for key, beforeRaw := range beforeKeys {
+		afterRaw, ok := afterKeys[key]
+		if !ok || !rawJSONEqual(beforeRaw, afterRaw) {
+			return false
+		}
+	}
+	return true
+}
+
+func recurrenceKeyMap(metadata json.RawMessage) (map[string]json.RawMessage, bool) {
+	var values map[string]json.RawMessage
+	if len(metadata) == 0 || json.Unmarshal(metadata, &values) != nil {
+		return nil, false
+	}
+	keys := make(map[string]json.RawMessage, 4)
+	for _, key := range []string{MetadataRepeat, MetadataRecurrenceStart, MetadataRecurrenceEnd, MetadataRecurrenceTZ} {
+		if raw, ok := values[key]; ok {
+			keys[key] = raw
+		}
+	}
+	return keys, true
+}
+
+func rawJSONEqual(a, b json.RawMessage) bool {
+	var left, right interface{}
+	if json.Unmarshal(a, &left) == nil && json.Unmarshal(b, &right) == nil {
+		return reflect.DeepEqual(left, right)
+	}
+	return bytes.Equal(a, b)
 }
 
 func parseRecurrenceBound(value string, location *time.Location) (time.Time, error) {

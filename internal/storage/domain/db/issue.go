@@ -66,6 +66,12 @@ func (r *issueSQLRepositoryImpl) Insert(ctx context.Context, issue *types.Issue,
 		return errors.New("db: Insert: explicit ID required (ID generation belongs to CreateIssueUseCase)")
 	}
 
+	// Recurrence contract parity with PrepareIssueForInsert: a uow client
+	// cannot create the malformed recurring states the embedded path refuses.
+	if _, err := types.ParseRecurrence(issue.Metadata, issue.Assignee); err != nil {
+		return fmt.Errorf("validation failed for issue %s: %w", issue.ID, err)
+	}
+
 	table := pickIssueTable(opts.UseWispsTable)
 	if opts.CreateOnly {
 		if err := issueops.EnsureIssueIDAvailableInTx(ctx, r.runner, issue.ID); err != nil {
@@ -190,6 +196,13 @@ func (r *issueSQLRepositoryImpl) Update(ctx context.Context, id string, updates 
 			return fmt.Errorf("db: Update %s: %w", id, err)
 		}
 		updates = resolved
+	}
+
+	// Recurrence coherence parity with issueops.updateIssueInTx: the uow dual
+	// refuses the same corrupted recurrence states, ahead of any write, on
+	// the merge-resolved map.
+	if err := issueops.ValidateUpdatedRecurrence(oldIssue, updates); err != nil {
+		return fmt.Errorf("db: Update %s: %w", id, err)
 	}
 
 	// closed_at coherence parity with issueops.updateIssueInTx: an explicit
@@ -405,6 +418,16 @@ func (r *issueSQLRepositoryImpl) Claim(ctx context.Context, id, actor string, op
 		return domain.ClaimRowResult{}, fmt.Errorf("db: Claim %s: read old issue: %w", id, err)
 	}
 
+	// Recurring issues keep their canonical owner across claims and are never
+	// claimable through a pool alias; malformed legacy metadata is inert
+	// (ParseRecurrenceLenient), matching issueops.ClaimIssueInTx. This dual
+	// must stay in lockstep with that path.
+	recurrence := types.ParseRecurrenceLenient(oldIssue.Metadata, oldIssue.Assignee)
+	claimAssignee := actor
+	if recurrence != nil {
+		claimAssignee = oldIssue.Assignee
+	}
+
 	table := pickIssueTable(opts.UseWispsTable)
 	now := time.Now().UTC()
 	startedWasZero := oldIssue.StartedAt == nil
@@ -432,7 +455,7 @@ func (r *issueSQLRepositoryImpl) Claim(ctx context.Context, id, actor string, op
 	// — including a spelling difference across layers (ga-wzl83) — or a
 	// claim-pool alias. issueops.ActorMatches is the exported form of the
 	// primary path's package-local actorMatches, kept for exactly this dual.
-	assigneeOK := oldIssue.Assignee == "" || issueops.ActorMatches(oldIssue.Assignee, actor) || slices.Contains(pools, oldIssue.Assignee)
+	assigneeOK := oldIssue.Assignee == "" || issueops.ActorMatches(oldIssue.Assignee, actor) || (recurrence == nil && slices.Contains(pools, oldIssue.Assignee))
 
 	// Same lockstep for the source statuses (bd-pq7m2): claimable from "open"
 	// plus custom active-category statuses, like the primary path — not a
@@ -461,7 +484,7 @@ func (r *issueSQLRepositoryImpl) Claim(ctx context.Context, id, actor string, op
 	if assigneeOK {
 		var res sql.Result
 		if startedWasZero {
-			args := append([]any{actor, now, now}, rowLockArgs...)
+			args := append([]any{claimAssignee, now, now}, rowLockArgs...)
 			args = append(args, id, oldIssue.RowVersion)
 			args = append(args, statusArgs...)
 			//nolint:gosec // G201: table is one of two hardcoded constants
@@ -471,7 +494,7 @@ func (r *issueSQLRepositoryImpl) Claim(ctx context.Context, id, actor string, op
 				WHERE id = ? AND row_lock = ? AND (%s)
 			`, table, rowLockClause, statusPredicate), args...)
 		} else {
-			args := append([]any{actor, now}, rowLockArgs...)
+			args := append([]any{claimAssignee, now}, rowLockArgs...)
 			args = append(args, id, oldIssue.RowVersion)
 			args = append(args, statusArgs...)
 			//nolint:gosec // G201: table is one of two hardcoded constants
@@ -523,7 +546,7 @@ func (r *issueSQLRepositoryImpl) Claim(ctx context.Context, id, actor string, op
 	}
 
 	oldData, _ := json.Marshal(oldIssue)
-	newData, _ := json.Marshal(map[string]any{"assignee": actor, "status": "in_progress"})
+	newData, _ := json.Marshal(map[string]any{"assignee": claimAssignee, "status": "in_progress"})
 	if err := r.events.Record(ctx, domain.Event{
 		IssueID:  id,
 		Type:     types.EventType("claimed"),
@@ -541,7 +564,7 @@ func (r *issueSQLRepositoryImpl) Claim(ctx context.Context, id, actor string, op
 
 	return domain.ClaimRowResult{
 		Updated:          true,
-		CurrentAssignee:  actor,
+		CurrentAssignee:  claimAssignee,
 		CurrentStatus:    types.StatusInProgress,
 		StartedAtWasZero: startedWasZero,
 		OldIssue:         oldIssue,
