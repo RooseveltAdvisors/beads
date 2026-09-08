@@ -102,10 +102,11 @@ instead of blocking claims or imports, and stays untouched until a write
 reshapes it.
 
 Recurring issues must keep the canonical owning agent in the ordinary
-`assignee` field. Claiming one under an equivalent runtime spelling preserves
-the stored owner name, and closing it preserves the schedule metadata. The
-external scheduler remains responsible for materializing and retaining
-evidence of individual runs.
+`assignee` field: writes that would clear it are refused, and claiming,
+releasing, or reclaiming an expired lease preserves the stored owner name
+even when the claimer identifies under an equivalent runtime spelling, while
+closing preserves the schedule metadata. The external scheduler remains
+responsible for materializing and retaining evidence of individual runs.
 
 Use the same flags with `bd update`. `--repeat=''` removes the complete
 recurrence contract and returns the issue to ordinary one-off semantics.
