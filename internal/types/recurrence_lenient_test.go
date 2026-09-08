@@ -24,6 +24,33 @@ func TestParseRecurrenceLenientTreatsUnformableRepeatAsInert(t *testing.T) {
 	}
 }
 
+func TestHasRecurrenceKeys(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		metadata string
+		want     bool
+	}{
+		{name: "valid recurrence", metadata: `{"repeat":"daily","recurrence_start":"2026-09-08","recurrence_tz":"UTC"}`, want: true},
+		{name: "legacy repeat only", metadata: `{"repeat":"weekly"}`, want: true},
+		{name: "non-string repeat", metadata: `{"repeat":3}`, want: true},
+		{name: "bounds without repeat", metadata: `{"recurrence_start":"2026-09-08"}`, want: true},
+		{name: "no recurrence keys", metadata: `{"campaign":"blog"}`, want: false},
+		{name: "empty object", metadata: `{}`, want: false},
+		{name: "empty metadata", metadata: ``, want: false},
+		{name: "non-object metadata", metadata: `"legacy"`, want: false},
+		{name: "null metadata", metadata: `null`, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := HasRecurrenceKeys(json.RawMessage(tc.metadata)); got != tc.want {
+				t.Fatalf("HasRecurrenceKeys(%s) = %v, want %v", tc.metadata, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRecurrenceKeysEqual(t *testing.T) {
 	t.Parallel()
 	valid := `{"repeat":"daily","recurrence_start":"2026-09-08","recurrence_tz":"America/New_York"}`

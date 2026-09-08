@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -67,6 +68,63 @@ func TestEmbeddedRecurringTaskRoundTripAndOwnerLifecycle(t *testing.T) {
 		}
 	}
 	assertRecurringBlog(bdShowJSON(t, bd, dir, created.ID), "closed")
+}
+
+// TestEmbeddedLegacyRecurrenceMetadataImportRoundTrip pins the fresh-clone
+// bootstrap path: a pre-contract replica's issue whose metadata carries
+// legacy recurrence-shaped keys must import without aborting the batch, must
+// survive an export/import round trip, and must claim leniently afterwards
+// like any one-off.
+func TestEmbeddedLegacyRecurrenceMetadataImportRoundTrip(t *testing.T) {
+	if os.Getenv("BEADS_TEST_EMBEDDED_DOLT") != "1" {
+		t.Skip("set BEADS_TEST_EMBEDDED_DOLT=1 to run embedded dolt recurrence tests")
+	}
+	t.Parallel()
+
+	bd := buildEmbeddedBD(t)
+
+	// A pre-change replica stores the legacy blob at rest; its JSONL carries it.
+	src, _, _ := bdInit(t, bd, "--prefix", "legacy")
+	legacyJSONL := filepath.Join(t.TempDir(), "pre-change-export.jsonl")
+	line := `{"id":"legacy-1","title":"Legacy weekly cadence","issue_type":"task","priority":2,"status":"open","metadata":{"repeat":"weekly"}}` + "\n"
+	if err := os.WriteFile(legacyJSONL, []byte(line), 0o644); err != nil {
+		t.Fatalf("write pre-change export: %v", err)
+	}
+	if _, err := bdRunWithFlockRetry(t, bd, src, "import", legacyJSONL); err != nil {
+		t.Fatalf("bd import of legacy recurrence metadata failed: %v", err)
+	}
+
+	if _, err := bdRunWithFlockRetry(t, bd, src, "export", "-o", "roundtrip.jsonl"); err != nil {
+		t.Fatalf("bd export failed: %v", err)
+	}
+	exported, err := os.ReadFile(filepath.Join(src, "roundtrip.jsonl"))
+	if err != nil {
+		t.Fatalf("read export: %v", err)
+	}
+	if !strings.Contains(string(exported), `"repeat":"weekly"`) {
+		t.Fatalf("export lost the legacy metadata:\n%s", exported)
+	}
+
+	dst, _, _ := bdInit(t, bd, "--prefix", "legacy")
+	if _, err := bdRunWithFlockRetry(t, bd, dst, "import", filepath.Join(src, "roundtrip.jsonl")); err != nil {
+		t.Fatalf("bd import into fresh clone failed: %v", err)
+	}
+
+	bdUpdate(t, bd, dst, "legacy-1", "--claim", "--actor", "jr_voice")
+	var details struct {
+		Assignee string            `json:"assignee"`
+		Status   string            `json:"status"`
+		Metadata map[string]string `json:"metadata"`
+	}
+	if err := json.Unmarshal(parseShowJSON(t, bdShowJSON(t, bd, dst, "legacy-1")), &details); err != nil {
+		t.Fatal(err)
+	}
+	if details.Assignee != "jr_voice" || details.Status != "in_progress" {
+		t.Fatalf("after lenient claim assignee/status = %q/%q, want jr_voice/in_progress", details.Assignee, details.Status)
+	}
+	if details.Metadata["repeat"] != "weekly" {
+		t.Fatalf("legacy metadata did not survive import+claim: %v", details.Metadata)
+	}
 }
 
 func TestEmbeddedRecurringTaskValidation(t *testing.T) {

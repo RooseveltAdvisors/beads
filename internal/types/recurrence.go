@@ -125,6 +125,16 @@ func ParseRecurrence(metadata json.RawMessage, assignee string) (*Recurrence, er
 	return &Recurrence{Schedule: repeat, Start: start, End: end, Timezone: tz}, nil
 }
 
+// HasRecurrenceKeys reports whether metadata carries any recurrence contract
+// key, whether or not the values form a valid recurrence. Lifecycle paths that
+// would otherwise clear an assignee use it to recognize recurrence-bearing
+// rows - including rows whose legacy metadata never parses - so the canonical
+// owner the contract names survives the whole lifecycle.
+func HasRecurrenceKeys(metadata json.RawMessage) bool {
+	keys, _ := recurrenceKeyMap(metadata)
+	return len(keys) > 0
+}
+
 // ParseRecurrenceLenient is the claim-time form of ParseRecurrence: metadata
 // that cannot form a valid recurrence (a pre-existing issue's legacy or
 // malformed use of the generic keys) is inert, yielding nil exactly like a
@@ -159,7 +169,7 @@ func RecurrenceKeysEqual(before, after json.RawMessage) bool {
 
 func recurrenceKeyMap(metadata json.RawMessage) (map[string]json.RawMessage, bool) {
 	var values map[string]json.RawMessage
-	if len(metadata) == 0 || json.Unmarshal(metadata, &values) != nil {
+	if len(metadata) == 0 || strings.TrimSpace(string(metadata)) == "null" || json.Unmarshal(metadata, &values) != nil {
 		return nil, false
 	}
 	keys := make(map[string]json.RawMessage, 4)

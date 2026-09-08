@@ -64,6 +64,17 @@ func UnclaimIssueInTx(ctx context.Context, tx DBTX, id string, actor string, for
 
 	now := time.Now().UTC()
 
+	// A recurrence-bearing row keeps its canonical assignee across the release:
+	// the issue returns to ready still owned by the agent that holds the
+	// schedule (legacy metadata whose keys never form a valid recurrence
+	// counts too), so the next claim by a differently-spelled or different
+	// actor cannot take the work away from its owner.
+	preserveOwner := types.HasRecurrenceKeys(oldIssue.Metadata)
+	assigneeClause := "assignee = '', "
+	if preserveOwner {
+		assigneeClause = ""
+	}
+
 	// Atomic UPDATE: clear assignee, reset status to open, clear started_at,
 	// and rewrite row_lock. The predicate CASes on row_lock rather than
 	// assignee (ga-5ksp5): ownership was already authorized above (or bypassed
@@ -78,10 +89,10 @@ func UnclaimIssueInTx(ctx context.Context, tx DBTX, id string, actor string, for
 	// the one we read.
 	result, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE %s
-		SET assignee = '', status = 'open', updated_at = ?,
+		SET %sstatus = 'open', updated_at = ?,
 		    started_at = NULL, row_lock = ?
 		WHERE id = ? AND status IN ('open', 'in_progress') AND row_lock = ?
-	`, issueTable), now, freshRowLock(), id, oldIssue.RowVersion)
+	`, issueTable, assigneeClause), now, freshRowLock(), id, oldIssue.RowVersion)
 	if err != nil {
 		return fmt.Errorf("failed to unclaim issue: %w", err)
 	}
@@ -119,9 +130,13 @@ func finishUnclaimInTx(ctx context.Context, tx DBTX, eventTable string, id strin
 		return err
 	}
 
+	newAssignee := ""
+	if types.HasRecurrenceKeys(oldIssue.Metadata) {
+		newAssignee = oldIssue.Assignee
+	}
 	oldData, _ := json.Marshal(oldIssue)
 	newData, _ := json.Marshal(map[string]interface{}{
-		"assignee": "",
+		"assignee": newAssignee,
 		"status":   "open",
 	})
 	if err := RecordFullEventInTable(ctx, tx, eventTable, id, "unclaimed", actor, string(oldData), string(newData)); err != nil {
@@ -183,6 +198,15 @@ func UnclaimIssueIfAssigneeInTx(ctx context.Context, tx DBTX, id string, actor s
 
 	now := time.Now().UTC()
 
+	// Same owner preservation as UnclaimIssueInTx: a recurrence-bearing row
+	// (even legacy metadata that never parses) releases its claim without
+	// releasing the canonical owner.
+	preserveOwner := types.HasRecurrenceKeys(oldIssue.Metadata)
+	assigneeClause := "assignee = '', "
+	if preserveOwner {
+		assigneeClause = ""
+	}
+
 	// Atomic UPDATE CASed on row_lock rather than assignee (ga-5ksp5): the
 	// Go-side check above already authorized the swap under actorMatches
 	// against the row read into oldIssue, and row_lock is rewritten by every
@@ -195,10 +219,10 @@ func UnclaimIssueIfAssigneeInTx(ctx context.Context, tx DBTX, id string, actor s
 	// without embedding a spelling-sensitive string comparison in SQL.
 	result, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE %s
-		SET assignee = '', status = 'open', updated_at = ?,
+		SET %sstatus = 'open', updated_at = ?,
 		    started_at = NULL, row_lock = ?
 		WHERE id = ? AND status IN ('open', 'in_progress') AND row_lock = ?
-	`, issueTable), now, freshRowLock(), id, oldIssue.RowVersion)
+	`, issueTable, assigneeClause), now, freshRowLock(), id, oldIssue.RowVersion)
 	if err != nil {
 		return fmt.Errorf("failed to unclaim issue: %w", err)
 	}

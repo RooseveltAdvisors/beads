@@ -530,9 +530,12 @@ func PrepareIssueForInsert(issue *types.Issue, customStatuses, customTypes []str
 	if err := ValidateMetadataIfConfigured(issue.Metadata); err != nil {
 		return fmt.Errorf("metadata validation failed for issue %s: %w", issue.ID, err)
 	}
-	if _, err := types.ParseRecurrence(issue.Metadata, issue.Assignee); err != nil {
-		return fmt.Errorf("validation failed for issue %s: %w", issue.ID, err)
-	}
+	// Recurrence metadata is deliberately NOT validated here: insert-time
+	// reads are lenient, matching claim/update time, so a pre-existing blob
+	// that cannot form a valid recurrence imports inertly instead of blocking
+	// the batch. Interactive CLI writes validate strictly before reaching
+	// storage, and updateIssueInTx still refuses writes that would corrupt a
+	// row that currently parses.
 
 	// Normalize timestamps to UTC, defaulting to now.
 	now := time.Now().UTC()

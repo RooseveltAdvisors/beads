@@ -98,7 +98,8 @@ the schedule timezone. The timezone is always an explicit IANA name.
 Creating or updating recurrence metadata is strict: every key present must
 form a valid schedule. Pre-existing metadata that uses these keys without
 forming a valid recurrence is inert legacy data - it is ignored on reads
-instead of blocking claims, and stays untouched until a write reshapes it.
+instead of blocking claims or imports, and stays untouched until a write
+reshapes it.
 
 Recurring issues must keep the canonical owning agent in the ordinary
 `assignee` field. Claiming one under an equivalent runtime spelling preserves

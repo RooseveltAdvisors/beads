@@ -66,12 +66,12 @@ func (r *issueSQLRepositoryImpl) Insert(ctx context.Context, issue *types.Issue,
 		return errors.New("db: Insert: explicit ID required (ID generation belongs to CreateIssueUseCase)")
 	}
 
-	// Recurrence contract parity with PrepareIssueForInsert: a uow client
-	// cannot create the malformed recurring states the embedded path refuses.
-	if _, err := types.ParseRecurrence(issue.Metadata, issue.Assignee); err != nil {
-		return fmt.Errorf("validation failed for issue %s: %w", issue.ID, err)
-	}
-
+	// Recurrence metadata is deliberately NOT validated on insert (lenient
+	// insert-time reads, matching claim/update time): a pre-existing blob that
+	// cannot form a valid recurrence lands inertly instead of failing the
+	// unit of work. Interactive CLI writes validate strictly before reaching
+	// storage, and Update refuses writes that would corrupt a row that
+	// currently parses.
 	table := pickIssueTable(opts.UseWispsTable)
 	if opts.CreateOnly {
 		if err := issueops.EnsureIssueIDAvailableInTx(ctx, r.runner, issue.ID); err != nil {
