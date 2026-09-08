@@ -48,6 +48,11 @@ func ClaimIssueInTx(ctx context.Context, tx DBTX, id string, actor string) (*Cla
 	if err != nil {
 		return nil, fmt.Errorf("failed to get issue for claim: %w", err)
 	}
+	recurrence := types.ParseRecurrenceLenient(oldIssue.Metadata, oldIssue.Assignee)
+	claimAssignee := actor
+	if recurrence != nil {
+		claimAssignee = oldIssue.Assignee
+	}
 
 	now := time.Now().UTC()
 
@@ -88,7 +93,7 @@ func ClaimIssueInTx(ctx context.Context, tx DBTX, id string, actor string) (*Cla
 	// config value, not a Gas Town identity that gets respelled per layer, so
 	// there is no cross-spelling variant to reconcile — canonicalizing it
 	// could only blur two administratively-distinct pool names into one.
-	assigneeOK := oldIssue.Assignee == "" || actorMatches(oldIssue.Assignee, actor) || slices.Contains(pools, oldIssue.Assignee)
+	assigneeOK := oldIssue.Assignee == "" || actorMatches(oldIssue.Assignee, actor) || (recurrence == nil && slices.Contains(pools, oldIssue.Assignee))
 
 	// Conditional UPDATE: only attempted while the issue was still claimable
 	// as of oldIssue, and even then CASed on row_lock rather than re-checking
@@ -108,7 +113,7 @@ func ClaimIssueInTx(ctx context.Context, tx DBTX, id string, actor string) (*Cla
 	if assigneeOK {
 		var result sql.Result
 		if oldIssue.StartedAt == nil {
-			args := append([]interface{}{actor, now, now}, rowLockArgs...)
+			args := append([]interface{}{claimAssignee, now, now}, rowLockArgs...)
 			args = append(args, id, oldIssue.RowVersion)
 			args = append(args, statusArgs...)
 			result, err = tx.ExecContext(ctx, fmt.Sprintf(`
@@ -117,7 +122,7 @@ func ClaimIssueInTx(ctx context.Context, tx DBTX, id string, actor string) (*Cla
 				WHERE id = ? AND row_lock = ? AND status IN (%s)
 			`, issueTable, rowLockClause, statusPlaceholders), args...)
 		} else {
-			args := append([]interface{}{actor, now}, rowLockArgs...)
+			args := append([]interface{}{claimAssignee, now}, rowLockArgs...)
 			args = append(args, id, oldIssue.RowVersion)
 			args = append(args, statusArgs...)
 			result, err = tx.ExecContext(ctx, fmt.Sprintf(`
@@ -207,7 +212,7 @@ func ClaimIssueInTx(ctx context.Context, tx DBTX, id string, actor string) (*Cla
 	// Record the claim event.
 	oldData, _ := json.Marshal(oldIssue)
 	newUpdates := map[string]interface{}{
-		"assignee": actor,
+		"assignee": claimAssignee,
 		"status":   "in_progress",
 	}
 	newData, _ := json.Marshal(newUpdates)

@@ -12,6 +12,10 @@ import (
 // registerCommonIssueFlags registers flags common to create and update commands.
 func registerCommonIssueFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("assignee", "a", "", "Assignee")
+	cmd.Flags().String("repeat", "", "Repeat schedule: daily, weekly, or a five-field cron expression (with bd update, --repeat='' clears the whole recurrence contract)")
+	cmd.Flags().String("recurrence-start", "", "Recurrence activation start (YYYY-MM-DD or ISO-8601 datetime)")
+	cmd.Flags().String("recurrence-end", "", "Optional recurrence activation end (YYYY-MM-DD or ISO-8601 datetime; empty clears on update)")
+	cmd.Flags().String("recurrence-tz", "", "IANA timezone for the recurrence schedule (required with --repeat)")
 	cmd.Flags().StringP("description", "d", "", "Issue description")
 	cmd.Flags().String("body", "", "Alias for --description (GitHub CLI convention)")
 	_ = cmd.Flags().MarkHidden("body") // Hidden alias for agent/CLI ergonomics

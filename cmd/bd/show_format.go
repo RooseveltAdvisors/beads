@@ -126,6 +126,18 @@ func formatIssueMetadata(issue *types.Issue) string {
 		lines = append(lines, strings.Join(timeParts, " · "))
 	}
 
+	if recurrence, err := types.ParseRecurrence(issue.Metadata, issue.Assignee); err == nil && recurrence != nil {
+		parts := []string{
+			fmt.Sprintf("Repeat: %s", recurrence.Schedule),
+			fmt.Sprintf("Start: %s", recurrence.Start),
+		}
+		if recurrence.End != "" {
+			parts = append(parts, fmt.Sprintf("End: %s", recurrence.End))
+		}
+		parts = append(parts, fmt.Sprintf("Timezone: %s", recurrence.Timezone))
+		lines = append(lines, strings.Join(parts, " · "))
+	}
+
 	// Lease line: only when an active lease is held (in_progress + non-null
 	// lease_expires_at). row_lock is internal and never surfaced.
 	if issue.Status == types.StatusInProgress && issue.LeaseExpiresAt != nil {

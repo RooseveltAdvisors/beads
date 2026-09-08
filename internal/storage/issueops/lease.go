@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -667,6 +668,11 @@ func reclaimReplicaSQL(filter types.ReclaimFilter, localNode string) (string, []
 // the lease from) so the caller can log/emit recovery events. The caller owns
 // Dolt versioning.
 //
+// Recurrence-bearing rows keep their assignee: the canonical owner named by
+// the recurrence contract outlives the lease, so the reverted issue returns to
+// ready still owned by the agent that holds the schedule (metadata whose keys
+// never form a valid recurrence counts too - HasRecurrenceKeys is the test).
+//
 // filter narrows which stale leases are eligible (see types.ReclaimFilter); the
 // zero filter keeps the historical global behavior. Scoping is applied to the
 // snapshot SELECT only — the per-row DELETE/UPDATE re-checks staleness by id,
@@ -685,7 +691,7 @@ func ReclaimExpiredLeasesInTx(ctx context.Context, tx DBTX, cutoff time.Time, fi
 	args := append([]any{cutoff}, replicaArgs...)
 	args = append(args, scopeArgs...)
 	rows, err := tx.QueryContext(ctx, `
-		SELECT l.issue_id, COALESCE(i.assignee, ''), COALESCE(l.granted_node, '') FROM leases l
+		SELECT l.issue_id, COALESCE(i.assignee, ''), COALESCE(l.granted_node, ''), COALESCE(i.metadata, '') FROM leases l
 		JOIN issues i ON i.id = l.issue_id
 		WHERE i.status = 'in_progress'
 		  AND l.lease_expires_at < ?
@@ -699,14 +705,17 @@ func ReclaimExpiredLeasesInTx(ctx context.Context, tx DBTX, cutoff time.Time, fi
 	// types.ReclaimedLease: it is a reclaim-time diagnostic, not part of the
 	// recovery record every backend returns to callers.
 	staleNodes := map[string]string{}
+	staleMetadata := map[string]json.RawMessage{}
 	for rows.Next() {
 		var r types.ReclaimedLease
 		var grantedNode string
-		if err := rows.Scan(&r.ID, &r.PreviousOwner, &grantedNode); err != nil {
+		var metadata []byte
+		if err := rows.Scan(&r.ID, &r.PreviousOwner, &grantedNode, &metadata); err != nil {
 			_ = rows.Close()
 			return nil, fmt.Errorf("scan stale lease row: %w", err)
 		}
 		staleNodes[r.ID] = grantedNode
+		staleMetadata[r.ID] = json.RawMessage(metadata)
 		stale = append(stale, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -753,13 +762,20 @@ func ReclaimExpiredLeasesInTx(ctx context.Context, tx DBTX, cutoff time.Time, fi
 		// Revert the issue itself. status is re-checked so a row that stopped
 		// being in_progress under us (closed) is left alone; row_lock makes a
 		// concurrent close/update conflict at commit time rather than
-		// cell-merge with this write.
-		res, err = tx.ExecContext(ctx, `
+		// cell-merge with this write. A recurrence-bearing row keeps its
+		// assignee so the canonical owner survives the revert.
+		assigneeClause := "assignee = NULL,\n\t\t\t    "
+		newOwner := ""
+		if types.HasRecurrenceKeys(staleMetadata[r.ID]) {
+			assigneeClause = ""
+			newOwner = r.PreviousOwner
+		}
+		res, err = tx.ExecContext(ctx, fmt.Sprintf(`
 			UPDATE issues
-			SET status = 'open', assignee = NULL, started_at = NULL,
+			SET status = 'open', %sstarted_at = NULL,
 			    updated_at = ?, row_lock = ?
 			WHERE id = ? AND status = 'in_progress'
-		`, time.Now().UTC(), freshRowLock(), r.ID)
+		`, assigneeClause), time.Now().UTC(), freshRowLock(), r.ID)
 		if err != nil {
 			return nil, fmt.Errorf("reclaim %s: %w", r.ID, err)
 		}
@@ -771,11 +787,12 @@ func ReclaimExpiredLeasesInTx(ctx context.Context, tx DBTX, cutoff time.Time, fi
 			continue // no longer in_progress — its lease row was stale anyway
 		}
 		if err := RecordFullEventInTable(ctx, tx, "events", r.ID, types.EventLeaseReclaimed, actor,
-			r.PreviousOwner, ""); err != nil {
+			r.PreviousOwner, newOwner); err != nil {
 			return nil, fmt.Errorf("record reclaim event for %s: %w", r.ID, err)
 		}
-		// Journal the lease reclaim as an update (assignee cleared, status
-		// reverted to open) so a replayer sees the claim released. Emitted past
+		// Journal the lease reclaim as an update (assignee released or kept
+		// for a recurrence-bearing row, status reverted to open) so a replayer
+		// sees the claim released. Emitted past
 		// both re-checks, so only reverts that actually happened are recorded.
 		if err := RecordEventInTx(ctx, tx, EventUpdate, r.ID, actor); err != nil {
 			return nil, err

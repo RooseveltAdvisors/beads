@@ -371,6 +371,9 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 	if err != nil {
 		return nil, err
 	}
+	if err := ValidateUpdatedRecurrence(oldIssue, updates); err != nil {
+		return nil, err
+	}
 
 	// An explicit closed_at must agree with the status the update lands. The
 	// guard reads the caller's INTENT, so it runs on the merge-resolved map
@@ -545,6 +548,38 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 		return nil, err
 	}
 	return updateResult, nil
+}
+
+// ValidateUpdatedRecurrence rejects recurrence state a write would corrupt,
+// mirroring the create-side strictness. Metadata that was never a valid
+// recurrence is inert legacy data: as long as the write leaves the recurrence
+// keys exactly as it found them, the issue keeps behaving like the one-off it
+// always was instead of starting to fail validation.
+func ValidateUpdatedRecurrence(oldIssue *types.Issue, updates map[string]interface{}) error {
+	metadata := oldIssue.Metadata
+	if value, ok := updates["metadata"]; ok {
+		normalized, err := storage.NormalizeMetadataValue(value)
+		if err != nil {
+			return fmt.Errorf("invalid metadata: %w", err)
+		}
+		metadata = json.RawMessage(normalized)
+	}
+	assignee := oldIssue.Assignee
+	if value, ok := updates["assignee"]; ok {
+		if value == nil {
+			assignee = ""
+		} else if text, ok := value.(string); ok {
+			assignee = text
+		}
+	}
+	if _, err := types.ParseRecurrence(metadata, assignee); err != nil {
+		if _, legacyErr := types.ParseRecurrence(oldIssue.Metadata, oldIssue.Assignee); legacyErr != nil &&
+			types.RecurrenceKeysEqual(oldIssue.Metadata, metadata) {
+			return nil
+		}
+		return fmt.Errorf("%w: %w", storage.ErrValidation, err)
+	}
+	return nil
 }
 
 func cloneUpdateFields(updates map[string]interface{}) map[string]interface{} {

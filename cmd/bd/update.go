@@ -377,8 +377,14 @@ pointless).`,
 		// Incremental metadata edits (GH#1406)
 		setMetadataFlags, _ := cmd.Flags().GetStringArray("set-metadata")
 		unsetMetadataFlags, _ := cmd.Flags().GetStringArray("unset-metadata")
+		recurrenceSet, recurrenceUnset, err := recurrenceMetadataEdits(cmd)
+		if err != nil {
+			return HandleErrorRespectJSON("%v", err)
+		}
+		setMetadataFlags = append(setMetadataFlags, recurrenceSet...)
+		unsetMetadataFlags = append(unsetMetadataFlags, recurrenceUnset...)
 		if (len(setMetadataFlags) > 0 || len(unsetMetadataFlags) > 0) && cmd.Flags().Changed("metadata") {
-			return HandleErrorRespectJSON("cannot combine --metadata with --set-metadata or --unset-metadata")
+			return HandleErrorRespectJSON("cannot combine --metadata with recurrence, --set-metadata, or --unset-metadata flags")
 		}
 		if len(setMetadataFlags) > 0 {
 			updates[storageissueops.OpSetMetadata] = setMetadataFlags

@@ -274,6 +274,18 @@ func gatherCreateInput(cmd *cobra.Command, args []string) (createInput, error) {
 		in.metadataSet = true
 	}
 
+	// The proxied create route builds its issue from this input, so the
+	// recurrence flags and their strict validation must ride here (the
+	// embedded direct route applies them itself in RunE). Running with no
+	// recurrence flags changed still strict-validates --metadata that carries
+	// recurrence keys, so no interactive create route accepts a malformed
+	// recurrence silently.
+	recurrenceMetadata, err := applyCreateRecurrenceFlags(cmd, in.metadata, in.assignee)
+	if err != nil {
+		return in, HandleError("invalid recurrence: %v", err)
+	}
+	in.metadata = recurrenceMetadata
+
 	if cmd.Flags().Changed("estimate") {
 		est, _ := cmd.Flags().GetInt("estimate")
 		if est < 0 {
@@ -308,6 +320,7 @@ var singleIssueOnlyFlags = []string{
 	"event-category", "event-actor", "event-target", "event-payload",
 	"due", "defer",
 	"metadata", "estimate", "wisp-type",
+	"repeat", "recurrence-start", "recurrence-end", "recurrence-tz",
 }
 
 func rejectSingleIssueFlagsForMarkdown(cmd *cobra.Command) error {

@@ -297,6 +297,10 @@ var createCmd = &cobra.Command{
 			}
 			metadata = json.RawMessage(metadataJSON)
 		}
+		metadata, err = applyCreateRecurrenceFlags(cmd, metadata, assignee)
+		if err != nil {
+			return HandleError("invalid recurrence: %v", err)
+		}
 
 		validateTemplate, _ := cmd.Flags().GetBool("validate")
 		validationMode := config.GetString("validation.on-create")

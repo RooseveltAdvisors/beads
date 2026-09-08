@@ -251,8 +251,14 @@ func gatherUpdateInput(ctx context.Context, cmd *cobra.Command) (*updateInput, e
 	}
 	setMetadataFlags, _ := cmd.Flags().GetStringArray("set-metadata")
 	unsetMetadataFlags, _ := cmd.Flags().GetStringArray("unset-metadata")
+	recurrenceSet, recurrenceUnset, err := recurrenceMetadataEdits(cmd)
+	if err != nil {
+		return nil, HandleErrorRespectJSON("%v", err)
+	}
+	setMetadataFlags = append(setMetadataFlags, recurrenceSet...)
+	unsetMetadataFlags = append(unsetMetadataFlags, recurrenceUnset...)
 	if (len(setMetadataFlags) > 0 || len(unsetMetadataFlags) > 0) && cmd.Flags().Changed("metadata") {
-		return nil, HandleErrorRespectJSON("cannot combine --metadata with --set-metadata or --unset-metadata")
+		return nil, HandleErrorRespectJSON("cannot combine --metadata with recurrence, --set-metadata, or --unset-metadata flags")
 	}
 	in.setMetadata = setMetadataFlags
 	in.unsetMetadata = unsetMetadataFlags
