@@ -34,11 +34,7 @@ func ParseRecurrence(metadata json.RawMessage, assignee string) (*Recurrence, er
 	if len(metadata) > 0 && strings.TrimSpace(string(metadata)) != "null" {
 		if err := json.Unmarshal(metadata, &values); err != nil {
 			// Arbitrary non-object metadata remains valid for one-off issues.
-			var objectType map[string]any
-			if json.Unmarshal(metadata, &objectType) != nil {
-				return nil, nil
-			}
-			return nil, err
+			return nil, nil
 		}
 	}
 
@@ -105,16 +101,24 @@ func ParseRecurrence(metadata json.RawMessage, assignee string) (*Recurrence, er
 	if err != nil {
 		return nil, fmt.Errorf("invalid recurrence timezone %q: use an IANA timezone", tz)
 	}
-	startAt, err := parseRecurrenceBound(start, location)
+	startAt, _, err := parseRecurrenceBound(start, location)
 	if err != nil {
 		return nil, fmt.Errorf("invalid recurrence_start %q: use YYYY-MM-DD or an ISO-8601 datetime", start)
 	}
 	if end != "" {
-		endAt, err := parseRecurrenceBound(end, location)
+		endAt, dateOnly, err := parseRecurrenceBound(end, location)
 		if err != nil {
 			return nil, fmt.Errorf("invalid recurrence_end %q: use YYYY-MM-DD or an ISO-8601 datetime", end)
 		}
-		if endAt.Before(startAt) {
+		if dateOnly {
+			// A date-only end includes the whole end day, so it compares
+			// against the start of the following day, which must still lie
+			// strictly after the start for a non-empty window.
+			endAt = endAt.AddDate(0, 0, 1)
+			if !endAt.After(startAt) {
+				return nil, fmt.Errorf("recurrence_end %q is before recurrence_start %q", end, start)
+			}
+		} else if endAt.Before(startAt) {
 			return nil, fmt.Errorf("recurrence_end %q is before recurrence_start %q", end, start)
 		}
 	}
@@ -175,11 +179,14 @@ func rawJSONEqual(a, b json.RawMessage) bool {
 	return bytes.Equal(a, b)
 }
 
-func parseRecurrenceBound(value string, location *time.Location) (time.Time, error) {
-	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02T15:04", "2006-01-02"} {
-		if parsed, err := time.ParseInLocation(layout, value, location); err == nil {
-			return parsed, nil
+func parseRecurrenceBound(value string, location *time.Location) (time.Time, bool, error) {
+	for _, layout := range []struct {
+		pattern  string
+		dateOnly bool
+	}{{time.RFC3339, false}, {"2006-01-02T15:04:05", false}, {"2006-01-02T15:04", false}, {"2006-01-02", true}} {
+		if parsed, err := time.ParseInLocation(layout.pattern, value, location); err == nil {
+			return parsed, layout.dateOnly, nil
 		}
 	}
-	return time.Time{}, fmt.Errorf("unsupported recurrence bound")
+	return time.Time{}, false, fmt.Errorf("unsupported recurrence bound")
 }

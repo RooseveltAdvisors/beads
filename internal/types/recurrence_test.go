@@ -24,6 +24,9 @@ func TestParseRecurrence(t *testing.T) {
 		{name: "unknown timezone", metadata: `{"repeat":"daily","recurrence_start":"2026-09-08","recurrence_tz":"Mars/Olympus"}`, assignee: "jr-voice", wantErr: "invalid recurrence timezone"},
 		{name: "implicit local timezone", metadata: `{"repeat":"daily","recurrence_start":"2026-09-08","recurrence_tz":"Local"}`, assignee: "jr-voice", wantErr: "explicit IANA timezone"},
 		{name: "end before start", metadata: `{"repeat":"daily","recurrence_start":"2026-09-08","recurrence_end":"2026-09-07","recurrence_tz":"UTC"}`, assignee: "jr-voice", wantErr: "is before recurrence_start"},
+		{name: "end equal to the start instant", metadata: `{"repeat":"daily","recurrence_start":"2026-09-08","recurrence_end":"2026-09-08T00:00","recurrence_tz":"UTC"}`, assignee: "jr-voice"},
+		{name: "same-day date-only end after datetime start", metadata: `{"repeat":"daily","recurrence_start":"2026-09-08T09:00","recurrence_end":"2026-09-08","recurrence_tz":"America/New_York"}`, assignee: "jr-voice"},
+		{name: "date-only end before datetime start", metadata: `{"repeat":"daily","recurrence_start":"2026-09-08T09:00","recurrence_end":"2026-09-07","recurrence_tz":"America/New_York"}`, assignee: "jr-voice", wantErr: "is before recurrence_start"},
 		{name: "missing owner", metadata: `{"repeat":"daily","recurrence_start":"2026-09-08","recurrence_tz":"UTC"}`, wantErr: "canonical owning agent"},
 		{name: "orphan bound", metadata: `{"recurrence_start":"2026-09-08"}`, assignee: "jr-voice", wantErr: `requires "repeat"`},
 	}
