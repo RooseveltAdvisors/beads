@@ -530,6 +530,9 @@ func PrepareIssueForInsert(issue *types.Issue, customStatuses, customTypes []str
 	if err := ValidateMetadataIfConfigured(issue.Metadata); err != nil {
 		return fmt.Errorf("metadata validation failed for issue %s: %w", issue.ID, err)
 	}
+	if _, err := types.ParseRecurrence(issue.Metadata, issue.Assignee); err != nil {
+		return fmt.Errorf("validation failed for issue %s: %w", issue.ID, err)
+	}
 
 	// Normalize timestamps to UTC, defaulting to now.
 	now := time.Now().UTC()

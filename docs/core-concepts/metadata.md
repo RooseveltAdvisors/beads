@@ -75,6 +75,34 @@ round-trip fields it understands. Prefer namespaced keys and keep
 tracker-specific policy in the integration. If a value becomes broadly useful
 to beads itself, revisit whether it deserves a native field.
 
+## Recurring Work Definitions
+
+Schedulers can mark an issue as a recurring work definition without adding a
+second backlog or asking beads to execute a schedule:
+
+```bash
+bd create "Publish daily jonroosevelt.com blog post" \
+  --assignee jr-voice \
+  --repeat "0 9 * * *" \
+  --recurrence-start 2026-09-08 \
+  --recurrence-tz America/New_York
+```
+
+The CLI stores the contract as top-level metadata keys named `repeat`,
+`recurrence_start`, `recurrence_end` (optional), and `recurrence_tz`. A task is
+recurring exactly when `repeat` is present. `repeat` accepts `daily`, `weekly`,
+or a standard five-field cron expression. Bounds accept `YYYY-MM-DD` or an
+ISO-8601 datetime; the timezone is always an explicit IANA name.
+
+Recurring issues must keep the canonical owning agent in the ordinary
+`assignee` field. Claiming one under an equivalent runtime spelling preserves
+the stored owner name, and closing it preserves the schedule metadata. The
+external scheduler remains responsible for materializing and retaining
+evidence of individual runs.
+
+Use the same flags with `bd update`. `--repeat=''` removes the complete
+recurrence contract and returns the issue to ordinary one-off semantics.
+
 ## Reserved Key Prefixes
 
 | Prefix | Reserved For |

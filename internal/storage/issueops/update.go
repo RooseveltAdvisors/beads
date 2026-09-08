@@ -371,6 +371,9 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 	if err != nil {
 		return nil, err
 	}
+	if err := validateUpdatedRecurrence(oldIssue, updates); err != nil {
+		return nil, err
+	}
 
 	// An explicit closed_at must agree with the status the update lands. The
 	// guard reads the caller's INTENT, so it runs on the merge-resolved map
@@ -545,6 +548,29 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 		return nil, err
 	}
 	return updateResult, nil
+}
+
+func validateUpdatedRecurrence(oldIssue *types.Issue, updates map[string]interface{}) error {
+	metadata := oldIssue.Metadata
+	if value, ok := updates["metadata"]; ok {
+		normalized, err := storage.NormalizeMetadataValue(value)
+		if err != nil {
+			return fmt.Errorf("invalid metadata: %w", err)
+		}
+		metadata = json.RawMessage(normalized)
+	}
+	assignee := oldIssue.Assignee
+	if value, ok := updates["assignee"]; ok {
+		if value == nil {
+			assignee = ""
+		} else if text, ok := value.(string); ok {
+			assignee = text
+		}
+	}
+	if _, err := types.ParseRecurrence(metadata, assignee); err != nil {
+		return fmt.Errorf("%w: %w", storage.ErrValidation, err)
+	}
+	return nil
 }
 
 func cloneUpdateFields(updates map[string]interface{}) map[string]interface{} {
