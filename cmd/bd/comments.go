@@ -72,7 +72,11 @@ Examples:
   bd comments add bd-123 "This is a comment"
 
   # Add a comment from a file
-  bd comments add bd-123 -f notes.txt`,
+
+  bd comments add bd-123 -f notes.txt
+
+  # Delete a comment ("remove" is an alias)
+  bd comments delete bd-123 <comment-id>`,
 	Args:          validateCommentsArgs,
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -191,7 +195,7 @@ Examples:
 
 		issueID := args[0]
 
-		commentText, err := requireTextFromSources("comment text", "use positional args or -f to read from file",
+		commentText, err := requireTextFromSources("comment text", "use positional args, --stdin, or -f to read from file",
 			cmdTextSources(cmd, args[1:]))
 		if err != nil {
 			return HandleErrorRespectJSON("%v", err)
@@ -293,11 +297,81 @@ func addCommentDirect(ctx context.Context, st storage.DoltStorage, issueID, auth
 	return result.Comment, nil
 }
 
+var commentsDeleteCmd = &cobra.Command{
+	Use:           "delete <issue-id> <comment-id>",
+	Aliases:       []string{"remove"},
+	Short:         "Delete a comment from an issue",
+	Args:          cobra.ExactArgs(2),
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		CheckReadonly("comment delete")
+		actor := getActorWithGit()
+		if usesProxiedServer() {
+			return runCommentsDeleteProxiedServer(rootCtx, args[0], args[1], actor)
+		}
+		if err := ensureStoreActive(); err != nil {
+			return HandleErrorRespectJSON("deleting comment: %v", err)
+		}
+		result, err := resolveAndGetIssueForMutation(rootCtx, store, args[0])
+		if err != nil {
+			if result != nil {
+				result.Close()
+			}
+			return HandleErrorRespectJSON("resolving %s: %v", args[0], err)
+		}
+		if result == nil || result.Issue == nil {
+			if result != nil {
+				result.Close()
+			}
+			return HandleErrorRespectJSON("issue %s not found", args[0])
+		}
+		defer result.Close()
+		issueID := result.ResolvedID
+		comment, err := deleteCommentDirect(rootCtx, result.Store, issueID, args[1], actor)
+		if err != nil {
+			return HandleErrorRespectJSON("deleting comment: %v", err)
+		}
+		if err := commitPendingIfEmbedded(rootCtx, result.Store, actor, doltAutoCommitParams{
+			Command:  "comments delete",
+			IssueIDs: []string{issueID},
+		}); err != nil {
+			return HandleErrorRespectJSON("failed to commit: %v", err)
+		}
+		if jsonOutput {
+			return outputJSON(comment)
+		}
+		fmt.Printf("Comment deleted from %s\n", issueID)
+		return nil
+	},
+}
+
+func deleteCommentDirect(ctx context.Context, st storage.DoltStorage, issueID, commentID, actor string) (*types.Comment, error) {
+	opsCtx, err := issueOpsContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	commenter, err := st.Commenter()
+	if err != nil {
+		return nil, err
+	}
+	result, err := commenter.DeleteComment(opsCtx, issueops.DeleteCommentRequest{
+		Actor: actor, IssueID: issueID, CommentID: commentID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.Comment, nil
+}
+
 func init() {
 	commentsCmd.AddCommand(commentsMisplacedListCmd)
 	commentsCmd.AddCommand(commentsAddCmd)
+	commentsCmd.AddCommand(commentsDeleteCmd)
 	commentsCmd.Flags().Bool("local-time", false, "Show timestamps in local time instead of UTC")
 	commentsAddCmd.Flags().StringP("file", "f", "", "Read comment text from file")
+	commentsAddCmd.Flags().Bool("stdin", false, "Read comment text from standard input")
+	commentsAddCmd.MarkFlagsMutuallyExclusive("stdin", "file")
 	commentsAddCmd.Flags().StringP("author", "a", "", "Add author to comment")
 
 	// Issue ID completions

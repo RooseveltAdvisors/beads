@@ -905,6 +905,27 @@ bd --verbose list
 cat .beads/dolt-server.log
 ```
 
+#### Crash and error logs
+
+`bd` also appends crashes (panics with stack traces) and command errors to a
+durable log under the XDG state directory:
+
+```bash
+cat "${XDG_STATE_HOME:-$HOME/.local/state}/beads/logs/bd.log"
+```
+
+Each line has an RFC3339 timestamp, the failing command, and the error or
+panic. Entries never contain issue bodies, credentials, or other sensitive
+data, so the log is safe to attach when asking for help:
+
+```bash
+# Include the last few log lines with a bug report
+tail -n 20 "${XDG_STATE_HOME:-$HOME/.local/state}/beads/logs/bd.log"
+```
+
+The log is append-only and capped at 5 MB (truncated and restarted when it
+exceeds the cap).
+
 ### System info
 
 ```bash
