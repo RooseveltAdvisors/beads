@@ -144,7 +144,7 @@ func TestInitNonInteractiveAutoExportDefaultOffAndOptIn(t *testing.T) {
 		t.Fatalf("export.git-add default = %q, want false", got)
 	}
 
-	runBDForAutoExportInitTest(t, bd, dir, "create", "default-off issue", "-p", "2")
+	runBDForAutoExportInitTest(t, bd, dir, "create", "--due", "+7d", "default-off issue", "-p", "2")
 	jsonlPath := filepath.Join(dir, ".beads", "issues.jsonl")
 	if _, err := os.Stat(jsonlPath); !os.IsNotExist(err) {
 		t.Fatalf("default-off create wrote %s; stat err=%v", jsonlPath, err)
@@ -156,7 +156,7 @@ func TestInitNonInteractiveAutoExportDefaultOffAndOptIn(t *testing.T) {
 		t.Fatalf("explicit export.auto = %q, want true", got)
 	}
 	time.Sleep(10 * time.Millisecond)
-	runBDForAutoExportInitTest(t, bd, dir, "create", "explicit export issue", "-p", "2")
+	runBDForAutoExportInitTest(t, bd, dir, "create", "--due", "+7d", "explicit export issue", "-p", "2")
 	data, err := os.ReadFile(jsonlPath)
 	if err != nil {
 		t.Fatalf("explicit export.auto did not write %s: %v", jsonlPath, err)

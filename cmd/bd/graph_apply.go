@@ -968,6 +968,7 @@ func executeGraphApply(ctx context.Context, plan *GraphApplyPlan, opts GraphAppl
 			issues = append(issues, issue)
 		}
 
+		applyDefaultDues(issues)
 		if err := tx.CreateIssues(ctx, issues, actor); err != nil {
 			return fmt.Errorf("batch create: %w", err)
 		}

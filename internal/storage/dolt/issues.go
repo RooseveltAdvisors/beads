@@ -235,8 +235,21 @@ func (s *DoltStore) updateIssue(ctx context.Context, id string, updates map[stri
 		}
 
 		commitMsg := fmt.Sprintf("bd: update %s", id)
-		return s.doltAddAndCommitInTx(ctx, tx, []string{"issues", "events"}, commitMsg)
+		return s.doltAddAndCommitInTx(ctx, tx, updateStagedTables(result), commitMsg)
 	})
+}
+
+// updateStagedTables is what an update commit stages: the issue row and its
+// event, plus whatever a status change into closed spawned for a recurring
+// bead (issueops.UpdateResult.Spawned).
+func updateStagedTables(result *issueops.UpdateResult) []string {
+	tables := []string{"issues", "events"}
+	for table := range result.Spawned.ChangedTables {
+		if table != "issues" && table != "events" {
+			tables = append(tables, table)
+		}
+	}
+	return tables
 }
 
 // UpdateIssueChecked applies the update like UpdateIssue, adding an optional
@@ -312,7 +325,7 @@ func (s *DoltStore) updateIssueChecked(ctx context.Context, id string, updates m
 			}
 
 			commitMsg := fmt.Sprintf("bd: update %s", id)
-			return s.doltAddAndCommitInTx(ctx, tx, []string{"issues", "events"}, commitMsg)
+			return s.doltAddAndCommitInTx(ctx, tx, updateStagedTables(result), commitMsg)
 		})
 	}
 

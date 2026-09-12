@@ -109,7 +109,7 @@ func TestCreateBlockedDuringMigrationFreeze(t *testing.T) {
 	bd, dir := setupMigrationFreezeWorkspace(t)
 	freezeTown(t, dir, "mayor", "dolt v2 migration")
 
-	stdout, stderr, code := runBDMigrationFreeze(t, bd, dir, "create", "should not be created", "-p", "2")
+	stdout, stderr, code := runBDMigrationFreeze(t, bd, dir, "create", "--due", "+7d", "should not be created", "-p", "2")
 
 	if code != 1 {
 		t.Fatalf("exit code = %d, want 1\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
@@ -135,7 +135,7 @@ func TestUpdateBlockedDuringMigrationFreeze(t *testing.T) {
 	bd, dir := setupMigrationFreezeWorkspace(t)
 
 	// Create the issue BEFORE freezing — create itself isn't under test here.
-	stdout, stderr, code := runBDMigrationFreeze(t, bd, dir, "create", "pre-freeze issue", "-p", "2", "--json")
+	stdout, stderr, code := runBDMigrationFreeze(t, bd, dir, "create", "--due", "+7d", "pre-freeze issue", "-p", "2", "--json")
 	if code != 0 {
 		t.Fatalf("setup bd create failed (exit %d):\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
 	}
@@ -163,7 +163,7 @@ func TestUpdateBlockedDuringMigrationFreeze(t *testing.T) {
 func TestCreateNotBlockedWithoutFreeze(t *testing.T) {
 	bd, dir := setupMigrationFreezeWorkspace(t)
 
-	stdout, stderr, code := runBDMigrationFreeze(t, bd, dir, "create", "normal issue", "-p", "2", "--json")
+	stdout, stderr, code := runBDMigrationFreeze(t, bd, dir, "create", "--due", "+7d", "normal issue", "-p", "2", "--json")
 	if code != 0 {
 		t.Fatalf("bd create failed (exit %d) with no freeze sentinel present:\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
 	}
@@ -209,7 +209,7 @@ func TestQuickBlockedDuringMigrationFreeze(t *testing.T) {
 func TestLabelAddBlockedDuringMigrationFreeze(t *testing.T) {
 	bd, dir := setupMigrationFreezeWorkspace(t)
 
-	stdout, stderr, code := runBDMigrationFreeze(t, bd, dir, "create", "pre-freeze issue for label", "-p", "2", "--json")
+	stdout, stderr, code := runBDMigrationFreeze(t, bd, dir, "create", "--due", "+7d", "pre-freeze issue for label", "-p", "2", "--json")
 	if code != 0 {
 		t.Fatalf("setup bd create failed (exit %d):\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
 	}
@@ -261,7 +261,7 @@ func TestAutoMigrateSkippedDuringMigrationFreeze(t *testing.T) {
 		wantExit    int
 		wantBlocked bool
 	}{
-		{name: "create", args: []string{"create", "should not be created", "-p", "2"}, wantExit: 1, wantBlocked: true},
+		{name: "create", args: []string{"create", "--due", "+7d", "should not be created", "-p", "2"}, wantExit: 1, wantBlocked: true},
 		{name: "list", args: []string{"list"}, wantExit: 0, wantBlocked: false},
 	}
 
@@ -318,7 +318,7 @@ func TestAutoMigrateStillRunsWithoutFreeze(t *testing.T) {
 	}
 
 	stdout, stderr, code := runBDMigrationFreezeWithEnv(t, bd, dir, []string{"BD_DEBUG=1"},
-		"create", "normal issue", "-p", "2", "--json")
+		"create", "--due", "+7d", "normal issue", "-p", "2", "--json")
 
 	if code != 0 {
 		t.Fatalf("bd create failed (exit %d) with no freeze sentinel present:\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)

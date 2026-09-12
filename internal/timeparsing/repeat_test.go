@@ -51,6 +51,55 @@ func TestParseRepeatInterval(t *testing.T) {
 	}
 }
 
+// A monthly or yearly series keeps its anchor day: it clamps to a shorter
+// month instead of overflowing, and an end-of-month anchor stays at the end of
+// every month, so the series never walks off its day for good.
+func TestMonthIntervalKeepsItsAnchorDay(t *testing.T) {
+	monthly := mustParseRepeat(t, "+1m")
+	cur := time.Date(2026, 1, 31, 9, 0, 0, 0, time.UTC)
+	for _, want := range []time.Time{
+		time.Date(2026, 2, 28, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 3, 31, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 4, 30, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 5, 31, 9, 0, 0, 0, time.UTC),
+	} {
+		next, err := monthly.Next(cur)
+		if err != nil {
+			t.Fatalf("Next(%v) error = %v", cur, err)
+		}
+		if !next.Equal(want) {
+			t.Fatalf("Next(%v) = %v, want %v", cur, next, want)
+		}
+		cur = next
+	}
+
+	// A mid-month anchor is untouched.
+	mid, err := monthly.Next(time.Date(2026, 1, 15, 9, 0, 0, 0, time.UTC))
+	if err != nil || !mid.Equal(time.Date(2026, 2, 15, 9, 0, 0, 0, time.UTC)) {
+		t.Errorf("Next(Jan 15) = %v, %v; want Feb 15", mid, err)
+	}
+
+	// A leap-day anchor lands on Feb 28 in a common year and returns to
+	// Feb 29 when the calendar has one again.
+	yearly := mustParseRepeat(t, "+1y")
+	cur = time.Date(2028, 2, 29, 9, 0, 0, 0, time.UTC)
+	for _, want := range []time.Time{
+		time.Date(2029, 2, 28, 9, 0, 0, 0, time.UTC),
+		time.Date(2030, 2, 28, 9, 0, 0, 0, time.UTC),
+		time.Date(2031, 2, 28, 9, 0, 0, 0, time.UTC),
+		time.Date(2032, 2, 29, 9, 0, 0, 0, time.UTC),
+	} {
+		next, err := yearly.Next(cur)
+		if err != nil {
+			t.Fatalf("Next(%v) error = %v", cur, err)
+		}
+		if !next.Equal(want) {
+			t.Fatalf("Next(%v) = %v, want %v", cur, next, want)
+		}
+		cur = next
+	}
+}
+
 func TestParseRepeatRejectsBadPatterns(t *testing.T) {
 	for _, pattern := range []string{
 		"-1d",         // backwards: no next occurrence

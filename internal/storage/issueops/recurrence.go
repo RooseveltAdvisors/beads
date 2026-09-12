@@ -7,7 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/storage/dberrors"
+	"github.com/steveyegge/beads/internal/storage/depid"
+	"github.com/steveyegge/beads/internal/timeparsing"
 	"github.com/steveyegge/beads/internal/types"
 	"github.com/steveyegge/beads/internal/workapi"
 )
@@ -183,12 +186,23 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 		// The predicate is repeated so a bead closed, deferred, or rescheduled
 		// between the SELECT and here matches nothing and is left alone rather
 		// than clobbered.
-		args := append([]any{next, string(types.DueSourceRepeat), now, freshRowLock(), c.id, c.dueAt}, statusArgs...)
+		//
+		// due_source records where the date CAME from, so only a date the
+		// pattern computed is stamped repeat; a grace push on a non-recurring
+		// bead leaves its backfill/explicit provenance in place.
+		sourceClause := ""
+		args := []any{next}
+		if c.repeatPattern != "" {
+			sourceClause = ", due_source = ?"
+			args = append(args, string(types.DueSourceRepeat))
+		}
+		args = append(args, now, freshRowLock(), c.id, c.dueAt)
+		args = append(args, statusArgs...)
 		res, err := tx.ExecContext(ctx, fmt.Sprintf(`
 			UPDATE %s
-			SET due_at = ?, due_source = ?, updated_at = ?, row_lock = ?
+			SET due_at = ?%s, updated_at = ?, row_lock = ?
 			WHERE id = ? AND due_at = ? AND status IN (%s)
-		`, table, statusList), args...)
+		`, table, sourceClause, statusList), args...)
 		if err != nil {
 			return fired, fmt.Errorf("due sweep reschedule %s: %w", c.id, err)
 		}
@@ -237,14 +251,42 @@ func nextDueAfterMiss(c dueCandidate, now time.Time) time.Time {
 			RepeatStart:   c.repeatStart,
 			RepeatEnd:     c.repeatEnd,
 		}
-		// Advance from NOW, not from the missed date: a weekly bead left
-		// unattended for a month should land on the next Monday, not walk
-		// forward one occurrence per sweep until it catches up.
-		if next, ok, err := probe.NextOccurrence(now); err == nil && ok {
+		if next, ok := nextOccurrenceAfterMiss(probe, c.dueAt, now); ok {
 			return next
 		}
 	}
 	return now.Add(DueMissGrace)
+}
+
+// nextOccurrenceAfterMiss finds the first occurrence of a missed bead's series
+// that lies after now, or ok=false when the series cannot supply one.
+//
+// An INTERVAL rule steps from the missed date by its own interval, as many
+// times as it takes to clear now, so a weekly bead due Monday 09:00 that is
+// swept on Wednesday lands on the following Monday 09:00 — the schedule keeps
+// its anchor, exactly as the close path does. A CRON rule matches the next
+// occurrence from now, which is the same result computed directly. The walk is
+// bounded by RepeatHorizon past the missed date.
+func nextOccurrenceAfterMiss(probe *types.Issue, dueAt, now time.Time) (time.Time, bool) {
+	repeat, err := probe.Repeat()
+	if err != nil {
+		return time.Time{}, false
+	}
+	from := now
+	if repeat.IsInterval() {
+		from = dueAt
+	}
+	horizon := from.Add(timeparsing.RepeatHorizon)
+	for {
+		next, ok, err := probe.NextOccurrence(from)
+		if err != nil || !ok || !next.After(from) || next.After(horizon) {
+			return time.Time{}, false
+		}
+		if next.After(now) {
+			return next, true
+		}
+		from = next
+	}
 }
 
 // SpawnResult reports what a recurrence spawn created. ID is "" when nothing
@@ -261,12 +303,12 @@ type SpawnResult struct {
 }
 
 // RecurrenceSpawnTables is every table a recurrence spawn can write. It is a
-// fixed set — the successor is one issues row, its audit events, and its
-// labels — so a close path that stages a static list can simply include it.
-// Staging a table a spawn did not touch is free: DOLT_ADD on a clean table
-// stages nothing, and the empty-commit guard already skips a commit with
-// nothing staged.
-func RecurrenceSpawnTables() []string { return []string{"issues", "events", "labels"} }
+// fixed set — the successor is one issues row, its audit events, its labels,
+// and the parent-child edge it inherits — so a close path that stages a static
+// list can simply include it. Staging a table a spawn did not touch is free:
+// DOLT_ADD on a clean table stages nothing, and the empty-commit guard already
+// skips a commit with nothing staged.
+func RecurrenceSpawnTables() []string { return []string{"issues", "events", "labels", "dependencies"} }
 
 // SpawnRecurrenceInTx creates the next instance of a recurring bead, and is
 // called from the close path so every close — single, checked, or batched —
@@ -333,6 +375,9 @@ func SpawnRecurrenceInTx(ctx context.Context, tx DBTX, id, actor string) (SpawnR
 		return result, fmt.Errorf("spawn recurrence for %s: persist labels on %s: %w", id, newID, err)
 	}
 	result.ChangedTables = mergeChangedTables(result.ChangedTables, labelResult.ChangedTables)
+	if err := carryParentLink(ctx, tx, id, newID, actor, result.ChangedTables); err != nil {
+		return result, fmt.Errorf("spawn recurrence for %s: carry parent link to %s: %w", id, newID, err)
+	}
 	if err := RecordEventInTable(ctx, tx, "events", newID, types.EventCreated, actor, ""); err != nil {
 		return result, fmt.Errorf("spawn recurrence for %s: record create event: %w", id, err)
 	}
@@ -348,12 +393,56 @@ func SpawnRecurrenceInTx(ctx context.Context, tx DBTX, id, actor string) (SpawnR
 	return result, nil
 }
 
+// carryParentLink files the successor under the same parent as the closed
+// instance, so a recurring child of an epic stays in that epic.
+//
+// Recurrence is parent-linked and otherwise flat: peer dependency edges
+// (blocks, related, discovered-from, waits-for) describe one instance's
+// relationship to other work and are deliberately NOT copied. A successor that
+// inherited a `blocks` edge would re-block a bead the closed instance already
+// unblocked; a series that needs standing peer edges adds them per instance.
+func carryParentLink(ctx context.Context, tx DBTX, prevID, nextID, actor string, changed map[string]bool) error {
+	deps, err := GetDependencyRecordsForIssuesInTx(ctx, tx, []string{prevID})
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, dep := range deps[prevID] {
+		if dep.Type != types.DepParentChild {
+			continue
+		}
+		// The same insert create uses for a --parent edge, on any DBTX: the
+		// successor is a brand-new row, so the cycle and hierarchy checks a
+		// general dependency add performs have nothing to find.
+		edge := &types.Dependency{IssueID: nextID, DependsOnID: dep.DependsOnID, Type: types.DepParentChild}
+		kind := ClassifyDepTarget(ctx, tx, edge, types.ExtractPrefix(nextID) != types.ExtractPrefix(dep.DependsOnID))
+		//nolint:gosec // G201: the target column comes from DepTargetKind.Column(), a fixed set.
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
+			INSERT INTO dependencies (id, issue_id, %s, type, created_by, created_at, metadata, thread_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			ON DUPLICATE KEY UPDATE type = type
+		`, kind.Column()), depid.New(nextID, dep.DependsOnID), nextID, dep.DependsOnID, edge.Type, actor, now, "{}", ""); err != nil {
+			return fmt.Errorf("insert parent-child edge %s -> %s: %w", nextID, dep.DependsOnID, err)
+		}
+		if err := TouchDependencyCoordinationTableInTx(ctx, tx, dep.DependsOnID, "dependencies"); err != nil {
+			return err
+		}
+		if err := RecordDepEventInTx(ctx, tx, EventDepAdd, nextID, string(edge.Type), dep.DependsOnID, "{}", actor); err != nil {
+			return err
+		}
+		changed["dependencies"] = true
+	}
+	return nil
+}
+
 // nextRecurrenceInstance builds the successor bead: the same work, due next.
 //
 // It copies what DESCRIBES the work and resets what describes this instance of
 // it. Deliberately not carried over: status/closure (the successor is open),
-// assignment and leases (the next occurrence is unclaimed), external refs and
-// spec ids (they identify one instance), and compaction state.
+// leases (the next occurrence is unclaimed until someone picks it up, though
+// it keeps its assignee), external refs and spec ids (they identify one
+// instance), and compaction state. Dependency edges are handled by
+// carryParentLink: the parent link is kept, peer edges are not.
 func nextRecurrenceInstance(prev *types.Issue, due time.Time, actor string) *types.Issue {
 	now := time.Now().UTC()
 	next := &types.Issue{
@@ -386,6 +475,73 @@ func nextRecurrenceInstance(prev *types.Issue, due time.Time, actor string) *typ
 	// whoever owns it; an unassigned series stays unassigned.
 	next.Assignee = prev.Assignee
 	return next
+}
+
+// ClearRecurrenceBoundsOnStop makes an empty repeat_pattern also clear both
+// bounds, so stopping a series never leaves a row holding repeat_start or
+// repeat_end with no pattern — a shape PrepareIssueForInsert refuses on the
+// next export/import.
+func ClearRecurrenceBoundsOnStop(updates map[string]interface{}) {
+	if pattern, ok := updates["repeat_pattern"].(string); ok && pattern == "" {
+		updates["repeat_start"] = nil
+		updates["repeat_end"] = nil
+	}
+}
+
+// ValidateRecurrenceUpdate checks the (repeat_pattern, repeat_start,
+// repeat_end) triple an update would LAND — the row's current values merged
+// with the update — against the same rule every create path applies
+// (types.Issue.ValidateRecurrence), so an update cannot leave a row that a
+// create would have refused.
+func ValidateRecurrenceUpdate(oldIssue *types.Issue, updates map[string]interface{}) error {
+	rawPattern, hasPattern := updates["repeat_pattern"]
+	rawStart, hasStart := updates["repeat_start"]
+	rawEnd, hasEnd := updates["repeat_end"]
+	if !hasPattern && !hasStart && !hasEnd {
+		return nil
+	}
+	merged := types.Issue{
+		RepeatPattern: oldIssue.RepeatPattern,
+		RepeatStart:   oldIssue.RepeatStart,
+		RepeatEnd:     oldIssue.RepeatEnd,
+	}
+	if hasPattern {
+		pattern, ok := rawPattern.(string)
+		if !ok {
+			return fmt.Errorf("%w: invalid repeat pattern %v", storage.ErrValidation, rawPattern)
+		}
+		merged.RepeatPattern = pattern
+	}
+	var err error
+	if hasStart {
+		if merged.RepeatStart, err = updateTimeValue("repeat_start", rawStart); err != nil {
+			return err
+		}
+	}
+	if hasEnd {
+		if merged.RepeatEnd, err = updateTimeValue("repeat_end", rawEnd); err != nil {
+			return err
+		}
+	}
+	if err := merged.ValidateRecurrence(); err != nil {
+		return fmt.Errorf("%w: %v", storage.ErrValidation, err)
+	}
+	return nil
+}
+
+// updateTimeValue reads a nullable timestamp as the update funnels carry it:
+// nil clears, and either a time.Time or a *time.Time sets.
+func updateTimeValue(key string, raw interface{}) (*time.Time, error) {
+	switch value := raw.(type) {
+	case nil:
+		return nil, nil
+	case time.Time:
+		return &value, nil
+	case *time.Time:
+		return value, nil
+	default:
+		return nil, fmt.Errorf("%w: invalid %s value %v", storage.ErrValidation, key, raw)
+	}
 }
 
 // ScheduledSweepResult aggregates the two lazy time-based sweeps a read path

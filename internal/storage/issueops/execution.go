@@ -219,6 +219,9 @@ func ExecuteUpdate(ctx context.Context, tx *sql.Tx, request publicops.UpdateRequ
 			if updated.IssueRowsChanged {
 				tables.Add("issues")
 			}
+			for table := range updated.Spawned.ChangedTables {
+				tables.Add(table)
+			}
 		}
 	}
 	labelsChanged, err := ApplyLabelPatch(ctx, tx, current, attempt.Patch.Labels, attempt.Actor)

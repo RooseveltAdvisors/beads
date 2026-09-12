@@ -348,6 +348,7 @@ Examples:
 		}
 		gate.Metadata = metadata
 
+		applyDefaultDue(gate)
 		if err := store.CreateIssue(ctx, gate, actor); err != nil {
 			return HandleErrorRespectJSON("creating gate: %v", err)
 		}

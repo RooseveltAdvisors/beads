@@ -46,13 +46,27 @@ func TestPlanDueBackfillSelectsOnlyUndatedWork(t *testing.T) {
 		nil, // a nil row must not panic the report
 	}
 
-	report := planDueBackfill(issues, 7*24*time.Hour)
+	report := planDueBackfill(issues, 7*24*time.Hour, day(1))
 
 	if report.Candidates != 2 {
 		t.Fatalf("Candidates = %d, want 2 (rows: %+v)", report.Candidates, report.Rows)
 	}
 	if report.AlreadyDated != 1 {
 		t.Errorf("AlreadyDated = %d, want 1", report.AlreadyDated)
+	}
+	// Every exclusion is counted and named, never inferred from the gap
+	// between scanned and candidates.
+	if report.SkippedClosed != 1 {
+		t.Errorf("SkippedClosed = %d, want 1", report.SkippedClosed)
+	}
+	wantExempt := map[string]int{"event": 1, "wisp": 1, "template": 1, "federated": 1}
+	for class, n := range wantExempt {
+		if report.SkippedExempt[class] != n {
+			t.Errorf("SkippedExempt[%s] = %d, want %d (all: %v)", class, report.SkippedExempt[class], n, report.SkippedExempt)
+		}
+	}
+	if len(report.SkippedExempt) != len(wantExempt) {
+		t.Errorf("SkippedExempt = %v, want exactly %v", report.SkippedExempt, wantExempt)
 	}
 	if report.Scanned != len(issues) {
 		t.Errorf("Scanned = %d, want %d", report.Scanned, len(issues))
@@ -77,7 +91,7 @@ func TestPlanDueBackfillDatesFromEachCreatedAt(t *testing.T) {
 		backfillIssue("bd-old", day(1), nil),
 		backfillIssue("bd-new", day(10), nil),
 	}
-	report := planDueBackfill(issues, interval)
+	report := planDueBackfill(issues, interval, day(1))
 	for _, row := range report.Rows {
 		if want := row.CreatedAt.Add(interval); !row.ProposedDue.Equal(want) {
 			t.Errorf("%s proposed due = %v, want %v", row.ID, row.ProposedDue, want)
@@ -100,7 +114,7 @@ func TestPlanDueBackfillCountsByTypeAndStatus(t *testing.T) {
 		backfillIssue("bd-2", day(2), func(i *types.Issue) { i.IssueType = types.TypeBug }),
 		backfillIssue("bd-3", day(3), func(i *types.Issue) { i.Status = types.StatusInProgress }),
 	}
-	report := planDueBackfill(issues, 24*time.Hour)
+	report := planDueBackfill(issues, 24*time.Hour, day(1))
 	if report.ByType["task"] != 2 || report.ByType["bug"] != 1 {
 		t.Errorf("ByType = %v, want task=2 bug=1", report.ByType)
 	}
@@ -110,9 +124,45 @@ func TestPlanDueBackfillCountsByTypeAndStatus(t *testing.T) {
 }
 
 func TestPlanDueBackfillEmptyRepository(t *testing.T) {
-	report := planDueBackfill(nil, 24*time.Hour)
+	report := planDueBackfill(nil, 24*time.Hour, day(1))
 	if report.Candidates != 0 || len(report.Rows) != 0 || report.OldestDue != nil {
 		t.Errorf("empty plan = %+v, want no candidates", report)
+	}
+}
+
+// A bead older than the interval must not be dated in the past: that would
+// fire every one of them on the next ready read. Its date is floored to
+// now + interval, and the report says so.
+func TestPlanDueBackfillFloorsDatesToNowPlusInterval(t *testing.T) {
+	interval := 7 * 24 * time.Hour
+	now := day(20)
+	issues := []*types.Issue{
+		backfillIssue("bd-ancient", day(1), nil), // created+7d = day 8, in the past
+		backfillIssue("bd-edge", day(13), nil),   // created+7d = day 20 = now, still floored
+		backfillIssue("bd-recent", day(21), nil), // created+7d = day 28, past the floor, kept
+	}
+	report := planDueBackfill(issues, interval, now)
+	if report.Floored != 2 {
+		t.Fatalf("Floored = %d, want 2 (rows: %+v)", report.Floored, report.Rows)
+	}
+	floor := now.Add(interval)
+	for _, row := range report.Rows {
+		switch row.ID {
+		case "bd-ancient", "bd-edge":
+			if !row.Floored || !row.ProposedDue.Equal(floor) {
+				t.Errorf("%s: proposed %v floored=%v, want %v floored=true", row.ID, row.ProposedDue, row.Floored, floor)
+			}
+		case "bd-recent":
+			if row.Floored || !row.ProposedDue.Equal(day(28)) {
+				t.Errorf("%s: proposed %v floored=%v, want %v floored=false", row.ID, row.ProposedDue, row.Floored, day(28))
+			}
+		}
+		if row.ProposedDue.Before(now) {
+			t.Errorf("%s: proposed due %v is in the past (now %v)", row.ID, row.ProposedDue, now)
+		}
+	}
+	if report.OldestDue == nil || report.OldestDue.Before(now) {
+		t.Errorf("OldestDue = %v, want no proposed date before now", report.OldestDue)
 	}
 }
 

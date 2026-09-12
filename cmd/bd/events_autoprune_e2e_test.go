@@ -58,7 +58,7 @@ func TestAutoPruneBoundsTheJournalAfterAMutatingCommand(t *testing.T) {
 	noAutoPrune := append(append([]string{}, base...), "BD_EVENTS_JOURNAL_AUTO_PRUNE=0")
 
 	for i := range 5 {
-		if out, err := runWith(noAutoPrune, "create", fmt.Sprintf("backlog %d", i)); err != nil {
+		if out, err := runWith(noAutoPrune, "create", "--due", "+7d", fmt.Sprintf("backlog %d", i)); err != nil {
 			t.Fatalf("create %d: %v\n%s", i, err, out)
 		}
 	}
@@ -76,7 +76,7 @@ func TestAutoPruneBoundsTheJournalAfterAMutatingCommand(t *testing.T) {
 
 	// One more mutation, with auto-prune at its default. The command itself
 	// must still succeed and say nothing about maintenance.
-	if out, err := runWith(base, "create", "the trigger"); err != nil {
+	if out, err := runWith(base, "create", "--due", "+7d", "the trigger"); err != nil {
 		t.Fatalf("create with auto-prune enabled: %v\n%s", err, out)
 	}
 
@@ -145,7 +145,7 @@ func TestAutoPruneLeavesAnUnboundedJournalAlone(t *testing.T) {
 	}
 
 	for i := range 4 {
-		if out, err := run("create", fmt.Sprintf("kept %d", i)); err != nil {
+		if out, err := run("create", "--due", "+7d", fmt.Sprintf("kept %d", i)); err != nil {
 			t.Fatalf("create %d: %v\n%s", i, err, out)
 		}
 	}
@@ -199,7 +199,7 @@ func TestAutoPruneRespectsBdConfigSet(t *testing.T) {
 	set("events-journal-retain-rows", "2")
 
 	for i := range 5 {
-		if out, err := run("create", fmt.Sprintf("configured %d", i)); err != nil {
+		if out, err := run("create", "--due", "+7d", fmt.Sprintf("configured %d", i)); err != nil {
 			t.Fatalf("create %d: %v\n%s", i, err, out)
 		}
 	}
@@ -213,7 +213,7 @@ func TestAutoPruneRespectsBdConfigSet(t *testing.T) {
 	}
 
 	set("events-journal-auto-prune", "true")
-	if out, err := run("create", "after re-enabling"); err != nil {
+	if out, err := run("create", "--due", "+7d", "after re-enabling"); err != nil {
 		t.Fatalf("create after re-enabling: %v\n%s", err, out)
 	}
 	if out, err := run("events", "export", "--json"); err == nil {
@@ -260,7 +260,7 @@ func TestAutoPruneDoesNotRunForReadOnlyCommands(t *testing.T) {
 	noAutoPrune := append(append([]string{}, base...), "BD_EVENTS_JOURNAL_AUTO_PRUNE=0")
 
 	for i := range 5 {
-		if out, err := runWith(noAutoPrune, "create", fmt.Sprintf("backlog %d", i)); err != nil {
+		if out, err := runWith(noAutoPrune, "create", "--due", "+7d", fmt.Sprintf("backlog %d", i)); err != nil {
 			t.Fatalf("create %d: %v\n%s", i, err, out)
 		}
 	}

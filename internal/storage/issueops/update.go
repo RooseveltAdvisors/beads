@@ -334,6 +334,11 @@ type UpdateResult struct {
 	Changed          bool
 	IssueRowsChanged bool
 	WispRowsChanged  bool
+	// Spawned reports the successor a status change into the done category
+	// filed for a recurring bead — the same spawn `bd close` performs, reached
+	// here because a status update is a close by another name. Its
+	// ChangedTables must be unioned into whatever the caller stages.
+	Spawned SpawnResult
 }
 
 // UpdateIssueInTx performs the full update SQL logic within a transaction.
@@ -359,6 +364,7 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 	// it does not recognize, so a surviving override would reach the field
 	// allowlist and be refused by name.
 	forceClosePolicy := PopForceClosePolicy(updates)
+	ClearRecurrenceBoundsOnStop(updates)
 
 	// Route to correct table.
 	isWisp := IsActiveWispInTx(ctx, tx, id)
@@ -421,6 +427,9 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 	}
 
 	if err := ValidateScalarUpdates(ctx, tx, updates); err != nil {
+		return nil, err
+	}
+	if err := ValidateRecurrenceUpdate(oldIssue, updates); err != nil {
 		return nil, err
 	}
 
@@ -514,6 +523,16 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 	}
 
 	updateResult := &UpdateResult{OldIssue: oldIssue, IsWisp: isWisp, Changed: true, IssueRowsChanged: !isWisp, WispRowsChanged: isWisp}
+	if crossing {
+		spawned, err := SpawnRecurrenceInTx(ctx, tx, id, actor)
+		if err != nil {
+			return nil, err
+		}
+		updateResult.Spawned = spawned
+		if spawned.ID != "" {
+			updateResult.IssueRowsChanged = true
+		}
+	}
 	if rawStatus, hasStatus := updates["status"]; hasStatus {
 		var newStatus string
 		switch v := rawStatus.(type) {

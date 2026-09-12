@@ -69,6 +69,7 @@ func PreparePublicCreateRequest(request publicops.CreateRequest, context PublicC
 		// Normalization, not validation: an issue held to the invariant gets a
 		// destination before the second validation pass reads it.
 		DefaultDueRequiredAssignee(request.Issue, request.Actor)
+		StampExplicitDueSource(request.Issue)
 	}
 	if err := ValidatePublicCreateRequest(request); err != nil {
 		return publicops.CreateRequest{}, err

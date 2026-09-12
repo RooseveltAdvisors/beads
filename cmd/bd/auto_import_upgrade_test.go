@@ -222,7 +222,7 @@ func TestEmbeddedAutoImportJSONLSkipsNonEmpty(t *testing.T) {
 // or nil on failure (without failing the test).
 func bdCreateAllowError(t *testing.T, bd, dir string, args ...string) *types.Issue {
 	t.Helper()
-	fullArgs := append([]string{"create", "--json"}, args...)
+	fullArgs := append([]string{"create", "--json"}, withTestDue(args)...)
 	cmd := exec.Command(bd, fullArgs...)
 	cmd.Dir = dir
 	cmd.Env = bdEnv(dir)

@@ -120,13 +120,13 @@ func TestCreateDepsAtomicity(t *testing.T) {
 	runCreateDepsBD(t, bd, dir, "init", "--backend", "dolt", "--prefix", "test",
 		"--quiet", "--non-interactive", "--skip-hooks", "--skip-agents")
 
-	blocker := strings.TrimSpace(runCreateDepsBD(t, bd, dir, "create", "existing blocker", "--silent"))
+	blocker := strings.TrimSpace(runCreateDepsBD(t, bd, dir, "create", "--due", "+7d", "existing blocker", "--silent"))
 	if blocker == "" {
 		t.Fatal("blocker create returned empty ID")
 	}
 
 	t.Run("failed_dep_add_is_fatal_and_rolls_back_create", func(t *testing.T) {
-		out, err := runCreateDepsBDRaw(bd, dir, "create", "orphan candidate", "--json",
+		out, err := runCreateDepsBDRaw(bd, dir, "create", "--due", "+7d", "orphan candidate", "--json",
 			"--deps", "depends-on:test-missing1")
 		if err == nil {
 			t.Errorf("create with unresolvable dep exited 0; output:\n%s", out)
@@ -140,7 +140,7 @@ func TestCreateDepsAtomicity(t *testing.T) {
 	})
 
 	t.Run("one_failing_dep_rolls_back_valid_deps_and_create", func(t *testing.T) {
-		out, err := runCreateDepsBDRaw(bd, dir, "create", "partial dep issue", "--json",
+		out, err := runCreateDepsBDRaw(bd, dir, "create", "--due", "+7d", "partial dep issue", "--json",
 			"--deps", "depends-on:"+blocker+",depends-on:test-missing2")
 		if err == nil {
 			t.Errorf("create with one unresolvable dep exited 0; output:\n%s", out)
@@ -154,7 +154,7 @@ func TestCreateDepsAtomicity(t *testing.T) {
 	})
 
 	t.Run("waits_for_missing_spawner_is_fatal_and_rolls_back", func(t *testing.T) {
-		out, err := runCreateDepsBDRaw(bd, dir, "create", "waits-for orphan", "--json",
+		out, err := runCreateDepsBDRaw(bd, dir, "create", "--due", "+7d", "waits-for orphan", "--json",
 			"--waits-for", "test-missing3")
 		if err == nil {
 			t.Errorf("create with unresolvable --waits-for exited 0; output:\n%s", out)
@@ -175,7 +175,7 @@ func TestCreateDepsAtomicity(t *testing.T) {
 	t.Run("waits_for_gate_without_waits_for_is_rejected", func(t *testing.T) {
 		for _, gate := range []string{"all-children", "TOTALLY-BOGUS"} {
 			title := "gate-no-spawner-" + gate
-			out, err := runCreateDepsBDRaw(bd, dir, "create", title, "--json",
+			out, err := runCreateDepsBDRaw(bd, dir, "create", "--due", "+7d", title, "--json",
 				"--waits-for-gate", gate)
 			if err == nil {
 				t.Errorf("create --waits-for-gate %s (no --waits-for) exited 0 (was silently ignored); output:\n%s", gate, out)
@@ -191,7 +191,7 @@ func TestCreateDepsAtomicity(t *testing.T) {
 	// After the refactor in create_atomic.go, validation runs pre-write; this
 	// test documents the contract and guards against regressions.
 	t.Run("invalid_waits_for_gate_value_is_rejected_before_write", func(t *testing.T) {
-		out, err := runCreateDepsBDRaw(bd, dir, "create", "invalid-gate-probe", "--json",
+		out, err := runCreateDepsBDRaw(bd, dir, "create", "--due", "+7d", "invalid-gate-probe", "--json",
 			"--waits-for", blocker, "--waits-for-gate", "TOTALLY-BOGUS")
 		if err == nil {
 			t.Errorf("create with invalid --waits-for-gate exited 0; output:\n%s", out)
@@ -250,16 +250,16 @@ func TestCreateDepsAtomicity(t *testing.T) {
 	// itself failed. Validation now runs before the reservation, so a failed
 	// attempt must leave no gap in the child numbering.
 	t.Run("waits_for_gate_validation_failure_does_not_burn_child_id", func(t *testing.T) {
-		parentOut := runCreateDepsBD(t, bd, dir, "create", "child-id-burn-parent", "--json")
+		parentOut := runCreateDepsBD(t, bd, dir, "create", "--due", "+7d", "child-id-burn-parent", "--json")
 		parentID := createDepsExtractID(t, parentOut)
 
-		out, err := runCreateDepsBDRaw(bd, dir, "create", "should-not-exist-child", "--json",
+		out, err := runCreateDepsBDRaw(bd, dir, "create", "--due", "+7d", "should-not-exist-child", "--json",
 			"--parent", parentID, "--waits-for-gate", "all-children")
 		if err == nil {
 			t.Errorf("create --parent with --waits-for-gate (no --waits-for) exited 0; output:\n%s", out)
 		}
 
-		childOut := runCreateDepsBD(t, bd, dir, "create", "first-real-child", "--json", "--parent", parentID)
+		childOut := runCreateDepsBD(t, bd, dir, "create", "--due", "+7d", "first-real-child", "--json", "--parent", parentID)
 		childID := createDepsExtractID(t, childOut)
 
 		wantChildID := parentID + ".1"
@@ -281,7 +281,7 @@ func TestCreateDepsAtomicity(t *testing.T) {
 	})
 
 	t.Run("happy_path_deps_created_atomically", func(t *testing.T) {
-		out := runCreateDepsBD(t, bd, dir, "create", "happy child", "--json",
+		out := runCreateDepsBD(t, bd, dir, "create", "--due", "+7d", "happy child", "--json",
 			"--deps", "depends-on:"+blocker)
 		child := createDepsExtractID(t, out)
 
@@ -297,7 +297,7 @@ func TestCreateDepsAtomicity(t *testing.T) {
 	})
 
 	t.Run("invalid_dep_type_rejected_before_create", func(t *testing.T) {
-		out, err := runCreateDepsBDRaw(bd, dir, "create", "bad dep type issue", "--json",
+		out, err := runCreateDepsBDRaw(bd, dir, "create", "--due", "+7d", "bad dep type issue", "--json",
 			"--deps", "bogus-type:"+blocker)
 		if err == nil {
 			t.Errorf("create with unknown dep type exited 0; output:\n%s", out)
@@ -317,7 +317,7 @@ func TestCreateDepsAtomicity(t *testing.T) {
 	// absence of an orphan, which a direct parseDepSpecs unit test can't
 	// prove).
 	t.Run("multi_type_same_target_rejected_before_create_no_orphan", func(t *testing.T) {
-		out, err := runCreateDepsBDRaw(bd, dir, "create", "multi-type collision issue", "--json",
+		out, err := runCreateDepsBDRaw(bd, dir, "create", "--due", "+7d", "multi-type collision issue", "--json",
 			"--deps", "discovered-from:"+blocker, "--deps", "blocked-by:"+blocker)
 		if err == nil {
 			t.Errorf("create with multi-type same-target --deps exited 0; output:\n%s", out)
@@ -335,7 +335,7 @@ func TestCreateDepsAtomicity(t *testing.T) {
 	// treats a repeated identical edge as idempotent, so --deps should
 	// dedupe rather than hard-fail.
 	t.Run("duplicate_identical_dep_is_deduped_not_rejected", func(t *testing.T) {
-		out := runCreateDepsBD(t, bd, dir, "create", "deduped dep issue", "--json",
+		out := runCreateDepsBD(t, bd, dir, "create", "--due", "+7d", "deduped dep issue", "--json",
 			"--deps", "blocked-by:"+blocker, "--deps", "depends-on:"+blocker)
 		child := createDepsExtractID(t, out)
 

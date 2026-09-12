@@ -968,7 +968,7 @@ func TestAutoExportGitAddFailureExitsNonZero(t *testing.T) {
 	}
 	time.Sleep(10 * time.Millisecond)
 
-	cmd := exec.Command(bd, "create", "caller visible git add failure", "-p", "2")
+	cmd := exec.Command(bd, "create", "--due", "+7d", "caller visible git add failure", "-p", "2")
 	cmd.Dir = dir
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
@@ -1318,7 +1318,7 @@ func TestAutoExportSkipsWhenExistingJSONLHasIDsMissingFromStore(t *testing.T) {
 
 	run("init", "--prefix", "dl", "--non-interactive")
 	run("config", "set", "export.path", "custom.jsonl")
-	run("create", "local issue", "-p", "2")
+	run("create", "--due", "+7d", "local issue", "-p", "2")
 
 	jsonlPath := filepath.Join(dir, ".beads", "custom.jsonl")
 	original := []byte(strings.Join([]string{
@@ -1332,7 +1332,7 @@ func TestAutoExportSkipsWhenExistingJSONLHasIDsMissingFromStore(t *testing.T) {
 
 	run("config", "set", "export.interval", "1ms")
 	run("config", "set", "export.auto", "true")
-	out := run("create", "another local issue", "-p", "2")
+	out := run("create", "--due", "+7d", "another local issue", "-p", "2")
 	if !strings.Contains(out, "JSONL-only issue record") || !strings.Contains(out, "dl-jsonl-only") {
 		t.Fatalf("expected JSONL-only refusal warning, got:\n%s", out)
 	}

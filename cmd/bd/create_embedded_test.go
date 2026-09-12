@@ -18,11 +18,25 @@ import (
 	"github.com/steveyegge/beads/internal/types"
 )
 
+// withTestDue gives a create its due date when the caller did not choose one:
+// due.required is on by default, so a fixture that is not ABOUT the deadline
+// still has to satisfy it. A caller that passes --due or --repeat (whose
+// first occurrence dates the bead) is left exactly as written.
+func withTestDue(args []string) []string {
+	for _, arg := range args {
+		if arg == "--due" || strings.HasPrefix(arg, "--due=") ||
+			arg == "--repeat" || strings.HasPrefix(arg, "--repeat=") {
+			return args
+		}
+	}
+	return append(append([]string(nil), args...), "--due", "+7d")
+}
+
 // bdCreate runs "bd create" in the given dir with --json and extra args.
 // Returns the parsed issue JSON. Retries on flock contention, fatals on other failures.
 func bdCreate(t *testing.T, bd, dir string, args ...string) *types.Issue {
 	t.Helper()
-	fullArgs := append([]string{"create", "--json"}, args...)
+	fullArgs := append([]string{"create", "--json"}, withTestDue(args)...)
 	out, err := bdRunWithFlockRetry(t, bd, dir, fullArgs...)
 	if err != nil {
 		t.Fatalf("bd create %s failed: %v\n%s", strings.Join(args, " "), err, out)
@@ -59,7 +73,7 @@ func parseIssueJSON(t *testing.T, out []byte) *types.Issue {
 // Retries on flock contention.
 func bdCreateSilent(t *testing.T, bd, dir string, args ...string) string {
 	t.Helper()
-	fullArgs := append([]string{"create", "--silent"}, args...)
+	fullArgs := append([]string{"create", "--silent"}, withTestDue(args)...)
 	out, err := bdRunWithFlockRetry(t, bd, dir, fullArgs...)
 	if err != nil {
 		t.Fatalf("bd create --silent %s failed: %v\n%s", strings.Join(args, " "), err, out)
@@ -780,7 +794,7 @@ func TestEmbeddedChangeDirOverridesInheritedBeadsDir(t *testing.T) {
 	callerDir, callerBeadsDir, _ := bdInit(t, bd, "--prefix", "caller")
 	targetDir, targetBeadsDir, _ := bdInit(t, bd, "--prefix", "target")
 
-	cmd := exec.Command(bd, "-C", targetDir, "create", "Explicit target", "--json")
+	cmd := exec.Command(bd, "-C", targetDir, "create", "--due", "+7d", "Explicit target", "--json")
 	cmd.Dir = callerDir
 	cmd.Env = append(bdEnv(callerDir), "BEADS_DIR="+callerBeadsDir)
 	stdout, stderr, err := runCommandBuffers(t, cmd)
@@ -1138,7 +1152,7 @@ func TestEmbeddedCreateRepoRelativeUninitRefused(t *testing.T) {
 	dir, _, _ := bdInit(t, bd, "--prefix", "src")
 
 	relTarget := "some-other-rig"
-	out, err := bdRunWithFlockRetry(t, bd, dir, "create", "--json", "Should not land anywhere", "--repo", relTarget)
+	out, err := bdRunWithFlockRetry(t, bd, dir, "create", "--due", "+7d", "--json", "Should not land anywhere", "--repo", relTarget)
 	if err == nil {
 		t.Fatalf("expected bd create --repo %q to fail for an uninitialized relative target, got success: %s", relTarget, out)
 	}
@@ -1248,7 +1262,7 @@ func TestEmbeddedCreateConcurrent(t *testing.T) {
 			ready <- struct{}{}
 			<-start
 
-			cmd := exec.Command(bd, "create", "--silent", title)
+			cmd := exec.Command(bd, "create", "--due", "+7d", "--silent", title)
 			cmd.Dir = dir
 			cmd.Env = bdEnv(dir)
 			out, err := cmd.CombinedOutput()
@@ -1297,7 +1311,7 @@ func TestEmbeddedCreateConcurrent(t *testing.T) {
 
 	// Retry only the lock losers, once each, after concurrent contention ends.
 	for _, r := range lockLosers {
-		cmd := exec.Command(bd, "create", "--silent", r.title)
+		cmd := exec.Command(bd, "create", "--due", "+7d", "--silent", r.title)
 		cmd.Dir = dir
 		cmd.Env = bdEnv(dir)
 		out, err := cmd.CombinedOutput()

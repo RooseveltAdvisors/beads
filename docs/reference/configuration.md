@@ -115,7 +115,7 @@ Any key whose name contains `api_key`, `api-key`, `secret`, `token`, or `passwor
 | `git.author` | — | `BD_GIT_AUTHOR` | (none) | Override commit author for beads commits |
 | `git.no-gpg-sign` | — | `BD_GIT_NO_GPG_SIGN` | `false` | Disable GPG signing for beads commits |
 | `create.require-description` | — | `BD_CREATE_REQUIRE_DESCRIPTION` | `false` | Require description on `bd create` |
-| `due.required` | — | `BD_DUE_REQUIRED` | `false` | Require a due date on new work (see [below](#mandatory-due-dates)) |
+| `due.required` | — | `BD_DUE_REQUIRED` | `true` | Require a due date on new work (see [below](#mandatory-due-dates)) |
 | `validation.on-create` | — | `BD_VALIDATION_ON_CREATE` | `none` | Template validation: `none`, `warn`, `error` |
 | `validation.on-close` | — | `BD_VALIDATION_ON_CLOSE` | `none` | Template validation on close |
 | `validation.on-sync` | — | `BD_VALIDATION_ON_SYNC` | `none` | Template validation before sync |
@@ -172,12 +172,10 @@ Routing note: `output.title-length` and `agents.file` are functionally tool-leve
 
 ## Mandatory Due Dates
 
-A bead with no deadline is a bead nothing ever escalates. Turn `due.required`
-on and every new bead must carry one:
+A bead with no deadline is a bead nothing ever escalates, so `due.required` is
+on by default and every new bead must carry one:
 
 ```bash
-bd config set due.required true
-
 bd create "Rotate the signing key"
 # error: due date is required for task "Rotate the signing key" (pass --due, ...)
 
@@ -186,10 +184,18 @@ bd create "Rotate the signing key" --due +7d
 
 The rule lives at the storage boundary, not in the CLI flags, so every create
 surface answers to it — `bd create`, the HTTP and MCP servers, and the issueops
-API alike. It is off by default.
+API alike. A workspace that does not want it turns it off once:
 
-**Quick capture stays a one-liner.** `bd q` fills in a due date from the
-priority ladder when you do not pass `--due`, and reports the one it chose:
+```bash
+bd config set due.required false
+```
+
+**Capture stays a one-liner.** Surfaces that do not take a `--due` of their
+own — `bd q`, `bd todo add`, `bd gate create`, molecule instantiation, and the
+multi-bead plans (`--graph`, `--file`, `bd batch`) — fill in a due date from
+the priority ladder and record it as `due_source: default`, so a synthesized
+deadline stays distinguishable from one you chose. `bd q` reports the one it
+picked:
 
 | Priority | Due |
 |---|---|

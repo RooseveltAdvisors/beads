@@ -754,6 +754,9 @@ func (t *doltTransaction) UpdateIssue(ctx context.Context, id string, updates ma
 	t.dirty.MarkDirty(table)
 	_, _, eventTable, _ := issueops.WispTableRouting(table == "wisps")
 	t.dirty.MarkDirty(eventTable)
+	for spawnTable := range result.Spawned.ChangedTables {
+		t.dirty.MarkDirty(spawnTable)
+	}
 	return nil
 }
 

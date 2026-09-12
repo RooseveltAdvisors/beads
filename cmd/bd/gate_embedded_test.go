@@ -622,7 +622,7 @@ func TestEmbeddedGateConcurrent(t *testing.T) {
 
 			// Each worker: create a gate, add a waiter, resolve it
 			title := fmt.Sprintf("w%d-gate", worker)
-			out, err := bdRunWithFlockRetry(t, bd, dir, "create", "--silent", title, "--type", "gate")
+			out, err := bdRunWithFlockRetry(t, bd, dir, "create", "--due", "+7d", "--silent", title, "--type", "gate")
 			if err != nil {
 				r.err = fmt.Errorf("create gate: %v\n%s", err, out)
 				results[worker] = r

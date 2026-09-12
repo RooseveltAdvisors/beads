@@ -36,22 +36,29 @@ type dueBackfillRow struct {
 	Status      string    `json:"status"`
 	CreatedAt   time.Time `json:"created_at"`
 	ProposedDue time.Time `json:"proposed_due_at"`
+	// Floored marks a date that created_at + interval would have put in the
+	// past, so it was raised to now + interval instead.
+	Floored bool `json:"floored,omitempty"`
 }
 
-// dueBackfillReport is the whole dry run: what would change, and nothing else.
+// dueBackfillReport is the whole dry run: what would change, what was skipped
+// and why, and nothing else.
 type dueBackfillReport struct {
-	Applied      bool             `json:"applied"`
-	Interval     string           `json:"interval"`
-	Scanned      int              `json:"scanned"`
-	Candidates   int              `json:"candidates"`
-	ByType       map[string]int   `json:"by_type"`
-	ByStatus     map[string]int   `json:"by_status"`
-	OldestDue    *time.Time       `json:"oldest_proposed_due_at,omitempty"`
-	NewestDue    *time.Time       `json:"newest_proposed_due_at,omitempty"`
-	AlreadyDated int              `json:"already_dated"`
-	Rows         []dueBackfillRow `json:"rows"`
-	Updated      int              `json:"updated"`
-	Failed       []string         `json:"failed,omitempty"`
+	Applied       bool             `json:"applied"`
+	Interval      string           `json:"interval"`
+	Scanned       int              `json:"scanned"`
+	Candidates    int              `json:"candidates"`
+	Floored       int              `json:"floored"`
+	ByType        map[string]int   `json:"by_type"`
+	ByStatus      map[string]int   `json:"by_status"`
+	OldestDue     *time.Time       `json:"oldest_proposed_due_at,omitempty"`
+	NewestDue     *time.Time       `json:"newest_proposed_due_at,omitempty"`
+	AlreadyDated  int              `json:"already_dated"`
+	SkippedClosed int              `json:"skipped_closed"`
+	SkippedExempt map[string]int   `json:"skipped_exempt"`
+	Rows          []dueBackfillRow `json:"rows"`
+	Updated       int              `json:"updated"`
+	Failed        []string         `json:"failed,omitempty"`
 }
 
 var dueCmd = &cobra.Command{
@@ -75,13 +82,16 @@ changes nothing: it prints what it would do and stops. Read the report, then
 re-run with --apply if it looks right.
 
 Each candidate is dated --interval past its OWN creation (default +7d), not
-past today, so the relative order of a backlog survives the backfill. Every
-bead written is stamped due_source=backfill, so a synthesized date stays
-distinguishable from one a human chose.
+past today, so the relative order of a backlog survives the backfill. A bead
+older than the interval would land in the past and fire on the next ready
+read, so its date is floored to --interval past now instead; the report marks
+those rows. Every bead written is stamped due_source=backfill, so a
+synthesized date stays distinguishable from one a human chose.
 
 Beads that are not work awaiting completion are skipped: events, wisps,
 templates, federated rows, and anything already closed. So is anything that
-already has a due date - a backfill never overwrites one.
+already has a due date - a backfill never overwrites one. The report counts
+every skipped class so nothing is excluded silently.
 
 Examples:
   bd due backfill                      # dry run: report only, writes nothing
@@ -132,7 +142,7 @@ Examples:
 			return HandleError("scanning issues: %v", err)
 		}
 
-		report := planDueBackfill(issues, interval)
+		report := planDueBackfill(issues, interval, time.Now().UTC())
 		if apply {
 			applyDueBackfill(ctx, &report)
 		}
@@ -170,13 +180,15 @@ func parseBackfillInterval(raw string) (time.Duration, error) {
 // it, touching nothing. Keeping the decision here — pure, over a slice — is
 // what lets the report and the write agree by construction: --apply runs this
 // same plan and then writes exactly its rows.
-func planDueBackfill(issues []*types.Issue, interval time.Duration) dueBackfillReport {
+func planDueBackfill(issues []*types.Issue, interval time.Duration, now time.Time) dueBackfillReport {
 	report := dueBackfillReport{
-		Interval: interval.String(),
-		Scanned:  len(issues),
-		ByType:   map[string]int{},
-		ByStatus: map[string]int{},
+		Interval:      interval.String(),
+		Scanned:       len(issues),
+		ByType:        map[string]int{},
+		ByStatus:      map[string]int{},
+		SkippedExempt: map[string]int{},
 	}
+	floor := now.Add(interval).UTC()
 	for _, issue := range issues {
 		if issue == nil {
 			continue
@@ -185,10 +197,20 @@ func planDueBackfill(issues []*types.Issue, interval time.Duration) dueBackfillR
 			report.AlreadyDated++
 			continue
 		}
-		if issue.Status == types.StatusClosed || issueops.DueRequiredExempt(issue) {
+		if issue.Status == types.StatusClosed {
+			report.SkippedClosed++
+			continue
+		}
+		if reason := issueops.DueRequiredExemptReason(issue); reason != "" {
+			report.SkippedExempt[reason]++
 			continue
 		}
 		due := issue.CreatedAt.Add(interval).UTC()
+		floored := !due.After(now)
+		if floored {
+			due = floor
+			report.Floored++
+		}
 		report.Candidates++
 		report.ByType[string(issue.IssueType.Normalize())]++
 		report.ByStatus[string(issue.Status)]++
@@ -208,6 +230,7 @@ func planDueBackfill(issues []*types.Issue, interval time.Duration) dueBackfillR
 			Status:      string(issue.Status),
 			CreatedAt:   issue.CreatedAt.UTC(),
 			ProposedDue: due,
+			Floored:     floored,
 		})
 	}
 	// Oldest first: a reviewer reading the report wants the most overdue end of
@@ -255,12 +278,15 @@ func printDueBackfillReport(report dueBackfillReport) {
 	fmt.Printf("%s DRY RUN - nothing was written\n\n", ui.RenderWarn("!"))
 	fmt.Printf("  scanned           %d\n", report.Scanned)
 	fmt.Printf("  already dated     %d\n", report.AlreadyDated)
+	fmt.Printf("  skipped closed    %d  (closed work is never dated)\n", report.SkippedClosed)
+	fmt.Printf("  skipped exempt    %d  (%s)\n", sumCountMap(report.SkippedExempt), formatCountMap(report.SkippedExempt))
 	fmt.Printf("  would backfill    %d\n", report.Candidates)
 	if report.Candidates == 0 {
 		fmt.Printf("\nEvery bead that needs a due date already has one.\n")
 		return
 	}
 	fmt.Printf("  interval          %s past each bead's own created_at\n", report.Interval)
+	fmt.Printf("  floored           %d  (older than the interval; dated %s past now instead)\n", report.Floored, report.Interval)
 	if report.OldestDue != nil && report.NewestDue != nil {
 		fmt.Printf("  proposed range    %s .. %s\n",
 			report.OldestDue.Format("2006-01-02"), report.NewestDue.Format("2006-01-02"))
@@ -275,9 +301,16 @@ func printDueBackfillReport(report dueBackfillReport) {
 	}
 	fmt.Printf("\n  oldest %d of %d:\n", len(shown), len(report.Rows))
 	for _, row := range shown {
-		fmt.Printf("    %-14s  created %s  ->  due %s  %s\n",
-			row.ID, row.CreatedAt.Format("2006-01-02"), row.ProposedDue.Format("2006-01-02"),
+		mark := "  "
+		if row.Floored {
+			mark = " *"
+		}
+		fmt.Printf("    %-14s  created %s  ->  due %s%s  %s\n",
+			row.ID, row.CreatedAt.Format("2006-01-02"), row.ProposedDue.Format("2006-01-02"), mark,
 			truncateForReport(row.Title, 48))
+	}
+	if report.Floored > 0 {
+		fmt.Printf("    * floored to now + interval\n")
 	}
 	if len(report.Rows) > len(shown) {
 		fmt.Printf("    ... and %d more (use --json for the full list)\n", len(report.Rows)-len(shown))
@@ -304,6 +337,14 @@ func formatCountMap(counts map[string]int) string {
 		return "(none)"
 	}
 	return out
+}
+
+func sumCountMap(counts map[string]int) int {
+	total := 0
+	for _, n := range counts {
+		total += n
+	}
+	return total
 }
 
 func truncateForReport(s string, max int) string {

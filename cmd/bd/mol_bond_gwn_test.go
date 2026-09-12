@@ -52,7 +52,7 @@ type = "task"
 	}
 
 	// Create an issue to use as the second operand of bd mol bond.
-	out, err := bdRunWithFlockRetry(t, bd, dir, "create", "target", "-t", "task", "-p", "4", "--json")
+	out, err := bdRunWithFlockRetry(t, bd, dir, "create", "--due", "+7d", "target", "-t", "task", "-p", "4", "--json")
 	if err != nil {
 		t.Fatalf("bd create failed: %v\n%s", err, out)
 	}

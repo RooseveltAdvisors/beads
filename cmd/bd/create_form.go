@@ -189,6 +189,7 @@ func CreateIssueFromFormValues(ctx context.Context, s storage.DoltStorage, fv *c
 	// commit in one transaction; a failed edge rolls back the create instead
 	// of leaving a dep-less issue behind (same contract as bd create).
 	edges := createDepEdges{parentID: fv.ParentID, specs: depSpecs}
+	applyDefaultDue(issue)
 	if err := createIssueWithDeps(ctx, s, issue, actor, edges); err != nil {
 		return nil, fmt.Errorf("failed to create issue: %w", err)
 	}

@@ -82,6 +82,7 @@ var addTodoCmd = &cobra.Command{
 			CreatedBy:   getActorWithGit(),
 		}
 
+		applyDefaultDue(issue)
 		if err := getStore().CreateIssue(ctx, issue, getActorWithGit()); err != nil {
 			return HandleError("failed to create TODO: %v", err)
 		}

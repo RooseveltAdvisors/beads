@@ -26,9 +26,9 @@ func TestNextDueAfterMissRescheduling(t *testing.T) {
 			want: now.Add(DueMissGrace),
 		},
 		{
-			name: "recurring bead follows its own interval from now",
+			name: "recurring interval bead steps from its own due date, not from now",
 			cand: dueCandidate{id: "b", dueAt: at(2026, time.March, 1, 9), repeatPattern: "+1w"},
-			want: now.AddDate(0, 0, 7),
+			want: at(2026, time.March, 15, 9), // Mar 1 -> Mar 8 (still past) -> Mar 15
 		},
 		{
 			name: "recurring cron bead lands on its next occurrence, not the next missed one",
@@ -212,6 +212,84 @@ func TestDueSweepLiveStatusesFollowTheWorkspaceVocabulary(t *testing.T) {
 		if !got[want] {
 			t.Errorf("status %q is invisible to the due sweep", want)
 		}
+	}
+}
+
+// A weekly bead missed by several weeks must land on its own weekday and time:
+// rescheduling from the sweep's clock would drag the whole series to whenever
+// the sweep happened to run.
+func TestNextDueAfterMissKeepsTheIntervalAnchor(t *testing.T) {
+	dueAt := at(2026, time.March, 2, 9) // Monday 09:00
+	now := at(2026, time.March, 25, 15) // Wednesday 15:00, three weeks later
+	got := nextDueAfterMiss(dueCandidate{id: "a", dueAt: dueAt, repeatPattern: "+1w"}, now)
+	want := at(2026, time.March, 30, 9) // the next Monday 09:00
+	if !got.Equal(want) {
+		t.Fatalf("nextDueAfterMiss = %v, want %v", got, want)
+	}
+	if got.Weekday() != dueAt.Weekday() || got.Hour() != dueAt.Hour() {
+		t.Errorf("rescheduled to %v, which lost the %s %02d:00 anchor", got, dueAt.Weekday(), dueAt.Hour())
+	}
+	// A cron rule already expresses its anchor, so it matches from now.
+	cron := nextDueAfterMiss(dueCandidate{id: "c", dueAt: dueAt, repeatPattern: "0 9 * * 1"}, now)
+	if !cron.Equal(want) {
+		t.Errorf("cron reschedule = %v, want %v", cron, want)
+	}
+	// A miss older than the horizon cannot be walked and falls back to grace.
+	ancient := nextDueAfterMiss(dueCandidate{id: "d", dueAt: at(2015, time.March, 2, 9), repeatPattern: "+1w"}, now)
+	if !ancient.Equal(now.Add(DueMissGrace)) {
+		t.Errorf("ancient miss = %v, want the grace fallback %v", ancient, now.Add(DueMissGrace))
+	}
+}
+
+// The update funnel validates the triple it would LAND, not the one field it
+// was handed, and stopping a series clears its bounds along with the pattern.
+func TestValidateRecurrenceUpdateChecksTheMergedTriple(t *testing.T) {
+	start := at(2026, time.January, 1, 0)
+	end := at(2027, time.January, 1, 0)
+	recurring := &types.Issue{RepeatPattern: "+1w", RepeatStart: &start, RepeatEnd: &end}
+	plain := &types.Issue{}
+
+	tests := []struct {
+		name    string
+		old     *types.Issue
+		updates map[string]interface{}
+		wantErr bool
+	}{
+		{"no recurrence keys is not checked", plain, map[string]interface{}{"title": "x"}, false},
+		{"a bound on a non-recurring bead is refused", plain, map[string]interface{}{"repeat_end": end}, true},
+		{"a bound with a pattern in the same update is accepted", plain, map[string]interface{}{"repeat_pattern": "+1d", "repeat_end": end}, false},
+		{"an end before the stored start is refused", recurring, map[string]interface{}{"repeat_end": at(2025, time.June, 1, 0)}, true},
+		{"a start after the stored end is refused", recurring, map[string]interface{}{"repeat_start": &end, "repeat_end": &start}, true},
+		{"clearing the pattern alone would strand the stored bounds", recurring, map[string]interface{}{"repeat_pattern": ""}, true},
+		{"clearing a bound to nil is accepted", recurring, map[string]interface{}{"repeat_end": nil}, false},
+		{"a non-time bound value is refused", recurring, map[string]interface{}{"repeat_end": "tomorrow"}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateRecurrenceUpdate(tc.old, tc.updates)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ValidateRecurrenceUpdate = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
+
+	// The funnel clears the bounds BEFORE validating, so stopping a bounded
+	// series is a legal single update.
+	updates := map[string]interface{}{"repeat_pattern": ""}
+	ClearRecurrenceBoundsOnStop(updates)
+	if v, ok := updates["repeat_start"]; !ok || v != nil {
+		t.Errorf("repeat_start = %v (present %v), want an explicit nil", v, ok)
+	}
+	if v, ok := updates["repeat_end"]; !ok || v != nil {
+		t.Errorf("repeat_end = %v (present %v), want an explicit nil", v, ok)
+	}
+	if err := ValidateRecurrenceUpdate(recurring, updates); err != nil {
+		t.Errorf("stopping a bounded series must validate once the bounds are cleared, got %v", err)
+	}
+	keep := map[string]interface{}{"repeat_pattern": "+2w"}
+	ClearRecurrenceBoundsOnStop(keep)
+	if _, ok := keep["repeat_start"]; ok {
+		t.Error("changing the pattern must not touch the bounds")
 	}
 }
 

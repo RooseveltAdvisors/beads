@@ -35,10 +35,57 @@ func dueLessTask() *types.Issue {
 	return &types.Issue{ID: "bd-due1", Title: "no deadline", IssueType: types.TypeTask, Status: types.StatusOpen}
 }
 
-func TestDueRequiredDefaultsOff(t *testing.T) {
-	withDueRequired(t, false)
+// The invariant is ON in a workspace that has never configured it: a fresh
+// config refuses a due-less task, and only an explicit `due.required: false`
+// lets one through.
+func TestDueRequiredDefaultsOn(t *testing.T) {
+	t.Chdir(t.TempDir())
+	config.ResetForTesting()
+	if err := config.Initialize(); err != nil {
+		t.Fatalf("config.Initialize: %v", err)
+	}
+	t.Cleanup(config.ResetForTesting)
+	if !DueRequiredEnabled() {
+		t.Fatal("due.required must default to true")
+	}
+	if err := ValidateDueRequired(dueLessTask()); err == nil {
+		t.Fatal("a fresh workspace must refuse a due-less task")
+	}
+	config.Set(DueRequiredKey, false)
 	if err := ValidateDueRequired(dueLessTask()); err != nil {
 		t.Fatalf("invariant off must accept a due-less task, got %v", err)
+	}
+}
+
+// due_source answers "did a human pick this date": a create that arrives with
+// a date and no provenance is stamped explicit, and a path that already named
+// its source (the ladder, the backfill, a spawn) is left alone.
+func TestStampExplicitDueSource(t *testing.T) {
+	issue := dueLessTask()
+	StampExplicitDueSource(issue)
+	if issue.DueSource != "" {
+		t.Fatalf("a due-less issue must not get a source, got %q", issue.DueSource)
+	}
+	due := time.Now().Add(time.Hour)
+	issue.DueAt = &due
+	StampExplicitDueSource(issue)
+	if issue.DueSource != types.DueSourceExplicit {
+		t.Fatalf("due_source = %q, want %q", issue.DueSource, types.DueSourceExplicit)
+	}
+	issue.DueSource = types.DueSourceDefault
+	StampExplicitDueSource(issue)
+	if issue.DueSource != types.DueSourceDefault {
+		t.Fatalf("an existing source must be kept, got %q", issue.DueSource)
+	}
+
+	withDueRequired(t, true)
+	request := publicops.CreateRequest{Actor: "seat-a", Issue: &types.Issue{ID: "bd-src", Title: "dated", IssueType: types.TypeTask, Status: types.StatusOpen, DueAt: &due}}
+	prepared, err := PreparePublicCreateRequest(request, PublicCreateContext{IssuePrefix: "bd"})
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if prepared.Issue.DueSource != types.DueSourceExplicit {
+		t.Fatalf("public create due_source = %q, want %q", prepared.Issue.DueSource, types.DueSourceExplicit)
 	}
 }
 

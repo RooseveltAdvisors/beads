@@ -322,7 +322,7 @@ func TestEmbeddedUpdate(t *testing.T) {
 			t.Errorf("expected exact metadata conflict error, got: %s", conflict)
 		}
 
-		out = bdUpdate(t, bd, dir, "--json", issue.ID, "--due", "", "--history")
+		out = bdUpdate(t, bd, dir, "--json", issue.ID, "--due", "", "--force-no-due", "--reason", "tracked elsewhere", "--history")
 		updated = nil
 		if err := json.Unmarshal([]byte(out), &updated); err != nil {
 			t.Fatalf("parse clearing update response: %v\n%s", err, out)
@@ -649,7 +649,7 @@ func TestEmbeddedUpdateConcurrent(t *testing.T) {
 			for i := 0; i < issuesPerWorker; i++ {
 				// Create an issue.
 				title := fmt.Sprintf("w%d-issue-%d", worker, i)
-				out, err := bdRunWithFlockRetry(t, bd, dir, "create", "--silent", title)
+				out, err := bdRunWithFlockRetry(t, bd, dir, "create", "--due", "+7d", "--silent", title)
 				if err != nil {
 					r.err = fmt.Errorf("create %d: %v\n%s", i, err, out)
 					results[worker] = r

@@ -159,6 +159,40 @@ func TestEmbeddedRecurrenceCreate(t *testing.T) {
 		}
 	})
 
+	// Stopping a series clears its bounds with it: a row holding repeat_end
+	// and no pattern is one export/import would refuse.
+	t.Run("stopping_a_series_clears_its_bounds", func(t *testing.T) {
+		issue := bdCreate(t, bd, dir, "Bounded series", "--type", "chore", "--due", "+1d",
+			"--repeat", "+1w", "--repeat-start", "2026-01-01", "--repeat-end", "2030-01-01")
+		bdUpdate(t, bd, dir, issue.ID, "--repeat", "")
+		got := bdShow(t, bd, dir, issue.ID)
+		if got.RepeatPattern != "" || got.RepeatStart != nil || got.RepeatEnd != nil {
+			t.Errorf("after --repeat \"\": pattern=%q start=%v end=%v, want all cleared",
+				got.RepeatPattern, got.RepeatStart, got.RepeatEnd)
+		}
+	})
+
+	// The update path validates the triple it would LAND, so it refuses the
+	// same shapes create does: a bound without a pattern, and an end before
+	// the stored start.
+	t.Run("update_refuses_an_incoherent_recurrence_triple", func(t *testing.T) {
+		plain := bdCreate(t, bd, dir, "Plain task", "--type", "task", "--due", "+1d")
+		out := bdUpdateFail(t, bd, dir, plain.ID, "--repeat-end", "2030-01-01")
+		if !strings.Contains(out, "repeat_pattern") {
+			t.Errorf("refusal did not name the missing pattern:\n%s", out)
+		}
+		if got := bdShow(t, bd, dir, plain.ID); got.RepeatEnd != nil {
+			t.Errorf("a refused update still wrote repeat_end = %v", got.RepeatEnd)
+		}
+
+		bounded := bdCreate(t, bd, dir, "Series with a start", "--type", "chore", "--due", "+1d",
+			"--repeat", "+1w", "--repeat-start", "2028-01-01")
+		out = bdUpdateFail(t, bd, dir, bounded.ID, "--repeat-end", "2027-01-01")
+		if !strings.Contains(out, "before repeat_start") {
+			t.Errorf("refusal did not name the inverted bounds:\n%s", out)
+		}
+	})
+
 	t.Run("update_refuses_an_unparseable_pattern", func(t *testing.T) {
 		issue := bdCreate(t, bd, dir, "Reject bad update", "--type", "task")
 		cmd := exec.Command(bd, "update", issue.ID, "--repeat", "sometimes")
@@ -250,6 +284,57 @@ func TestEmbeddedRecurrenceSpawnOnClose(t *testing.T) {
 		bdClose(t, bd, dir, issue.ID)
 		if matched := bdIssuesByTitle(t, bd, dir, title); len(matched) != 1 {
 			t.Errorf("found %d beads titled %q, want no successor past repeat_end", len(matched), title)
+		}
+	})
+
+	// A status update into closed is a close by another name, so it reaches
+	// the same spawn: a series must not end silently because the caller typed
+	// `bd update --status closed` instead of `bd close`.
+	t.Run("a_status_update_into_closed_files_the_next_instance", func(t *testing.T) {
+		const title = "Closed by status update"
+		first := bdCreate(t, bd, dir, title, "--type", "chore", "--due", "2027-03-01",
+			"--repeat", "+1w", "--labels", "household")
+		bdUpdate(t, bd, dir, first.ID, "--status", "closed")
+
+		successor := otherThan(t, bdIssuesByTitle(t, bd, dir, title), first.ID)
+		if successor.Status != types.StatusOpen {
+			t.Errorf("successor status = %q, want open", successor.Status)
+		}
+		if successor.RepeatPattern != "+1w" {
+			t.Errorf("successor repeat_pattern = %q, want the series to continue", successor.RepeatPattern)
+		}
+		if successor.DueAt == nil || successor.DueAt.UTC().Format("2006-01-02") != "2027-03-08" {
+			t.Errorf("successor due = %v, want 2027-03-08", successor.DueAt)
+		}
+		if persisted := bdShow(t, bd, dir, successor.ID); len(persisted.Labels) != 1 || persisted.Labels[0] != "household" {
+			t.Errorf("successor labels = %v, want [household]", persisted.Labels)
+		}
+		events := bdHistoryJSON(t, bd, dir, first.ID, "--events")
+		if !eventsContain(events, "recurrence_spawned", successor.ID) {
+			t.Errorf("no recurrence_spawned event naming %s in:\n%+v", successor.ID, events)
+		}
+	})
+
+	// Recurrence is parent-linked and otherwise flat: the successor stays in
+	// its epic, while a peer edge describing one instance's relationship to
+	// other work is not copied.
+	t.Run("the_successor_keeps_its_parent_and_drops_peer_edges", func(t *testing.T) {
+		epic := bdCreate(t, bd, dir, "Household epic", "--type", "epic")
+		peer := bdCreate(t, bd, dir, "Related note", "--type", "task")
+		const title = "Recurring child chore"
+		child := bdCreate(t, bd, dir, title, "--type", "chore", "--due", "2027-03-01",
+			"--repeat", "+1w", "--parent", epic.ID)
+		bdDepAdd(t, bd, dir, child.ID, peer.ID, "--type", "related")
+		bdClose(t, bd, dir, child.ID)
+
+		successor := otherThan(t, bdIssuesByTitle(t, bd, dir, title), child.ID)
+		parents := bdDep(t, bd, dir, "list", successor.ID, "--type", "parent-child")
+		if !strings.Contains(parents, epic.ID) {
+			t.Errorf("successor %s is not a child of %s:\n%s", successor.ID, epic.ID, parents)
+		}
+		all := bdDep(t, bd, dir, "list", successor.ID)
+		if strings.Contains(all, peer.ID) {
+			t.Errorf("successor %s inherited the peer edge to %s:\n%s", successor.ID, peer.ID, all)
 		}
 	})
 
@@ -421,12 +506,16 @@ func TestEmbeddedDueBackfill(t *testing.T) {
 	bd := buildEmbeddedBD(t)
 	dir, _, _ := bdInit(t, bd, "--prefix", "bf")
 
-	// Beads created without --due under the default posture carry no due date:
-	// exactly the legacy shape the backfill exists for.
-	undated := bdCreate(t, bd, dir, "Legacy work item", "--type", "task")
+	// The invariant is on by default, so the legacy shape the backfill exists
+	// for — a bead with no due date — is produced by a workspace that turned
+	// it off, exactly as a pre-invariant repository looks.
+	bdRunOK(t, bd, dir, "config", "set", "due.required", "false")
+	undated := bdCreateSilent(t, bd, dir, "Legacy work item", "--type", "task", "--due", "")
 	dated := bdCreate(t, bd, dir, "Already dated", "--type", "task", "--due", "2030-01-01")
-	if bdShow(t, bd, dir, undated.ID).DueAt != nil {
-		t.Skip("this workspace mints due dates at create; the backfill has nothing to fix")
+	closed := bdCreateSilent(t, bd, dir, "Finished before the rule", "--type", "task", "--due", "")
+	bdClose(t, bd, dir, closed)
+	if bdShow(t, bd, dir, undated).DueAt != nil {
+		t.Fatalf("setup: the undated bead was minted a due date with due.required off")
 	}
 
 	t.Run("the_default_run_reports_and_writes_nothing", func(t *testing.T) {
@@ -443,8 +532,15 @@ func TestEmbeddedDueBackfill(t *testing.T) {
 		if report.AlreadyDated < 1 {
 			t.Errorf("AlreadyDated = %d, want at least the dated bead", report.AlreadyDated)
 		}
+		// The exclusions are reported, not inferred.
+		if report.SkippedClosed < 1 {
+			t.Errorf("SkippedClosed = %d, want at least the closed bead", report.SkippedClosed)
+		}
+		if report.SkippedExempt == nil {
+			t.Error("SkippedExempt is absent from the report")
+		}
 		// The crucial assertion: the database is unchanged.
-		if got := bdShow(t, bd, dir, undated.ID); got.DueAt != nil {
+		if got := bdShow(t, bd, dir, undated); got.DueAt != nil {
 			t.Errorf("dry run wrote a due date: %v", got.DueAt)
 		}
 	})
@@ -462,7 +558,7 @@ func TestEmbeddedDueBackfill(t *testing.T) {
 			t.Errorf("backfill failures: %v", applied.Failed)
 		}
 
-		got := bdShow(t, bd, dir, undated.ID)
+		got := bdShow(t, bd, dir, undated)
 		if got.DueAt == nil {
 			t.Fatal("backfill left the undated bead without a due date")
 		}

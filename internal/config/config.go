@@ -290,10 +290,10 @@ func Initialize() error {
 	// Create command defaults
 	v.SetDefault("create.require-description", false)
 
-	// Mandatory due dates. OFF by default so the invariant is opt-in per
-	// workspace; `bd create` and every other create surface demand an explicit
-	// due date for work types once it is on (issueops.ValidateDueRequired).
-	v.SetDefault("due.required", false)
+	// Mandatory due dates. ON by default: `bd create` and every other create
+	// surface demand a due date for work types (issueops.ValidateDueRequired).
+	// A workspace that does not want the invariant turns it off in config.yaml.
+	v.SetDefault("due.required", true)
 
 	// Validation configuration defaults (bd-t7jq)
 	// Values: "warn" | "error" | "none"

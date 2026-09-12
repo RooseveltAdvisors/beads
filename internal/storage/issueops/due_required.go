@@ -11,9 +11,8 @@ import (
 // DueRequiredKey is the workspace switch that turns a due date from an option
 // into a create-time invariant.
 //
-// It defaults OFF so a workspace that has never heard of it behaves exactly as
-// it did before; a fleet that wants every bead to carry a deadline turns it on
-// once, in config.yaml, and every create surface answers to it.
+// It defaults ON, so every create surface demands a deadline unless a workspace
+// turns it off once, in config.yaml.
 const DueRequiredKey = "due.required"
 
 // DueRequiredEnabled reports whether this workspace requires a due date on new
@@ -32,17 +31,40 @@ func DueRequiredEnabled() bool {
 // property of the caller restoring it, not of the row itself: the same row
 // created by hand still needs a due date.
 func DueRequiredExempt(issue *types.Issue) bool {
-	if issue == nil {
-		return true
-	}
+	return DueRequiredExemptReason(issue) != ""
+}
+
+// DueRequiredExemptReason names the class that exempts an issue from the
+// mandatory-due invariant — "event", "wisp", "template" or "federated" — or ""
+// when the issue is held to it. It is the one predicate behind
+// DueRequiredExempt, exposed so a report can say WHY a row was skipped.
+func DueRequiredExemptReason(issue *types.Issue) string {
+	switch {
+	case issue == nil:
+		return "nil"
+	case issue.IssueType == types.TypeEvent:
+		return "event"
 	// ponytail: the wisp plane is spelled three ways here because a create may
 	// arrive with any one of them set — the flags, or the class marker alone.
-	return issue.IssueType == types.TypeEvent ||
-		issue.Ephemeral || issue.NoHistory ||
-		issue.WispType != "" ||
-		issue.StorageClass == types.StorageClassEphemeral ||
-		issue.IsTemplate ||
-		issue.SourceSystem != ""
+	case issue.Ephemeral || issue.NoHistory || issue.WispType != "" ||
+		issue.StorageClass == types.StorageClassEphemeral:
+		return "wisp"
+	case issue.IsTemplate:
+		return "template"
+	case issue.SourceSystem != "":
+		return "federated"
+	}
+	return ""
+}
+
+// StampExplicitDueSource records that a due date reaching a create path with no
+// provenance was supplied by the caller. Paths that synthesize a date write
+// their own source first (`bd q`'s ladder, the backfill, a recurrence spawn),
+// so this only fills the blank the CLI, HTTP and MCP create surfaces leave.
+func StampExplicitDueSource(issue *types.Issue) {
+	if issue != nil && issue.DueAt != nil && issue.DueSource == "" {
+		issue.DueSource = types.DueSourceExplicit
+	}
 }
 
 // ValidateDueRequired refuses a create that would land work with no deadline.

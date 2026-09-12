@@ -610,7 +610,7 @@ func TestEmbeddedInit(t *testing.T) {
 			t.Fatal("source project ID is empty")
 		}
 
-		cmd := exec.Command(bd, "create", "Remote issue", "--type", "task")
+		cmd := exec.Command(bd, "create", "--due", "+7d", "Remote issue", "--type", "task")
 		cmd.Dir = sourceDir
 		cmd.Env = bdEnv(sourceDir)
 		if out, err := cmd.CombinedOutput(); err != nil {

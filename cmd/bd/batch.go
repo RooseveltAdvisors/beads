@@ -410,6 +410,7 @@ func runBatchOp(ctx context.Context, tx storage.Transaction, op batchOp) (batchO
 			Status:    types.StatusOpen,
 			Priority:  priority,
 		}
+		applyDefaultDue(issue)
 		if err := tx.CreateIssue(ctx, issue, actorName); err != nil {
 			return result, err
 		}

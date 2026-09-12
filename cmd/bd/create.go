@@ -265,7 +265,7 @@ var createCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		firstDue, err := firstOccurrenceDue(repeat, dueAt, time.Now())
+		firstDue, err := firstOccurrenceDue(repeat, dueAt, time.Now().UTC())
 		if err != nil {
 			return err
 		}

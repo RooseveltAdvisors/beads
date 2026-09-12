@@ -32,8 +32,26 @@ func resolveQuickDue(cmd *cobra.Command, issue *types.Issue) error {
 		issue.DueAt = &t
 		return nil
 	}
-	if !issueops.DueRequiredEnabled() || issueops.DueRequiredExempt(issue) {
-		return nil
+	applyDefaultDue(issue)
+	return nil
+}
+
+// applyDefaultDue gives a bead that has no due date one from the priority
+// ladder, stamped due_source=default, when the workspace requires due dates
+// and the bead is held to the rule.
+//
+// It is what every create surface WITHOUT a --due of its own runs before the
+// storage boundary: quick capture, `bd todo add`, `bd gate create`, molecule
+// instantiation, and the multi-bead plans (--graph, --file, batch). `bd create`
+// itself deliberately does not: the one surface where a human names each bead
+// is the one that asks them to name its deadline. A ladder date stays
+// distinguishable from a chosen one through its source, so nothing about the
+// invariant is hidden — every bead has a deadline, and the column says which
+// ones were synthesized.
+func applyDefaultDue(issue *types.Issue) {
+	if issue == nil || issue.DueAt != nil ||
+		!issueops.DueRequiredEnabled() || issueops.DueRequiredExempt(issue) {
+		return
 	}
 	priority := issue.Priority
 	if priority < 0 || priority >= len(quickDueLadderDays) {
@@ -41,7 +59,14 @@ func resolveQuickDue(cmd *cobra.Command, issue *types.Issue) error {
 	}
 	due := time.Now().AddDate(0, 0, quickDueLadderDays[priority])
 	issue.DueAt = &due
-	return nil
+	issue.DueSource = types.DueSourceDefault
+}
+
+// applyDefaultDues runs applyDefaultDue over a plan of beads.
+func applyDefaultDues(issues []*types.Issue) {
+	for _, issue := range issues {
+		applyDefaultDue(issue)
+	}
 }
 
 // echoQuickDue reports the due date the ladder resolved, on STDERR: `bd q`

@@ -18,8 +18,9 @@ const (
 	// DueSourceExplicit marks a due date the caller supplied.
 	DueSourceExplicit DueSource = "explicit"
 	// DueSourceDefault marks a due date a create path synthesized rather than
-	// took from the caller — `bd q`'s priority ladder is the one that does so
-	// today.
+	// took from the caller: the priority ladder that the capture surfaces
+	// without a --due of their own (`bd q`, `bd todo add`, `bd gate create`,
+	// molecule instantiation, multi-bead plans) apply.
 	DueSourceDefault DueSource = "default"
 	// DueSourceBackfill marks a due date `bd due backfill` wrote onto a bead
 	// that predates the due-date rule.

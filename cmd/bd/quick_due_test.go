@@ -57,6 +57,9 @@ func TestResolveQuickDueLadder(t *testing.T) {
 		if delta := issue.DueAt.Sub(want); delta > time.Minute || delta < -time.Minute {
 			t.Fatalf("P%d: due %s, want ~%s (+%dd)", priority, issue.DueAt, want, days)
 		}
+		if issue.DueSource != types.DueSourceDefault {
+			t.Fatalf("P%d: due_source = %q, want %q for a ladder-minted date", priority, issue.DueSource, types.DueSourceDefault)
+		}
 	}
 }
 
@@ -68,6 +71,11 @@ func TestResolveQuickDueExplicitFlagWins(t *testing.T) {
 	}
 	if issue.DueAt == nil || issue.DueAt.Before(time.Now().AddDate(0, 0, 80)) {
 		t.Fatalf("an explicit --due must beat the P0 ladder rung, got %v", issue.DueAt)
+	}
+	// The storage boundary stamps a caller-supplied date explicit; the ladder
+	// must not have claimed it as a default.
+	if issue.DueSource != "" {
+		t.Fatalf("due_source = %q for an explicit --due, want it left for the create boundary", issue.DueSource)
 	}
 }
 

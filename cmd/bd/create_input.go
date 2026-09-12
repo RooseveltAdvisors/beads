@@ -249,7 +249,7 @@ func gatherCreateInput(cmd *cobra.Command, args []string) (createInput, error) {
 	// A --repeat with no --due dates the first instance from the rule itself,
 	// so a recurring bead never needs a redundant --due restating what the
 	// pattern already says.
-	firstDue, err := firstOccurrenceDue(repeat, in.dueAt, time.Now())
+	firstDue, err := firstOccurrenceDue(repeat, in.dueAt, time.Now().UTC())
 	if err != nil {
 		return in, err
 	}

@@ -110,6 +110,9 @@ func (t *embeddedTransaction) UpdateIssue(ctx context.Context, id string, update
 	}
 	t.dirty.MarkDirty(issueTable)
 	t.dirty.MarkDirty(eventTable)
+	for spawnTable := range result.Spawned.ChangedTables {
+		t.dirty.MarkDirty(spawnTable)
+	}
 	return nil
 }
 

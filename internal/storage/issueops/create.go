@@ -116,6 +116,7 @@ func CreateIssueInTxWithResult(ctx context.Context, tx DBTX, bc *BatchContext, i
 		if err := ValidateDueRequired(issue); err != nil {
 			return result, err
 		}
+		StampExplicitDueSource(issue)
 	}
 	if err := PrepareIssueForInsert(issue, bc.CustomStatuses, bc.CustomTypes); err != nil {
 		return result, err
