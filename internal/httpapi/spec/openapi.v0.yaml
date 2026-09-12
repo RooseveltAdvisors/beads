@@ -6304,6 +6304,12 @@ components:
           description: >
             Where `due_at` came from: `explicit`, `default`, `backfill`, or
             `repeat`. Empty on rows written before the field existed.
+        due_missed:
+          type: integer
+          description: >
+            How many times `due_at` has arrived with the work still open. The
+            due sweep is its only writer; a caller cannot set it. At
+            three misses the bead's priority is raised once.
         external_ref:
           type: string
         source_system:
@@ -6458,6 +6464,7 @@ components:
         repeat_start: { type: string, format: date-time }
         repeat_end: { type: string, format: date-time }
         due_source: { type: string }
+        due_missed: { type: integer }
         external_ref: { type: string }
         source_system: { type: string }
         metadata: { type: object, additionalProperties: true }
@@ -6551,6 +6558,7 @@ components:
         repeat_start: { type: string, format: date-time }
         repeat_end: { type: string, format: date-time }
         due_source: { type: string }
+        due_missed: { type: integer }
         external_ref: { type: string }
         source_system: { type: string }
         metadata: { type: object, additionalProperties: true }
@@ -6722,6 +6730,7 @@ components:
         repeat_start: { type: string, format: date-time }
         repeat_end: { type: string, format: date-time }
         due_source: { type: string }
+        due_missed: { type: integer }
         external_ref: { type: string }
         source_system: { type: string }
         metadata: { type: object, additionalProperties: true }
@@ -6812,6 +6821,7 @@ components:
         repeat_start: { type: string, format: date-time }
         repeat_end: { type: string, format: date-time }
         due_source: { type: string }
+        due_missed: { type: integer }
         external_ref: { type: string }
         source_system: { type: string }
         metadata: { type: object, additionalProperties: true }

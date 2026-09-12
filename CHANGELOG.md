@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`bd due sweep` is the seam an external clock stands on, and due beads now
+  escalate.** Beads fire lazily on ready-work reads, which is a latency floor
+  rather than a clock: a workspace nobody reads never fires anything. The new
+  command runs the sweep on demand, reports what fired as JSON (including a
+  ready-to-publish `summary` field), and — unlike the lazy sweep behind a read
+  — exits non-zero when it cannot run, so a timer can tell a quiet workspace
+  from a broken one. It refuses proxied-server mode, as `bd due backfill` does:
+  the server already sweeps on its own reads.
+
+  A missed deadline is also counted now, in a new `due_missed` column
+  (migration 0068 plus its ignored-series twin 0027, so upgraded workspaces and
+  fresh clones converge on the same shape). Rescheduling alone left a bead
+  missed once and a bead missed twenty times indistinguishable in the ready
+  front; at the third miss the bead's priority is raised one rung, ONCE, and
+  never again — an escalation that repeated would walk a stale backlog to P0
+  and flatten the priority field. The counter is system-maintained: the sweep
+  is its only writer, no flag sets it, and `bd import` cannot clobber a local
+  count. The `due` audit event carries the miss count, and the sweep's JSON
+  names the beads that escalated.
+
+  Graph plans can set `due_source` too. `bd create --due-source` had given
+  single-issue creates a way to declare a due date's provenance and left
+  `--graph` without one, so every bead a plan created carried the default
+  provenance whether or not it was true — and provenance is exactly what
+  `bd due backfill` decides on.
+
+  `contrib/systemd/` carries a ready-to-install `systemd --user` timer for the
+  clock: `Persistent=true` so ticks missed while the machine slept are still
+  owed, a non-blocking lock so a slow sweep cannot stack, an `OnFailure=` unit,
+  and a heartbeat stamped after each sweep completes so an independent host can
+  tell a silent clock from a quiet one.
+
 - **Every new bead needs a due date.** `due.required` is on by default, and the
   rule is enforced at the storage boundary, so `bd create`, the HTTP and MCP
   servers, and the issueops API all refuse work with no deadline; `bd config

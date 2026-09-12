@@ -117,3 +117,18 @@ parity between `bd create` and graph plans).
 **Fixtures with hardcoded arity.** `internal/storage/domain/db/issue_scan_parity_test.go`
 and `internal/storage/issueops/search_lite_merge_test.go` both pin a column
 count and a full-width row.
+
+**A SYSTEM-MAINTAINED column skips most of this.** If one subsystem is the
+column's only writer and no caller may set it — migration 0068 (`due_missed`,
+written only by the due sweep) is the worked example — then the Write paths,
+Wire request schemas and CLI sections above do not apply at all: no `bd create`
+or `bd update` flag, no `GraphApplyNode` entry, no `IsAllowedUpdateField` or
+`allowedUpdateFields` member, no `CreateIssueRequest`. What remains is Schema,
+Model, Projections, the five wire READ schemas, and the arity fixtures. Two
+things still need a decision rather than a default: classify the field in
+`TestPublicCreateIssueFieldClassificationIsComplete` (`ignored`, with the
+reason a creator must not be able to declare it), and decide deliberately
+whether it belongs in the domain INSERT's `ON DUPLICATE KEY UPDATE` list —
+omitting it means a re-import preserves the value this workspace observed
+rather than adopting the incoming one, which is usually what observed state
+wants.

@@ -66,7 +66,10 @@ var dueCmd = &cobra.Command{
 	Short: "Inspect and repair due dates",
 	Long: `Commands for the due-date invariant.
 
-See 'bd due backfill --help' for giving legacy beads a due date.`,
+  sweep     fire the beads whose due date has arrived (the external clock's seam)
+  backfill  give legacy beads that predate the invariant a due date
+
+See 'bd due sweep --help' and 'bd due backfill --help'.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }

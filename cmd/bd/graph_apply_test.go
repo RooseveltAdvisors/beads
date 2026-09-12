@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/beads/internal/types"
 )
@@ -1005,5 +1006,44 @@ func TestGraphApplyNodeCoversCreateIssueParams(t *testing.T) {
 		if _, ok := nodeType.FieldByName(name); !ok {
 			t.Errorf("createIssueParams field %q is not addressable from graph plans; add it to GraphApplyNode (or the exclusion list with a reason)", name)
 		}
+	}
+}
+
+// TestGraphApplyNodeCarriesDueSource is the WIRING backstop the parity guard
+// above cannot be: that guard is name-based and passes as soon as a same-named
+// field exists, even if graphApplyNodeIssue never reads it.
+//
+// The gap this closes was real. `bd create --due-source` gave single-issue
+// creates a way to declare where a due date came from, and graph plans were
+// left without one — so every bead a plan created was stamped with the default
+// provenance whether or not that was true, and a synthesized date became
+// indistinguishable from a human's. A due date's provenance is the whole basis
+// on which `bd due backfill` decides what it may touch.
+func TestGraphApplyNodeCarriesDueSource(t *testing.T) {
+	due := time.Date(2027, 3, 4, 5, 0, 0, 0, time.UTC)
+
+	issue, err := graphApplyNodeIssue(GraphApplyNode{
+		Key:       "n",
+		Title:     "Planned work",
+		DueAt:     &due,
+		DueSource: types.DueSourceDefault,
+	}, GraphApplyOptions{}, "tester", "owner")
+	if err != nil {
+		t.Fatalf("graphApplyNodeIssue: %v", err)
+	}
+	if issue.DueSource != types.DueSourceDefault {
+		t.Errorf("due_source = %q, want %q — the node's provenance was dropped on the way to the issue",
+			issue.DueSource, types.DueSourceDefault)
+	}
+
+	// A plan that says nothing about provenance must not have one invented for
+	// it here; the create path's own defaulting owns that decision, in one
+	// place, for every route.
+	bare, err := graphApplyNodeIssue(GraphApplyNode{Key: "n", Title: "Unplanned"}, GraphApplyOptions{}, "tester", "owner")
+	if err != nil {
+		t.Fatalf("graphApplyNodeIssue (bare): %v", err)
+	}
+	if bare.DueSource != "" {
+		t.Errorf("due_source = %q on a node that declared none, want empty", bare.DueSource)
 	}
 }
