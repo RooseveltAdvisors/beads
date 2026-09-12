@@ -110,6 +110,9 @@ func (t *embeddedTransaction) UpdateIssue(ctx context.Context, id string, update
 	}
 	t.dirty.MarkDirty(issueTable)
 	t.dirty.MarkDirty(eventTable)
+	for spawnTable := range result.Spawned.ChangedTables {
+		t.dirty.MarkDirty(spawnTable)
+	}
 	return nil
 }
 
@@ -123,6 +126,11 @@ func (t *embeddedTransaction) CloseIssue(ctx context.Context, id string, reason 
 	t.dirty.MarkDirty(eventTable)
 	if result.IssueRowsChanged {
 		t.dirty.MarkDirty("issues")
+	}
+	// A recurring close filed its successor in this transaction; its labels
+	// live in their own table, so mark what the spawn actually wrote.
+	for spawnTable := range result.Spawned.ChangedTables {
+		t.dirty.MarkDirty(spawnTable)
 	}
 	return nil
 }

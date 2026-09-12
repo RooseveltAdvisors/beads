@@ -98,7 +98,7 @@ func TestRoutedCreateJournalsIntoTheTargetWorkspace(t *testing.T) {
 	}
 
 	// Route a create from the source workspace into the target.
-	run(sourceDir, "create", "--silent", "--repo", targetDir, "routed work")
+	run(sourceDir, "create", "--due", "+7d", "--silent", "--repo", targetDir, "routed work")
 
 	targetRecords := decodeEventRecords(t, run(targetDir, "events", "export"))
 	if len(targetRecords) == 0 {
@@ -149,7 +149,7 @@ func TestRoutedCreateHonorsTheEnvOverrideOverTheTargetsConfig(t *testing.T) {
 
 	// The operator turns it on for this process anyway.
 	on := append(envWithout(bdEnv(sourceDir), "BD_EVENTS_JOURNAL"), "BD_EVENTS_JOURNAL=1")
-	run(sourceDir, on, "create", "--silent", "--repo", targetDir, "routed under the env override")
+	run(sourceDir, on, "create", "--due", "+7d", "--silent", "--repo", targetDir, "routed under the env override")
 
 	records := decodeEventRecords(t, run(targetDir, append(envWithout(bdEnv(targetDir), "BD_EVENTS_JOURNAL"), "BD_EVENTS_JOURNAL=1"),
 		"events", "export"))

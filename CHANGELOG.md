@@ -9,6 +9,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Every new bead needs a due date.** `due.required` is on by default, and the
+  rule is enforced at the storage boundary, so `bd create`, the HTTP and MCP
+  servers, and the issueops API all refuse work with no deadline; `bd config
+  set due.required false` turns it off once per workspace. Capture surfaces used
+  without naming a deadline (`bd q`, which also takes `--due`, `bd todo add`,
+  `bd gate create`, molecule instantiation, `--graph`/`--file`/`bd batch`
+  plans) fill one in from a priority ladder (P0 +1d, P1 +3d, P2 +7d, P3 +14d,
+  P4 +30d) stamped `due_source=default`, so a synthesized deadline stays
+  distinguishable from a chosen one; `bd q` echoes the date it picked, and
+  `bd create --due-source` lets an integration record the same provenance.
+  Events, wisps, protos, federated rows, and `bd import` are exempt.
+  Clearing a due date is gated: `bd update --due "" --force-no-due --reason
+  "<why>"` on the CLI, or `due_clear_reason` on an HTTP patch, and the reason
+  lands on the update event. The MCP `create`/`update` tools gain `due` and
+  `repeat` parameters with the same rules.
+
+- **Beads can repeat.** `bd create --repeat` makes a bead recurring, with an
+  interval (`+1d`, `+2w`, `+1m`) or a five-field cron expression
+  (`"0 9 * * 1"`); `--repeat-start` and `--repeat-end` bound the series.
+  Closing a recurring bead files its next instance in the SAME transaction, so
+  a series cannot lose an occurrence to a crash between "closed" and "next one
+  filed". The successor carries the work forward — title, body, priority,
+  labels, assignee, the rule itself — and leaves the closed instance's own
+  state behind (closure, external ref, spec id). It is dated from the closed
+  instance's OWN due date rather than from when the work happened to finish, so
+  closing early or late does not drag the schedule with it. The series ends at
+  `--repeat-end`; `bd update --repeat ""` stops it sooner, and the bead keeps
+  its own due date. Migration 0067 plus its ignored-series twin 0026.
+
+- **An arrived due date fires an event.** The ready-front read that already
+  wakes expired defers now also sweeps beads whose due date has passed, writing
+  a `due` audit event — `old_value` the date that fired, `new_value` where it
+  moved to — on the same rail `bd events` and the events journal already carry,
+  so an external watcher consumes deadlines the same way it consumes everything
+  else. The date is then pushed forward: onto the bead's own repeat pattern
+  when it has one, otherwise by one day. That is both the nag (a missed
+  deadline that stays in the past fires once and is thereafter
+  indistinguishable from every other overdue bead) and the sweep's idempotency
+  mechanism — the advanced date is what stops the same bead re-firing on the
+  next read.
+
+- **`bd due backfill` gives legacy beads a due date — after you have read what
+  it would do.** It REPORTS by default and writes only with `--apply`: dating a
+  repository's whole history is a judgement call about other people's work, and
+  a migration is the one place that cannot be previewed or declined. Each
+  candidate is dated `--interval` (default `+7d`) past its OWN creation, so the
+  relative order of a backlog survives, and every bead written is stamped
+  `due_source=backfill`. Events, wisps, templates, federated rows, closed
+  beads, and anything that already has a date are skipped.
+
 - **The events journal records WHO performed each mutation.** `bd_events_journal`
   gains an `actor` column (migration 0066 plus its ignored-series twin 0025, so
   upgraded workspaces and fresh clones converge on the same shape), stamped

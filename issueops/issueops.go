@@ -138,6 +138,12 @@ type IssuePatch struct {
 	ExternalRef      Field[*string]
 	DueAt            Field[*time.Time]
 	DeferUntil       Field[*time.Time]
+	// RepeatPattern sets the recurrence rule; a set empty value stops the
+	// series without touching the bead's own due date. RepeatStart and
+	// RepeatEnd bound it; a set nil clears the bound.
+	RepeatPattern Field[string]
+	RepeatStart   Field[*time.Time]
+	RepeatEnd     Field[*time.Time]
 	// Persistence selects the complete persistence state. It is unchanged when
 	// unset; a set value must be a known PersistenceMode. A same current mode is
 	// a representation-preserving no-op. Every aggregate move is atomic.
@@ -255,6 +261,12 @@ type UpdateRequest struct {
 	// It is the update-side spelling of CloseRequest.Force; a command adapter
 	// that maps one flag to both spells both.
 	ForceClosePolicy bool
+	// DueClearReason is why a Patch.DueAt of nil is clearing the due date.
+	// While the workspace requires due dates, clearing one is the single edit
+	// that can undo the invariant, so the storage funnel refuses the clear
+	// unless a non-blank reason accompanies it and then records the reason
+	// on the update event. It has no effect on any other patch.
+	DueClearReason string
 	// The three Expected* guards below are this package's FOUNDING spelling of
 	// the compare-and-set family, and the family's rules are stated once, at
 	// length, on DeleteRequest.ExpectedVersion (deleter.go) and

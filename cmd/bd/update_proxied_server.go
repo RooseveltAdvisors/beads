@@ -127,6 +127,7 @@ func applyUpdateProxiedOne(ctx context.Context, id string, in *updateInput) (*ty
 		patch:            patch,
 		claim:            in.claim,
 		force:            in.force,
+		dueClearReason:   in.dueClearReason,
 		expectedAssignee: in.ifAssignee,
 		expectedStatus:   expectedStatus,
 		provenance:       fmt.Sprintf("bd: update %s", id),

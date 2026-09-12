@@ -26,7 +26,14 @@ func IsAllowedUpdateField(key string) bool {
 		"mol_type":       true,
 		"event_category": true, "event_actor": true, "event_target": true, "event_payload": true,
 		"due_at": true, "defer_until": true, "await_id": true, "waiters": true,
-		"metadata": true,
+		"repeat_pattern": true, "repeat_start": true, "repeat_end": true,
+		// due_source is provenance, written by the paths that SET a due date
+		// (create, the due sweep, `bd due backfill`). It is updatable rather
+		// than sealed so those paths reach it through the one update funnel
+		// every backend shares; ValidateScalarUpdates bounds it to the known
+		// vocabulary, so an arbitrary value cannot be stored.
+		"due_source": true,
+		"metadata":   true,
 	}
 	return allowed[key]
 }
@@ -327,6 +334,11 @@ type UpdateResult struct {
 	Changed          bool
 	IssueRowsChanged bool
 	WispRowsChanged  bool
+	// Spawned reports the successor a status change into the done category
+	// filed for a recurring bead — the same spawn `bd close` performs, reached
+	// here because a status update is a close by another name. Its
+	// ChangedTables must be unioned into whatever the caller stages.
+	Spawned SpawnResult
 }
 
 // UpdateIssueInTx performs the full update SQL logic within a transaction.
@@ -352,6 +364,8 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 	// it does not recognize, so a surviving override would reach the field
 	// allowlist and be refused by name.
 	forceClosePolicy := PopForceClosePolicy(updates)
+	dueClearReason := PopDueClearReason(updates)
+	ClearRecurrenceBoundsOnStop(updates)
 
 	// Route to correct table.
 	isWisp := IsActiveWispInTx(ctx, tx, id)
@@ -396,6 +410,10 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 		return &UpdateResult{OldIssue: oldIssue, IsWisp: isWisp, Changed: false}, nil
 	}
 
+	if err := ValidateDueClear(oldIssue, updates, dueClearReason); err != nil {
+		return nil, err
+	}
+
 	// A status update that crosses into the done category is a close by another
 	// name, so it answers to close policy. Running after the no-op filter keeps
 	// a done-to-done restatement policy-free, and running after the callers'
@@ -414,6 +432,10 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 	}
 
 	if err := ValidateScalarUpdates(ctx, tx, updates); err != nil {
+		return nil, err
+	}
+	AnchorRecurrenceUpdate(oldIssue, updates)
+	if err := ValidateRecurrenceUpdate(oldIssue, updates); err != nil {
 		return nil, err
 	}
 
@@ -501,12 +523,22 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 		newData, _ := json.Marshal(updates)
 		eventType := DetermineEventType(oldIssue, updates)
 
-		if err := RecordFullEventInTable(ctx, tx, eventTable, id, eventType, actor, string(oldData), string(newData)); err != nil {
+		if err := RecordFullEventWithCommentInTable(ctx, tx, eventTable, id, eventType, actor, string(oldData), string(newData), dueClearReason); err != nil {
 			return nil, fmt.Errorf("failed to record event: %w", err)
 		}
 	}
 
 	updateResult := &UpdateResult{OldIssue: oldIssue, IsWisp: isWisp, Changed: true, IssueRowsChanged: !isWisp, WispRowsChanged: isWisp}
+	if crossing {
+		spawned, err := SpawnRecurrenceInTx(ctx, tx, id, actor)
+		if err != nil {
+			return nil, err
+		}
+		updateResult.Spawned = spawned
+		if spawned.ID != "" {
+			updateResult.IssueRowsChanged = true
+		}
+	}
 	if rawStatus, hasStatus := updates["status"]; hasStatus {
 		var newStatus string
 		switch v := rawStatus.(type) {
@@ -699,6 +731,14 @@ func issueFieldMatches(issue *types.Issue, key string, value interface{}) (bool,
 		return matchesTimePointer(issue.DueAt, value), nil
 	case "defer_until":
 		return matchesTimePointer(issue.DeferUntil, value), nil
+	case "repeat_pattern":
+		return matchesString(issue.RepeatPattern, value), nil
+	case "repeat_start":
+		return matchesTimePointer(issue.RepeatStart, value), nil
+	case "repeat_end":
+		return matchesTimePointer(issue.RepeatEnd, value), nil
+	case "due_source":
+		return matchesString(string(issue.DueSource), value), nil
 	case "close_reason":
 		return matchesString(issue.CloseReason, value), nil
 	case "closed_by_session":
@@ -1026,11 +1066,22 @@ func readIssueAndResolveMergeOps(ctx context.Context, tx DBTX, id string, update
 
 // RecordFullEventInTable records an event with both old and new values.
 func RecordFullEventInTable(ctx context.Context, tx DBTX, table, issueID string, eventType types.EventType, actor, oldValue, newValue string) error {
-	return InsertDerivedEvent(ctx, tx, table, AuxEvent{
+	return RecordFullEventWithCommentInTable(ctx, tx, table, issueID, eventType, actor, oldValue, newValue, "")
+}
+
+// RecordFullEventWithCommentInTable records an event with both values and a
+// comment; an empty comment is stored as NULL, exactly as RecordFullEventInTable
+// leaves it.
+func RecordFullEventWithCommentInTable(ctx context.Context, tx DBTX, table, issueID string, eventType types.EventType, actor, oldValue, newValue, comment string) error {
+	event := AuxEvent{
 		IssueID:   issueID,
 		EventType: eventType,
 		Actor:     actor,
 		OldValue:  str(oldValue),
 		NewValue:  str(newValue),
-	})
+	}
+	if comment != "" {
+		event.Comment = str(comment)
+	}
+	return InsertDerivedEvent(ctx, tx, table, event)
 }

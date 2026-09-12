@@ -754,6 +754,9 @@ func (t *doltTransaction) UpdateIssue(ctx context.Context, id string, updates ma
 	t.dirty.MarkDirty(table)
 	_, _, eventTable, _ := issueops.WispTableRouting(table == "wisps")
 	t.dirty.MarkDirty(eventTable)
+	for spawnTable := range result.Spawned.ChangedTables {
+		t.dirty.MarkDirty(spawnTable)
+	}
 	return nil
 }
 
@@ -776,6 +779,11 @@ func (t *doltTransaction) CloseIssue(ctx context.Context, id string, reason stri
 	t.dirty.MarkDirty(eventTable)
 	if result.IssueRowsChanged {
 		t.dirty.MarkDirty("issues")
+	}
+	// A recurring close filed its successor in this transaction; its labels
+	// live in their own table, so mark what the spawn actually wrote.
+	for spawnTable := range result.Spawned.ChangedTables {
+		t.dirty.MarkDirty(spawnTable)
 	}
 	return nil
 }

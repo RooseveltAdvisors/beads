@@ -61,6 +61,7 @@ type storeMolWriter struct {
 }
 
 func (w storeMolWriter) CreateIssue(ctx context.Context, issue *types.Issue, actor string) error {
+	applyDefaultDue(issue)
 	return w.tx.CreateIssue(ctx, issue, actor)
 }
 
@@ -390,6 +391,7 @@ func (w *uowMolWriter) isWisp(ctx context.Context, id string) (bool, error) {
 }
 
 func (w *uowMolWriter) CreateIssue(ctx context.Context, issue *types.Issue, actor string) error {
+	applyDefaultDue(issue)
 	params := domain.CreateIssueParams{Issue: issue, ExplicitID: issue.ID, Labels: issue.Labels}
 	var err error
 	if issue.Ephemeral || issue.NoHistory {

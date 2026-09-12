@@ -99,6 +99,29 @@ type Issue struct {
 	DueAt      *time.Time `json:"due_at,omitempty"`      // When this issue should be completed
 	DeferUntil *time.Time `json:"defer_until,omitempty"` // Hide from bd ready until this time
 
+	// ===== Recurrence =====
+	// DueSource records where DueAt came from, so a date the system
+	// synthesized stays distinguishable from one a human chose: explicit,
+	// backfill (`bd due backfill`), or repeat (a spawned successor, or a
+	// missed occurrence the due sweep rescheduled). Whether a bead may be
+	// created WITHOUT a due date at all is a separate question, owned by
+	// issueops.ValidateDueRequired.
+	//
+	// RepeatPattern, when set, makes the bead recurring: closing it spawns the
+	// next instance (see issueops.SpawnRecurrenceInTx) and the due sweep
+	// reschedules a missed occurrence forward rather than letting it sit
+	// permanently overdue. The pattern is an interval ("+1w") or a five-field
+	// cron expression ("0 9 * * 1") — see timeparsing.ParseRepeat.
+	//
+	// RepeatStart and RepeatEnd bound the series. Occurrences before
+	// RepeatStart are skipped; the series stops once the next occurrence would
+	// fall after RepeatEnd. Both are optional and independent: an unbounded
+	// series leaves them nil.
+	RepeatPattern string     `json:"repeat_pattern,omitempty"`
+	RepeatStart   *time.Time `json:"repeat_start,omitempty"`
+	RepeatEnd     *time.Time `json:"repeat_end,omitempty"`
+	DueSource     DueSource  `json:"due_source,omitempty"`
+
 	// ===== External Integration =====
 	ExternalRef  *string `json:"external_ref,omitempty"`  // e.g., "gh-9", "jira-ABC"
 	SourceSystem string  `json:"source_system,omitempty"` // Adapter/system that created this issue (federation)
@@ -429,6 +452,9 @@ func (i *Issue) ValidateWithCustom(customStatuses, customTypes []string) error {
 		return err
 	}
 	if err := CheckFieldLen("owner", i.Owner); err != nil {
+		return err
+	}
+	if err := i.ValidateRecurrence(); err != nil {
 		return err
 	}
 	return nil
@@ -1623,6 +1649,16 @@ const (
 	// EventLeaseReclaimed records that a stale lease was reverted to ready by
 	// bd reclaim (dead-worker recovery). old_value is the previous owner.
 	EventLeaseReclaimed EventType = "lease_reclaimed"
+	// EventDue records that a bead's due date arrived. It is the rail an
+	// external watcher (stack-monitor, a firstmate wake) consumes to learn
+	// that work came due, in the same shape as every other audit event:
+	// old_value is the due date that fired, new_value the one it was
+	// rescheduled to.
+	EventDue EventType = "due"
+	// EventRecurrenceSpawned records that closing a recurring bead created its
+	// next instance. It is written on the CLOSED bead — old_value is its own
+	// id, new_value the successor's — so a series reads forward from any link.
+	EventRecurrenceSpawned EventType = "recurrence_spawned"
 )
 
 // ProvenanceEvent is one entry in the append-only provenance log: a typed

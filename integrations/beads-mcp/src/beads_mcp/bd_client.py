@@ -121,6 +121,11 @@ class BdClientBase(ABC):
         pass
 
     @abstractmethod
+    async def get_config(self, key: str) -> str:
+        """Read a workspace configuration value; "" when unset."""
+        pass
+
+    @abstractmethod
     async def update(self, params: UpdateIssueParams) -> Issue:
         """Update an existing issue."""
         pass
@@ -515,6 +520,22 @@ class BdCliClient(BdClientBase):
 
         return Issue.model_validate(data)
 
+    async def get_config(self, key: str) -> str:
+        """Read a workspace configuration value.
+
+        Args:
+            key: Configuration key (e.g., "due.required")
+
+        Returns:
+            The stored value, or "" when the key is not set (the caller
+            applies the key's default, mirroring the CLI's own defaults).
+        """
+        data = await self._run_command("config", "get", key)
+        if isinstance(data, dict):
+            value = data.get("value")
+            return str(value) if value is not None else ""
+        return ""
+
     async def create(self, params: CreateIssueParams) -> Issue:
         """Create a new issue.
 
@@ -538,6 +559,10 @@ class BdCliClient(BdClientBase):
             args.extend(["--assignee", params.assignee])
         if params.id:
             args.extend(["--id", params.id])
+        if params.due:
+            args.extend(["--due", params.due])
+        if params.due_source:
+            args.extend(["--due-source", params.due_source])
         for label in params.labels:
             args.extend(["-l", label])
         if params.deps:
@@ -578,6 +603,25 @@ class BdCliClient(BdClientBase):
             args.extend(["--notes", params.notes])
         if params.external_ref:
             args.extend(["--external-ref", params.external_ref])
+        if params.due is not None:
+            if params.due == "":
+                if not params.force_no_due:
+                    raise BdCommandError(
+                        "clearing a due date needs force_no_due=True and clear_due_reason "
+                        '(mirrors bd update --due="" --force-no-due --reason)'
+                    )
+                clear_due_reason = params.clear_due_reason or ""
+                if not clear_due_reason.strip():
+                    raise BdCommandError(
+                        'force_no_due=True needs clear_due_reason (mirrors bd update --reason "<why>")'
+                    )
+                args.extend(["--due", "", "--force-no-due", "--reason", clear_due_reason])
+            else:
+                args.extend(["--due", params.due])
+        elif params.force_no_due:
+            raise BdCommandError("force_no_due=True only applies when clearing a due date (due='')")
+        if params.repeat is not None:
+            args.extend(["--repeat", params.repeat])
 
         data = await self._run_command(*args)
         # bd update returns an array, extract first element

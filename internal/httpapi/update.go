@@ -35,13 +35,14 @@ const (
 var (
 	updateRequestMembers = []string{
 		"actor", "expected_assignee", "expected_status", "expected_version",
-		"force_assignee_transfer", "force_close_policy", updatePatchMember,
+		"force_assignee_transfer", "force_close_policy", "due_clear_reason", updatePatchMember,
 	}
 	issuePatchMembers = []string{
 		"title", "description", "design", "acceptance_criteria",
 		"notes", "append_notes", "priority", "issue_type", "status",
 		"assignee", "parent_id", "labels", "add_labels", "remove_labels", "metadata",
 		"estimated_minutes", "external_ref", "due_at", "defer_until",
+		"repeat_pattern", "repeat_start", "repeat_end",
 	}
 	// nullablePatchMembers is the closed set on which explicit `null` CLEARS
 	// rather than refuses. They are exactly the members the role models as
@@ -51,6 +52,10 @@ var (
 		"external_ref":      true,
 		"due_at":            true,
 		"defer_until":       true,
+		// repeat_pattern is Field[string], not Field[*string]: an EMPTY STRING
+		// stops the series, so a clear needs no null and none is accepted.
+		"repeat_start": true,
+		"repeat_end":   true,
 	}
 )
 
@@ -167,6 +172,10 @@ func (s *Server) updateRequest(w http.ResponseWriter, r *http.Request, id string
 	if !ok {
 		return issueops.UpdateRequest{}, false
 	}
+	dueClearReason, ok := s.optionalStringMember(w, r, members, "due_clear_reason")
+	if !ok {
+		return issueops.UpdateRequest{}, false
+	}
 	// The role documents both combinations as invalid, and refusing them HERE
 	// keeps the 400 a statement about the request rather than a translated
 	// storage error — the `notes`/`append_notes` rule, applied to the two
@@ -197,8 +206,25 @@ func (s *Server) updateRequest(w http.ResponseWriter, r *http.Request, id string
 		ExpectedAssignee:      expectedAssignee,
 		ForceClosePolicy:      forceClosePolicy,
 		ForceAssigneeTransfer: forceAssigneeTransfer,
+		DueClearReason:        dueClearReason,
 		Provenance:            updateProvenance,
 	}, true
+}
+
+// optionalStringMember reads a string member that may be absent. Absent is
+// the empty string; present means a JSON string, so a null or any other type
+// is refused by name rather than read as empty.
+func (s *Server) optionalStringMember(w http.ResponseWriter, r *http.Request, members map[string]json.RawMessage, name string) (string, bool) {
+	raw, ok := members[name]
+	if !ok {
+		return "", true
+	}
+	var value *string
+	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
+		s.fail(w, r, InvalidArgument(name, ReasonInvalidValue, "`"+name+"` must be a string"))
+		return "", false
+	}
+	return *value, true
 }
 
 // updateExpectedStatus reads the status precondition, preserving the difference
@@ -435,6 +461,15 @@ func (s *Server) issuePatch(w http.ResponseWriter, r *http.Request, id string, m
 	}
 	if set("due_at") {
 		patch.DueAt = issueops.Field[*time.Time]{Set: true, Value: wire.DueAt}
+	}
+	if set("repeat_pattern") {
+		patch.RepeatPattern = issueops.Field[string]{Set: true, Value: derefString(wire.RepeatPattern)}
+	}
+	if set("repeat_start") {
+		patch.RepeatStart = issueops.Field[*time.Time]{Set: true, Value: wire.RepeatStart}
+	}
+	if set("repeat_end") {
+		patch.RepeatEnd = issueops.Field[*time.Time]{Set: true, Value: wire.RepeatEnd}
 	}
 	if set("defer_until") {
 		patch.DeferUntil = issueops.Field[*time.Time]{Set: true, Value: wire.DeferUntil}

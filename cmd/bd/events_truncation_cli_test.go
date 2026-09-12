@@ -53,7 +53,7 @@ func TestEventsTailReportsTruncationToTheCLI(t *testing.T) {
 	}
 
 	for _, title := range []string{"one", "two", "three", "four", "five"} {
-		if out, err := run("create", title); err != nil {
+		if out, err := run("create", "--due", "+7d", title); err != nil {
 			t.Fatalf("create %s: %v\n%s", title, err, out)
 		}
 	}
@@ -153,7 +153,7 @@ func TestEventsTailFollowReportsTruncationOnTheStream(t *testing.T) {
 		pruneBelow = 10
 	)
 	for i := 0; i < backlog; i++ {
-		if out, err := run("create", fmt.Sprintf("backlog %d", i)); err != nil {
+		if out, err := run("create", "--due", "+7d", fmt.Sprintf("backlog %d", i)); err != nil {
 			t.Fatalf("create %d: %v\n%s", i, err, out)
 		}
 	}
@@ -256,7 +256,7 @@ func TestEventsPruneHonorsRetainRowsFloorFromConfig(t *testing.T) {
 	}
 
 	for _, title := range []string{"one", "two", "three"} {
-		if out, err := run("create", title); err != nil {
+		if out, err := run("create", "--due", "+7d", title); err != nil {
 			t.Fatalf("create %s: %v\n%s", title, err, out)
 		}
 	}

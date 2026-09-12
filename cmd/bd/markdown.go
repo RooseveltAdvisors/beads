@@ -388,6 +388,9 @@ func buildMarkdownBatchRequest(templates []*IssueTemplate, in createInput) (issu
 			Dependencies: dependencies,
 		})
 	}
+	for _, item := range items {
+		applyDefaultDue(item.Issue)
+	}
 	return issueops.CreateBatchRequest{
 		Actor: markdownBatchActor(in),
 		Items: items,

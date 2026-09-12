@@ -854,7 +854,7 @@ func TestProxiedServerUpdate3(t *testing.T) {
 			t.Errorf("due_at: got %s, expected after %s", set.DueAt, now)
 		}
 
-		cleared := bdProxiedUpdateOne(t, bd, p.dir, issue.ID, "--due", "")
+		cleared := bdProxiedUpdateOne(t, bd, p.dir, issue.ID, "--due", "", "--force-no-due", "--reason", "tracked elsewhere")
 		if cleared.DueAt != nil {
 			t.Errorf("due_at: expected nil after clear, got %s", cleared.DueAt)
 		}

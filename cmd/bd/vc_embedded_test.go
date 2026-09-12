@@ -216,7 +216,7 @@ func TestEmbeddedVCConcurrent(t *testing.T) {
 		go func(worker int) {
 			defer wg.Done()
 			// Create an issue
-			createCmd := exec.Command(bd, "create", "--silent", fmt.Sprintf("vc-conc-issue-%d", worker))
+			createCmd := exec.Command(bd, "create", "--due", "+7d", "--silent", fmt.Sprintf("vc-conc-issue-%d", worker))
 			createCmd.Dir = dir
 			createCmd.Env = bdEnv(dir)
 			if out, err := createCmd.CombinedOutput(); err != nil {

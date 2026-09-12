@@ -89,7 +89,7 @@ func setupMultiIDUpdateDB(t *testing.T) (bd, dir string) {
 // createMultiIDUpdateIssue creates an issue and returns its ID.
 func createMultiIDUpdateIssue(t *testing.T, bd, dir, title string) string {
 	t.Helper()
-	stdout, stderr, code := runBDMultiID(t, bd, dir, "create", title, "-p", "2", "--json")
+	stdout, stderr, code := runBDMultiID(t, bd, dir, "create", "--due", "+7d", title, "-p", "2", "--json")
 	if code != 0 {
 		t.Fatalf("bd create failed (exit %d):\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
 	}

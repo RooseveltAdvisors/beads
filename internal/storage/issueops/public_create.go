@@ -47,6 +47,17 @@ func ValidatePublicCreateRequest(request publicops.CreateRequest) error {
 	if err := types.CheckFieldLen("parent ID", request.ParentID); err != nil {
 		return publicCreateValidationError(fmt.Errorf("create: %w", err))
 	}
+	// The mandatory-due invariant, on the public leg. It is checked here rather
+	// than only in the CLI so HTTP, MCP and the issueops facade answer to it
+	// too; the classic/store leg checks it in CreateIssueInTxWithResult.
+	//
+	// ponytail: a workspace-configured infra type is marked wisp-plane by the
+	// unit of work AFTER this validator runs, so such a create is held to the
+	// invariant like any other work type. Give it a due date or list it as an
+	// exempt type; do not special-case it here, where the routing is not known.
+	if err := ValidateDueRequired(request.Issue); err != nil {
+		return err
+	}
 	return validatePublicCreateDependencies(request)
 }
 
@@ -54,6 +65,10 @@ func ValidatePublicCreateRequest(request publicops.CreateRequest) error {
 // create request using the supplied configuration.
 func PreparePublicCreateRequest(request publicops.CreateRequest, context PublicCreateContext) (publicops.CreateRequest, error) {
 	request = CloneCreateRequest(request)
+	if request.Issue != nil {
+		StampExplicitDueSource(request.Issue)
+		AnchorRecurrence(request.Issue)
+	}
 	if err := ValidatePublicCreateRequest(request); err != nil {
 		return publicops.CreateRequest{}, err
 	}
@@ -129,7 +144,8 @@ func publicCreateIssue(source *types.Issue) *types.Issue {
 		Assignee: source.Assignee, Owner: source.Owner, EstimatedMinutes: cloneInt(source.EstimatedMinutes),
 		CreatedAt: source.CreatedAt, CreatedBy: source.CreatedBy, UpdatedAt: source.UpdatedAt,
 		StartedAt: cloneTime(source.StartedAt), ClosedAt: cloneTime(source.ClosedAt), CloseReason: source.CloseReason, ClosedBySession: source.ClosedBySession,
-		DueAt: cloneTime(source.DueAt), DeferUntil: cloneTime(source.DeferUntil), ExternalRef: cloneString(source.ExternalRef), SourceSystem: source.SourceSystem, SourceRepo: source.SourceRepo,
+		DueAt: cloneTime(source.DueAt), DeferUntil: cloneTime(source.DeferUntil),
+		RepeatPattern: source.RepeatPattern, RepeatStart: cloneTime(source.RepeatStart), RepeatEnd: cloneTime(source.RepeatEnd), DueSource: source.DueSource, ExternalRef: cloneString(source.ExternalRef), SourceSystem: source.SourceSystem, SourceRepo: source.SourceRepo,
 		Metadata: cloneRawMessage(source.Metadata), Labels: append([]string(nil), source.Labels...), Sender: source.Sender,
 		Ephemeral: source.Ephemeral, NoHistory: source.NoHistory, WispType: source.WispType, StorageClass: source.StorageClass,
 		Pinned: source.Pinned, IsTemplate: source.IsTemplate, BondedFrom: append([]types.BondRef(nil), source.BondedFrom...),

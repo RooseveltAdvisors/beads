@@ -38,6 +38,7 @@ type commandUpdateMutation struct {
 	patch            issueops.IssuePatch
 	claim            bool
 	force            bool
+	dueClearReason   string
 	expectedAssignee *string
 	expectedStatus   *issueops.Status
 	// provenance names the history entry the write records. Empty takes the
@@ -58,6 +59,7 @@ func runCommandUpdateMutation(ctx context.Context, updater commandIssueUpdater, 
 		Claim:                 mutation.claim,
 		ForceAssigneeTransfer: mutation.force && mutation.patch.Assignee.Set,
 		ForceClosePolicy:      mutation.force,
+		DueClearReason:        mutation.dueClearReason,
 		ExpectedAssignee:      mutation.expectedAssignee,
 		ExpectedStatus:        mutation.expectedStatus,
 		Provenance:            mutation.provenance,
@@ -280,7 +282,18 @@ pointless).`,
 		if cmd.Flags().Changed("due") {
 			dueStr, _ := cmd.Flags().GetString("due")
 			if dueStr == "" {
-				// Empty string clears the due date
+				// Empty string clears the due date. Under `due.required` that
+				// is the one edit that can put an issue back into the state the
+				// invariant exists to prevent, so it has to be deliberate and
+				// it has to say why.
+				//
+				// ponytail: the requirement is flat rather than per-target —
+				// no type lookup, no exempt-row carve-out — because nothing
+				// clears a due date off an event or a wisp, and a stray --force-
+				// no-due on one costs a flag, not correctness.
+				if err := requireForceNoDue(cmd); err != nil {
+					return HandleErrorRespectJSON("%v", err)
+				}
 				updates["due_at"] = nil
 			} else {
 				t, err := timeparsing.ParseRelativeTime(dueStr, time.Now())
@@ -289,6 +302,9 @@ pointless).`,
 				}
 				updates["due_at"] = t
 			}
+		}
+		if err := applyRecurrenceUpdateFlags(cmd, updates); err != nil {
+			return err
 		}
 		if cmd.Flags().Changed("defer") {
 			deferStr, _ := cmd.Flags().GetString("defer")
@@ -546,6 +562,7 @@ pointless).`,
 				patch:            patch,
 				claim:            claimFlag,
 				force:            forceFlag,
+				dueClearReason:   dueClearReasonFor(cmd, updates),
 				expectedAssignee: ifAssignee,
 				expectedStatus:   expectedStatus,
 			})
@@ -712,6 +729,15 @@ func buildUpdatePatch(updates map[string]interface{}) (issueops.IssuePatch, erro
 			patch.DueAt, ok = optionalTimeField(value)
 		case "defer_until":
 			patch.DeferUntil, ok = optionalTimeField(value)
+		case "repeat_pattern":
+			var pattern issueops.Field[string]
+			if pattern, ok = stringField(value); ok {
+				patch.RepeatPattern = pattern
+			}
+		case "repeat_start":
+			patch.RepeatStart, ok = optionalTimeField(value)
+		case "repeat_end":
+			patch.RepeatEnd, ok = optionalTimeField(value)
 		case "add_labels":
 			patch.Labels.Add, ok = value.([]string)
 		case "remove_labels":
@@ -1011,6 +1037,9 @@ func init() {
 	//   --defer=+1h         Hidden from bd ready for 1 hour
 	//   --defer=""          Clear defer (show in bd ready immediately)
 	updateCmd.Flags().String("due", "", "Due date/time (empty to clear). Formats: +6h, +1d, +2w, tomorrow, next monday, 2025-01-15")
+	registerRecurrenceUpdateFlags(updateCmd)
+	updateCmd.Flags().Bool("force-no-due", false, "Permit --due=\"\" to clear the due date when due.required is on. Requires --reason")
+	updateCmd.Flags().String("reason", "", "Why the due date is being cleared (required with --force-no-due)")
 	updateCmd.Flags().String("defer", "", "Defer until date (empty to clear). Issue hidden from bd ready until then, then auto-wakes to open")
 	// Gate fields (bd-z6kw)
 	updateCmd.Flags().String("await-id", "", "Set gate await_id (e.g., GitHub run ID for gh:run gates)")
@@ -1026,4 +1055,33 @@ func init() {
 	updateCmd.Flags().StringArray("unset-metadata", nil, "Remove metadata key (repeatable, e.g., --unset-metadata team)")
 	updateCmd.ValidArgsFunction = issueIDCompletion
 	rootCmd.AddCommand(updateCmd)
+}
+
+// requireForceNoDue gates clearing a due date under the mandatory-due
+// invariant. It is a no-op in a workspace that has not turned the invariant on,
+// so upstream `bd update --due ""` is unchanged.
+func requireForceNoDue(cmd *cobra.Command) error {
+	if !storageissueops.DueRequiredEnabled() {
+		return nil
+	}
+	force, _ := cmd.Flags().GetBool("force-no-due")
+	reason, _ := cmd.Flags().GetString("reason")
+	if !force {
+		return fmt.Errorf("clearing a due date needs --force-no-due --reason \"<why>\" while due.required is on")
+	}
+	if strings.TrimSpace(reason) == "" {
+		return fmt.Errorf("--force-no-due needs --reason \"<why>\"")
+	}
+	return nil
+}
+
+// dueClearReasonFor is the --reason that accompanies a due-date clear, and
+// nothing otherwise: the storage funnel records it on the update event and
+// refuses the clear without it while due.required is on.
+func dueClearReasonFor(cmd *cobra.Command, fields map[string]interface{}) string {
+	if value, clearing := fields["due_at"]; !clearing || value != nil {
+		return ""
+	}
+	reason, _ := cmd.Flags().GetString("reason")
+	return strings.TrimSpace(reason)
 }

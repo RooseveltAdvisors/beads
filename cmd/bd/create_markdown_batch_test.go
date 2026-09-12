@@ -111,7 +111,7 @@ Ephemeral body.
 	// The edges the file declares are written with the issues, in the same
 	// transaction — including an edge onto an issue created EARLIER in the file.
 	t.Run("writes_the_edges_the_file_declares", func(t *testing.T) {
-		blocker := strings.TrimSpace(runCreateDepsBD(t, bd, dir, "create", "file edge blocker", "--silent"))
+		blocker := strings.TrimSpace(runCreateDepsBD(t, bd, dir, "create", "file edge blocker", "--silent", "--due", "+7d"))
 		if blocker == "" {
 			t.Fatal("blocker create returned empty ID")
 		}

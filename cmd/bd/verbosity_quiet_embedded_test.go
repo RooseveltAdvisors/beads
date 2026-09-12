@@ -35,7 +35,7 @@ func TestEmbeddedQuietFlagSuppressesSuccessOutput(t *testing.T) {
 	}
 
 	t.Run("create", func(t *testing.T) {
-		cmd := exec.Command(bd, "--quiet", "create", "quiet-create-test-title", "-p", "2")
+		cmd := exec.Command(bd, "--quiet", "create", "--due", "+7d", "quiet-create-test-title", "-p", "2")
 		cmd.Dir = dir
 		cmd.Env = env
 		stdout, stderr, err := runCommandBuffers(t, cmd)

@@ -66,9 +66,9 @@ func WakeExpiredDefersAdvisory(ctx context.Context, p UnitOfWorkProvider) {
 	}
 	if dberrors.IsAccessDenied(err) {
 		advisoryAccessDeniedOnce.Do(func() {
-			fmt.Fprintf(os.Stderr, "warning: defer-wake sweep skipped (SQL user lacks write privileges; expired defers will not auto-wake from this client): %v\n", err)
+			fmt.Fprintf(os.Stderr, "warning: scheduled sweep skipped (SQL user lacks write privileges; expired defers will not auto-wake and due beads will not fire from this client): %v\n", err)
 		})
 		return
 	}
-	fmt.Fprintf(os.Stderr, "warning: defer-wake sweep skipped: %v\n", err)
+	fmt.Fprintf(os.Stderr, "warning: scheduled sweep skipped: %v\n", err)
 }

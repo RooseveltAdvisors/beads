@@ -64,6 +64,9 @@ func (o *importer) ImportBatch(ctx context.Context, request publicops.ImportBatc
 				SkipPrefixValidation:           request.SkipPrefixValidation,
 				RejectStaleUpserts:             !request.AllowStale,
 				SkipDependencyValidationErrors: true,
+				// Exempt from the mandatory-due invariant for the reason the
+				// classic import path states (cmd/bd/import_shared.go).
+				SkipDueRequired: true,
 				OnSkippedDependency: func(issueID, dependsOnID, reason string) {
 					key := issueID + "\x00" + dependsOnID + "\x00" + reason
 					if _, ok := skippedSeen[key]; ok {

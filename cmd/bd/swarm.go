@@ -1004,6 +1004,7 @@ Examples:
 				CreatedBy:   actor,
 			}
 
+			applyDefaultDue(wrapperEpic)
 			if err := store.CreateIssue(ctx, wrapperEpic, actor); err != nil {
 				return HandleErrorRespectJSON("failed to create wrapper epic: %v", err)
 			}
@@ -1084,6 +1085,7 @@ Examples:
 			CreatedBy:   actor,
 		}
 
+		applyDefaultDue(swarmMol)
 		if err := store.CreateIssue(ctx, swarmMol, actor); err != nil {
 			return HandleErrorRespectJSON("failed to create swarm molecule: %v", err)
 		}

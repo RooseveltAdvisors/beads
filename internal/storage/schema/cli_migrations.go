@@ -126,6 +126,12 @@ func cliCompatibleMigrationSQL(name, sqlText string) string {
 		// itself is always present here: 0064's prepared RENAME executes on
 		// 2.2.0 (same measurement), so a fresh bundle always needs the column.
 		return cliMigration0066AddEventsJournalActor
+	case "0067_add_recurrence_columns.up.sql":
+		// Direct DDL for the same reason as 0060: the source migration's
+		// PREPARE guards make it idempotent on upgraded databases, and the
+		// 2.2.x CLI no-ops a prepared ALTER (dolthub/dolt#11345). 0067 is
+		// schema-only, so this substitute is the whole migration.
+		return cliMigration0067AddRecurrenceColumns
 	default:
 		return sqlText
 	}
@@ -157,6 +163,10 @@ func cliSubstituteAssumesWispTables(name string) bool {
 	case "0065_widen_wisp_comments_text.up.sql":
 		// cliMigration0065WidenWispCommentsText is a bare MODIFY on
 		// wisp_comments.
+		return true
+	case "0067_add_recurrence_columns.up.sql":
+		// cliMigration0067AddRecurrenceColumns drops the @has_wisps guard and
+		// ALTERs wisps unconditionally.
 		return true
 	default:
 		return false
@@ -201,6 +211,15 @@ ALTER TABLE wisps DROP COLUMN heartbeat_at;`
 
 const cliMigration0060AddStorageClass = `ALTER TABLE issues ADD COLUMN storage_class VARCHAR(16);
 ALTER TABLE wisps ADD COLUMN storage_class VARCHAR(16);`
+
+const cliMigration0067AddRecurrenceColumns = `ALTER TABLE issues ADD COLUMN repeat_pattern VARCHAR(255) NOT NULL DEFAULT '';
+ALTER TABLE issues ADD COLUMN repeat_start DATETIME;
+ALTER TABLE issues ADD COLUMN repeat_end DATETIME;
+ALTER TABLE issues ADD COLUMN due_source VARCHAR(16) NOT NULL DEFAULT '';
+ALTER TABLE wisps ADD COLUMN repeat_pattern VARCHAR(255) NOT NULL DEFAULT '';
+ALTER TABLE wisps ADD COLUMN repeat_start DATETIME;
+ALTER TABLE wisps ADD COLUMN repeat_end DATETIME;
+ALTER TABLE wisps ADD COLUMN due_source VARCHAR(16) NOT NULL DEFAULT '';`
 
 const cliMigration0065WidenWispCommentsText = `ALTER TABLE wisp_comments MODIFY COLUMN text LONGTEXT NOT NULL;`
 const cliMigration0066AddEventsJournalActor = `ALTER TABLE bd_events_journal ADD COLUMN actor VARCHAR(255) NOT NULL DEFAULT '';`

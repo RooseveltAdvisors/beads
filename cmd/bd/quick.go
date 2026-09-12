@@ -82,6 +82,10 @@ Example:
 			Labels:    mergeCreateLabels(labels, inheritedLabels),
 		}
 
+		if err := resolveQuickDue(cmd, issue); err != nil {
+			return err
+		}
+
 		if parentID != "" {
 			childID, err := store.GetNextChildID(ctx, parentID)
 			if err != nil {
@@ -100,6 +104,7 @@ Example:
 
 		commandDidWrite.Store(true)
 
+		echoQuickDue(issue)
 		fmt.Println(issue.ID)
 		return nil
 	},
@@ -110,5 +115,6 @@ func init() {
 	quickCmd.Flags().StringP("type", "t", "task", "Issue type")
 	quickCmd.Flags().StringSliceP("labels", "l", []string{}, "Labels")
 	quickCmd.Flags().String("parent", "", "Parent issue ID for hierarchical child (e.g., 'bd-a3f8e9')")
+	quickCmd.Flags().String("due", "", "Due date/time. Formats: +6h, +1d, +2w, tomorrow, next monday, 2025-01-15. Defaults to the priority ladder when due.required is on")
 	rootCmd.AddCommand(quickCmd)
 }

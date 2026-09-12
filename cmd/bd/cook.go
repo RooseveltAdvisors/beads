@@ -909,6 +909,7 @@ func cookFormula(ctx context.Context, s storage.DoltStorage, f *formula.Formula,
 		}
 
 		// Create all issues
+		applyDefaultDues(issues)
 		if err := tx.CreateIssues(ctx, issues, actor); err != nil {
 			return fmt.Errorf("failed to create issues: %w", err)
 		}

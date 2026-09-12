@@ -768,6 +768,9 @@ func (s *EmbeddedDoltStore) ImportJSONLData(
 		// Create all issues in the same transaction
 		if err := issueops.CreateIssuesInTx(ctx, tx, issues, actor, storage.BatchCreateOptions{
 			SkipPrefixValidation: true,
+			// Auto-import is an import: exempt from the mandatory-due invariant
+			// for the reason cmd/bd/import_shared.go states.
+			SkipDueRequired: true,
 			// Defense-in-depth (GH#3955): the embedded fast-path is the primary
 			// auto-import route for 1.0+ users and is gated by the in-transaction
 			// emptiness check above. Make it insert-if-new too so a regression in
