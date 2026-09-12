@@ -141,37 +141,6 @@ func TestDueRequiredExemptions(t *testing.T) {
 	}
 }
 
-func TestDefaultDueRequiredAssignee(t *testing.T) {
-	withDueRequired(t, true)
-
-	unowned := dueLessTask()
-	DefaultDueRequiredAssignee(unowned, "seat-a")
-	if unowned.Assignee != "seat-a" {
-		t.Fatalf("an unowned required-due issue must fall back to the actor, got %q", unowned.Assignee)
-	}
-
-	claimed := dueLessTask()
-	claimed.Assignee = "seat-b"
-	DefaultDueRequiredAssignee(claimed, "seat-a")
-	if claimed.Assignee != "seat-b" {
-		t.Fatalf("an explicit assignee must win, got %q", claimed.Assignee)
-	}
-
-	owned := dueLessTask()
-	owned.Owner = "repo-owner"
-	DefaultDueRequiredAssignee(owned, "seat-a")
-	if owned.Assignee != "" {
-		t.Fatalf("an owned issue already has a destination, got assignee %q", owned.Assignee)
-	}
-
-	wisp := dueLessTask()
-	wisp.Ephemeral = true
-	DefaultDueRequiredAssignee(wisp, "seat-a")
-	if wisp.Assignee != "" {
-		t.Fatalf("an exempt record must not be assigned, got %q", wisp.Assignee)
-	}
-}
-
 // TestValidatePublicCreateRequestEnforcesDueRequired is the storage-boundary
 // case: a create arriving through the public request type — HTTP, MCP, the
 // issueops facade — never touches a CLI flag, and is refused all the same.
@@ -190,17 +159,72 @@ func TestValidatePublicCreateRequestEnforcesDueRequired(t *testing.T) {
 	}
 }
 
-func TestPreparePublicCreateRequestAssignsSeat(t *testing.T) {
+// Clearing a due date is the one edit that can undo the invariant, so both
+// write funnels refuse it without a reason while the rule is on; the same
+// clear with a reason, on an exempt row, or with the rule off, goes through.
+func TestValidateDueClear(t *testing.T) {
 	withDueRequired(t, true)
-	issue := dueLessTask()
-	due := time.Now().Add(72 * time.Hour)
-	issue.DueAt = &due
-	prepared, err := PreparePublicCreateRequest(publicops.CreateRequest{Actor: "seat-a", Issue: issue}, PublicCreateContext{IssuePrefix: "bd"})
-	if err != nil {
-		t.Fatalf("prepare: %v", err)
+	due := time.Now().Add(time.Hour)
+	dated := &types.Issue{ID: "bd-c1", Title: "dated", IssueType: types.TypeTask, Status: types.StatusOpen, DueAt: &due}
+	clear := map[string]interface{}{"due_at": nil}
+
+	err := ValidateDueClear(dated, clear, "")
+	if err == nil || !errors.Is(err, storage.ErrValidation) || !strings.Contains(err.Error(), "reason") {
+		t.Fatalf("a clear without a reason must be refused as ErrValidation naming the reason, got %v", err)
 	}
-	if prepared.Issue.Assignee != "seat-a" {
-		t.Fatalf("a required-due create must carry a destination, got %q", prepared.Issue.Assignee)
+	if err := ValidateDueClear(dated, clear, "tracked upstream"); err != nil {
+		t.Fatalf("a clear with a reason must be accepted, got %v", err)
+	}
+	if err := ValidateDueClear(dated, map[string]interface{}{"due_at": due.Add(time.Hour)}, ""); err != nil {
+		t.Fatalf("moving a due date is not a clear, got %v", err)
+	}
+	if err := ValidateDueClear(dated, map[string]interface{}{"title": "x"}, ""); err != nil {
+		t.Fatalf("an update that does not touch due_at is not a clear, got %v", err)
+	}
+	wisp := &types.Issue{ID: "bd-c2", Title: "scratch", IssueType: types.TypeTask, Status: types.StatusOpen, Ephemeral: true, DueAt: &due}
+	if err := ValidateDueClear(wisp, clear, ""); err != nil {
+		t.Fatalf("an exempt row is not held to the gate, got %v", err)
+	}
+
+	updates := map[string]interface{}{"due_at": nil, OpDueClearReason: "  tracked upstream  "}
+	if got := PopDueClearReason(updates); got != "tracked upstream" {
+		t.Fatalf("PopDueClearReason = %q, want the trimmed reason", got)
+	}
+	if _, still := updates[OpDueClearReason]; still {
+		t.Fatal("the reason op must be popped before the field allowlist sees it")
+	}
+
+	withDueRequired(t, false)
+	if err := ValidateDueClear(dated, clear, ""); err != nil {
+		t.Fatalf("with the invariant off, clearing a due date is unchanged, got %v", err)
+	}
+}
+
+// A recurring create records its first due date as the series' start, so a
+// monthly rule keeps its original day-of-month; an explicit start, a
+// non-recurring bead, and a due-less bead are left alone.
+func TestAnchorRecurrence(t *testing.T) {
+	due := time.Date(2026, 1, 30, 9, 0, 0, 0, time.UTC)
+	recurring := &types.Issue{RepeatPattern: "+1m", DueAt: &due}
+	AnchorRecurrence(recurring)
+	if recurring.RepeatStart == nil || !recurring.RepeatStart.Equal(due) {
+		t.Fatalf("repeat_start = %v, want the first due date %v", recurring.RepeatStart, due)
+	}
+	start := time.Date(2025, 12, 31, 0, 0, 0, 0, time.UTC)
+	explicit := &types.Issue{RepeatPattern: "+1m", DueAt: &due, RepeatStart: &start}
+	AnchorRecurrence(explicit)
+	if !explicit.RepeatStart.Equal(start) {
+		t.Errorf("an explicit start must win, got %v", explicit.RepeatStart)
+	}
+	plain := &types.Issue{DueAt: &due}
+	AnchorRecurrence(plain)
+	if plain.RepeatStart != nil {
+		t.Errorf("a non-recurring bead must not get a start, got %v", plain.RepeatStart)
+	}
+	undated := &types.Issue{RepeatPattern: "+1m"}
+	AnchorRecurrence(undated)
+	if undated.RepeatStart != nil {
+		t.Errorf("a due-less bead has nothing to anchor on, got %v", undated.RepeatStart)
 	}
 }
 

@@ -99,22 +99,33 @@ func (r Repeat) FirstAtOrAfter(t time.Time) (time.Time, error) {
 }
 
 // Next returns the first occurrence strictly after t. Interval rules add the
-// interval to t; cron rules search forward to the next matching minute.
-//
-// A month or year interval keeps its anchor day: the step clamps to the last
-// day of a shorter month, and an occurrence that sits on its month's last day
-// stays on the last day of the next one, so a series anchored on Jan 31 runs
-// Feb 28, Mar 31, Apr 30 rather than sliding to the 28th for good.
+// interval to t (a month or year step clamps to a shorter target month); cron
+// rules search forward to the next matching minute. It is NextFrom with t as
+// its own anchor.
 func (r Repeat) Next(t time.Time) (time.Time, error) {
+	return r.NextFrom(t, t)
+}
+
+// NextFrom returns the first occurrence strictly after t for a series
+// anchored on anchor.
+//
+// Only a month or year interval reads the anchor: the step keeps the anchor's
+// day-of-month, clamped to the target month's length, so a series anchored on
+// Jan 30 runs Feb 28, Mar 30, Apr 30 rather than sliding to the 28th once
+// February has clamped it, and one anchored on the 31st lands on the last day
+// of every month (Jan 31 -> Feb 28 -> Mar 31 -> Apr 30). Every other rule
+// ignores the anchor.
+func (r Repeat) NextFrom(t, anchor time.Time) (time.Time, error) {
 	switch {
 	case r.cron != nil:
 		return r.cron.next(t)
 	case r.unit == "m" || r.unit == "y":
 		next := applyDuration(t, r.amount, r.unit)
-		if isMonthEnd(t) && !isMonthEnd(next) {
-			next = next.AddDate(0, 0, daysInMonth(next)-next.Day())
+		day := anchor.Day()
+		if last := daysInMonth(next); day > last {
+			day = last
 		}
-		return next, nil
+		return next.AddDate(0, 0, day-next.Day()), nil
 	case r.unit != "":
 		return applyDuration(t, r.amount, r.unit), nil
 	default:

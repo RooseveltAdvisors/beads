@@ -240,6 +240,7 @@ func (r *uowApplyRun) applyUpdate(ctx context.Context, index int, item *publicop
 		ExpectedAssignee:      item.ExpectedAssignee,
 		ForceClosePolicy:      item.ForceClosePolicy,
 		ForceAssigneeTransfer: item.ForceAssigneeTransfer,
+		DueClearReason:        item.DueClearReason,
 	}
 	if err := validateUpdateRequest(request); err != nil {
 		return itemErr(err)

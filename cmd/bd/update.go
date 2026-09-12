@@ -38,6 +38,7 @@ type commandUpdateMutation struct {
 	patch            issueops.IssuePatch
 	claim            bool
 	force            bool
+	dueClearReason   string
 	expectedAssignee *string
 	expectedStatus   *issueops.Status
 	// provenance names the history entry the write records. Empty takes the
@@ -58,6 +59,7 @@ func runCommandUpdateMutation(ctx context.Context, updater commandIssueUpdater, 
 		Claim:                 mutation.claim,
 		ForceAssigneeTransfer: mutation.force && mutation.patch.Assignee.Set,
 		ForceClosePolicy:      mutation.force,
+		DueClearReason:        mutation.dueClearReason,
 		ExpectedAssignee:      mutation.expectedAssignee,
 		ExpectedStatus:        mutation.expectedStatus,
 		Provenance:            mutation.provenance,
@@ -560,6 +562,7 @@ pointless).`,
 				patch:            patch,
 				claim:            claimFlag,
 				force:            forceFlag,
+				dueClearReason:   dueClearReasonFor(cmd, updates),
 				expectedAssignee: ifAssignee,
 				expectedStatus:   expectedStatus,
 			})
@@ -1070,4 +1073,15 @@ func requireForceNoDue(cmd *cobra.Command) error {
 		return fmt.Errorf("--force-no-due needs --reason \"<why>\"")
 	}
 	return nil
+}
+
+// dueClearReasonFor is the --reason that accompanies a due-date clear, and
+// nothing otherwise: the storage funnel records it on the update event and
+// refuses the clear without it while due.required is on.
+func dueClearReasonFor(cmd *cobra.Command, fields map[string]interface{}) string {
+	if value, clearing := fields["due_at"]; !clearing || value != nil {
+		return ""
+	}
+	reason, _ := cmd.Flags().GetString("reason")
+	return strings.TrimSpace(reason)
 }

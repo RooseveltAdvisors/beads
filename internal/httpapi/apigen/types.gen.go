@@ -710,6 +710,9 @@ type ApplyPatchBody struct {
 //
 // The two carry the same preconditions and the same force flags; what is this operation's alone is that its guards evaluate AS-MODIFIED — against the row as earlier items of this same request have already changed it — and that a miss takes the whole plan down rather than one write.
 type ApplyUpdateItem struct {
+	// DueClearReason Why a `patch.due_at` of `null` is clearing the due date. While the workspace requires due dates (`due.required`, on by default), clearing one is the single edit that can undo the invariant, so the workspace refuses the clear as a `400` unless a non-blank reason accompanies it; the reason is then recorded on the update event, where `bd history --events` shows it. It has no effect on any other patch.
+	DueClearReason *string `json:"due_clear_reason,omitempty"`
+
 	// ExpectedAssignee Requires the issue's assignee to equal this value, evaluated as-modified. A match AUTHORIZES the requested `patch.assignee` transfer: this compare-and-set replaces the ordinary anti-steal fence, so it must not be combined with `force_assignee_transfer`. A miss refuses the whole request with `409 precondition_failed`.
 	ExpectedAssignee *string `json:"expected_assignee,omitempty"`
 
@@ -1934,6 +1937,9 @@ type TreeNode = types.TreeNode
 type UpdateIssueRequest struct {
 	// Actor Who is editing the issue. `ClaimRequest.actor`'s rules exactly: the server trims it, then refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters — the byte limit is the binding one), and any control character including newline. The value reaches the history entry's attribution and the storage commit message, so an unvalidated newline would forge audit-trail lines.
 	Actor string `json:"actor"`
+
+	// DueClearReason Why a `patch.due_at` of `null` is clearing the due date. While the workspace requires due dates (`due.required`, on by default), clearing one is the single edit that can undo the invariant, so the workspace refuses the clear as a `400` unless a non-blank reason accompanies it; the reason is then recorded on the update event, where `bd history --events` shows it. It has no effect on any other patch.
+	DueClearReason *string `json:"due_clear_reason,omitempty"`
 
 	// ExpectedAssignee Requires the issue's assignee to equal this value before the patch. A match AUTHORIZES the requested `patch.assignee` transfer: this compare-and-set replaces the ordinary anti-steal fence, so it must not be combined with `force_assignee_transfer`. A miss refuses the whole request with `409 precondition_failed`.
 	ExpectedAssignee *string `json:"expected_assignee,omitempty"`

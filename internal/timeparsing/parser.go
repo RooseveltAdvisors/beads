@@ -103,11 +103,6 @@ func daysInMonth(t time.Time) int {
 	return time.Date(t.Year(), t.Month()+1, 0, 0, 0, 0, 0, t.Location()).Day()
 }
 
-// isMonthEnd reports whether t falls on the last day of its month.
-func isMonthEnd(t time.Time) bool {
-	return t.Day() == daysInMonth(t)
-}
-
 // isCompactDuration returns true if the string matches compact duration syntax.
 func isCompactDuration(s string) bool {
 	return compactDurationRe.MatchString(s)

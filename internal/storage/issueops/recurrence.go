@@ -182,17 +182,17 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 	var fired []string
 	now := time.Now().UTC()
 	for _, c := range candidates {
-		next := nextDueAfterMiss(c, now)
+		next, fromPattern := nextDueAfterMiss(c, now)
 		// The predicate is repeated so a bead closed, deferred, or rescheduled
 		// between the SELECT and here matches nothing and is left alone rather
 		// than clobbered.
 		//
 		// due_source records where the date CAME from, so only a date the
-		// pattern computed is stamped repeat; a grace push on a non-recurring
-		// bead leaves its backfill/explicit provenance in place.
+		// pattern computed is stamped repeat; a grace push — on a non-recurring
+		// bead, or on a series that has ended — leaves the provenance in place.
 		sourceClause := ""
 		args := []any{next}
-		if c.repeatPattern != "" {
+		if fromPattern {
 			sourceClause = ", due_source = ?"
 			args = append(args, string(types.DueSourceRepeat))
 		}
@@ -244,37 +244,42 @@ func statusPlaceholders(statuses []types.Status) (string, []any) {
 // bead follows its own pattern; everything else — including a recurring bead
 // whose series has ended or whose pattern no longer parses — gets one
 // DueMissGrace, so a deadline keeps nagging instead of going silent.
-func nextDueAfterMiss(c dueCandidate, now time.Time) time.Time {
+//
+// The second result reports whether the PATTERN produced the date, so a grace
+// fallback is never labelled as pattern-computed.
+func nextDueAfterMiss(c dueCandidate, now time.Time) (time.Time, bool) {
 	if c.repeatPattern != "" {
 		probe := &types.Issue{
 			RepeatPattern: c.repeatPattern,
 			RepeatStart:   c.repeatStart,
 			RepeatEnd:     c.repeatEnd,
 		}
-		if next, ok := nextOccurrenceAfterMiss(probe, c.dueAt, now); ok {
-			return next
+		if next, ok := nextOccurrencePast(probe, c.dueAt, now); ok {
+			return next, true
 		}
 	}
-	return now.Add(DueMissGrace)
+	return now.Add(DueMissGrace), false
 }
 
-// nextOccurrenceAfterMiss finds the first occurrence of a missed bead's series
-// that lies after now, or ok=false when the series cannot supply one.
+// nextOccurrencePast finds the first occurrence of a series that lies strictly
+// after now, walking forward from the instance due at dueAt, or ok=false when
+// the series cannot supply one: it has ended (repeat_end), its pattern is
+// unusable, or the walk would exceed RepeatHorizon.
 //
-// An INTERVAL rule steps from the missed date by its own interval, as many
-// times as it takes to clear now, so a weekly bead due Monday 09:00 that is
-// swept on Wednesday lands on the following Monday 09:00 — the schedule keeps
-// its anchor, exactly as the close path does. A CRON rule matches the next
-// occurrence from now, which is the same result computed directly. The walk is
-// bounded by RepeatHorizon past the missed date.
-func nextOccurrenceAfterMiss(probe *types.Issue, dueAt, now time.Time) (time.Time, bool) {
+// An INTERVAL rule steps from dueAt by its own interval, as many times as it
+// takes to clear now, so the schedule keeps its phase: a weekly bead due
+// Monday 09:00 that is swept or closed on a Wednesday lands on the following
+// Monday 09:00, however late it was. A CRON rule already expresses its phase,
+// so it matches from the later of dueAt and now — the same answer the walk
+// would reach, without visiting every occurrence in between.
+func nextOccurrencePast(probe *types.Issue, dueAt, now time.Time) (time.Time, bool) {
 	repeat, err := probe.Repeat()
 	if err != nil {
 		return time.Time{}, false
 	}
-	from := now
-	if repeat.IsInterval() {
-		from = dueAt
+	from := dueAt
+	if !repeat.IsInterval() && now.After(from) {
+		from = now
 	}
 	horizon := from.Add(timeparsing.RepeatHorizon)
 	for {
@@ -330,17 +335,20 @@ func SpawnRecurrenceInTx(ctx context.Context, tx DBTX, id, actor string) (SpawnR
 		return result, nil
 	}
 
-	// The series advances from the instance's OWN due date when it has one, so
-	// a bead closed early or late still lands its successor on the schedule
-	// rather than relative to when the work happened to finish.
-	from := time.Now().UTC()
+	// The series advances from the instance's OWN due date when it has one —
+	// whole steps from the original anchor, so a bead closed early or late
+	// keeps its schedule's phase — but walks forward until the successor is
+	// strictly in the future, so a late close never files a bead that is
+	// already overdue. It is the sweep's walk, for the same reason.
+	if _, err := issue.Repeat(); err != nil {
+		return result, fmt.Errorf("spawn recurrence for %s: %w", id, err)
+	}
+	now := time.Now().UTC()
+	from := now
 	if issue.DueAt != nil {
 		from = issue.DueAt.UTC()
 	}
-	next, ok, err := issue.NextOccurrence(from)
-	if err != nil {
-		return result, fmt.Errorf("spawn recurrence for %s: %w", id, err)
-	}
+	next, ok := nextOccurrencePast(issue, from, now)
 	if !ok {
 		return result, nil // series exhausted: repeat_end reached
 	}
@@ -486,6 +494,35 @@ func ClearRecurrenceBoundsOnStop(updates map[string]interface{}) {
 		updates["repeat_start"] = nil
 		updates["repeat_end"] = nil
 	}
+}
+
+// AnchorRecurrenceUpdate is AnchorRecurrence for the update funnel: an update
+// that gives a bead a repeat pattern with no repeat_start, on a bead that has
+// (or is being given) a due date, records that due date as the series' start
+// so later steps have their anchor. It runs before ValidateRecurrenceUpdate,
+// on the landed triple.
+func AnchorRecurrenceUpdate(oldIssue *types.Issue, updates map[string]interface{}) {
+	pattern, _ := updates["repeat_pattern"].(string)
+	if pattern == "" {
+		return
+	}
+	if raw, ok := updates["repeat_start"]; ok {
+		if raw != nil {
+			return
+		}
+	} else if oldIssue.RepeatStart != nil {
+		return
+	}
+	due := oldIssue.DueAt
+	if raw, ok := updates["due_at"]; ok {
+		if due, _ = updateTimeValue("due_at", raw); due == nil {
+			return
+		}
+	}
+	if due == nil {
+		return
+	}
+	updates["repeat_start"] = due.UTC()
 }
 
 // ValidateRecurrenceUpdate checks the (repeat_pattern, repeat_start,

@@ -18,6 +18,7 @@ import (
 )
 
 type updateInput struct {
+	dueClearReason   string
 	fields           map[string]any
 	addLabels        []string
 	removeLabels     []string
@@ -172,7 +173,11 @@ func gatherUpdateInput(ctx context.Context, cmd *cobra.Command) (*updateInput, e
 	if cmd.Flags().Changed("due") {
 		dueStr, _ := cmd.Flags().GetString("due")
 		if dueStr == "" {
+			if err := requireForceNoDue(cmd); err != nil {
+				return nil, HandleErrorRespectJSON("%v", err)
+			}
 			in.fields["due_at"] = nil
+			in.dueClearReason = dueClearReasonFor(cmd, in.fields)
 		} else {
 			t, err := timeparsing.ParseRelativeTime(dueStr, time.Now())
 			if err != nil {

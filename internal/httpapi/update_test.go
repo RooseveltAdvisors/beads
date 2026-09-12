@@ -323,6 +323,8 @@ func TestUpdateRejectsTheShapesTheDocumentRefuses(t *testing.T) {
 		{"expected_version is not a number", `{"actor":"alice","patch":{"title":"t"},"expected_version":"3"}`, "expected_version"},
 		{"null expected_status", `{"actor":"alice","patch":{"title":"t"},"expected_status":null}`, "expected_status"},
 		{"null force_close_policy", `{"actor":"alice","patch":{"title":"t"},"force_close_policy":null}`, "force_close_policy"},
+		{"null due_clear_reason", `{"actor":"alice","patch":{"due_at":null},"due_clear_reason":null}`, "due_clear_reason"},
+		{"due_clear_reason is not a string", `{"actor":"alice","patch":{"due_at":null},"due_clear_reason":7}`, "due_clear_reason"},
 		{"blank title", `{"actor":"alice","patch":{"title":"   "}}`, "patch.title"},
 		{"oversize title", `{"actor":"alice","patch":{"title":"` + strings.Repeat("x", 300) + `"}}`, "patch.title"},
 		{"title is not a string", `{"actor":"alice","patch":{"title":7}}`, "patch"},
@@ -597,6 +599,41 @@ func revisionedIssue(id string, revision int64) *types.Issue {
 	issue := updatedIssue(id)
 	issue.RowVersion = revision
 	return issue
+}
+
+// TestUpdateForwardsTheDueClearReason: a patch that clears due_at carries its
+// reason to the role, where the storage gate reads it; the same clear without
+// one reaches the role with no reason, and the role's ErrValidation refusal
+// comes back as this surface's ordinary 400 rather than a translated error.
+func TestUpdateForwardsTheDueClearReason(t *testing.T) {
+	lifecycle := &roleLifecycle{updateResult: issueops.UpdateResult{Issue: revisionedIssue("bd-1", 42), Changed: true}}
+	ts := newUpdateServer(t, lifecycle)
+
+	resp := ts.updateIssue(t, updatePath, `{"actor":"alice","patch":{"due_at":null},"due_clear_reason":"tracked upstream"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, readAll(t, resp))
+	}
+	got := lifecycle.updateRequests()
+	if len(got) != 1 {
+		t.Fatalf("the role was called %d times, want 1", len(got))
+	}
+	if got[0].DueClearReason != "tracked upstream" {
+		t.Errorf("due_clear_reason = %q, want it forwarded verbatim", got[0].DueClearReason)
+	}
+	if !got[0].Patch.DueAt.Set || got[0].Patch.DueAt.Value != nil {
+		t.Errorf("patch.due_at = %+v, want an explicit clear", got[0].Patch.DueAt)
+	}
+
+	refusing := &roleLifecycle{updateErr: fmt.Errorf("%w: clearing a due date needs a reason", storage.ErrValidation)}
+	ts = newUpdateServer(t, refusing)
+	resp = ts.updateIssue(t, updatePath, `{"actor":"alice","patch":{"due_at":null}}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a refused clear: %s", resp.StatusCode, readAll(t, resp))
+	}
+	got = refusing.updateRequests()
+	if len(got) != 1 || got[0].DueClearReason != "" {
+		t.Fatalf("a clear with no reason must reach the role with none, got %+v", got)
+	}
 }
 
 // TestUpdateForwardsTheGuardedMembers walks the members added beside the

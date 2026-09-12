@@ -72,10 +72,15 @@ func (i *Issue) NextOccurrence(after time.Time) (next time.Time, ok bool, err er
 	// A series that has not started yet takes its first occurrence from the
 	// start bound, not from whenever the bead happened to be closed — and for
 	// an interval rule that first occurrence is the bound ITSELF, not one
-	// interval past it.
-	if i.RepeatStart != nil && after.Before(*i.RepeatStart) {
+	// interval past it. Once started, the start bound is also the series'
+	// anchor: a monthly rule keeps its day-of-month from the day the series
+	// was first scheduled, not from whatever a short month clamped it to.
+	switch {
+	case i.RepeatStart != nil && after.Before(*i.RepeatStart):
 		next, err = repeat.FirstAtOrAfter(*i.RepeatStart)
-	} else {
+	case i.RepeatStart != nil:
+		next, err = repeat.NextFrom(after, *i.RepeatStart)
+	default:
 		next, err = repeat.Next(after)
 	}
 	if err != nil {

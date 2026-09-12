@@ -338,6 +338,39 @@ func TestEmbeddedRecurrenceSpawnOnClose(t *testing.T) {
 		}
 	})
 
+	// A bead closed weeks late files exactly one successor, due in the FUTURE,
+	// on the schedule's own weekday: the spawn walks whole steps from the
+	// original anchor rather than filing an already-overdue instance.
+	t.Run("a_late_close_files_one_successor_in_the_future", func(t *testing.T) {
+		const title = "Closed five weeks late"
+		fiveWeeksAgo := time.Now().UTC().AddDate(0, 0, -35)
+		first := bdCreate(t, bd, dir, title, "--type", "chore",
+			"--due", fiveWeeksAgo.Format("2006-01-02"), "--repeat", "+1w")
+		if first.DueAt == nil {
+			t.Fatal("setup: the recurring bead has no due date")
+		}
+		anchor := first.DueAt.UTC()
+		bdClose(t, bd, dir, first.ID)
+
+		successor := otherThan(t, bdIssuesByTitle(t, bd, dir, title), first.ID)
+		if successor.DueAt == nil {
+			t.Fatal("successor has no due date")
+		}
+		now := time.Now().UTC()
+		if !successor.DueAt.After(now) {
+			t.Errorf("successor due %v is not in the future (now %v): born overdue", successor.DueAt.UTC(), now)
+		}
+		if successor.DueAt.After(now.AddDate(0, 0, 7)) {
+			t.Errorf("successor due %v is more than one interval out; the walk overshot", successor.DueAt.UTC())
+		}
+		if successor.DueAt.UTC().Weekday() != anchor.Weekday() {
+			t.Errorf("successor due %v lost the anchor weekday %s", successor.DueAt.UTC(), anchor.Weekday())
+		}
+		if want := anchor; successor.DueAt.UTC().Sub(want)%(7*24*time.Hour) != 0 {
+			t.Errorf("successor due %v is not a whole number of weeks past the anchor %v", successor.DueAt.UTC(), want)
+		}
+	})
+
 	// Closing the successor keeps the chain going, which is what makes this a
 	// series rather than a single extra instance.
 	t.Run("the_series_continues_past_the_second_instance", func(t *testing.T) {
@@ -473,6 +506,43 @@ func TestEmbeddedDueTrigger(t *testing.T) {
 		}
 		if !firstDue.Equal(*secondDue) {
 			t.Errorf("second read moved the deadline again: %v -> %v", firstDue, secondDue)
+		}
+	})
+}
+
+// Clearing a due date is gated on a reason, and the reason is what makes the
+// gate worth having: it must be readable afterwards, on the update event,
+// through `bd history --events`.
+func TestEmbeddedDueClearReason(t *testing.T) {
+	if os.Getenv("BEADS_TEST_EMBEDDED_DOLT") != "1" {
+		t.Skip("set BEADS_TEST_EMBEDDED_DOLT=1 to run embedded dolt integration tests")
+	}
+	t.Parallel()
+
+	bd := buildEmbeddedBD(t)
+	dir, _, _ := bdInit(t, bd, "--prefix", "dc")
+
+	t.Run("a_clear_without_the_gate_is_refused_and_writes_nothing", func(t *testing.T) {
+		issue := bdCreate(t, bd, dir, "Keeps its deadline", "--type", "task", "--due", "2030-01-01")
+		out := bdUpdateFail(t, bd, dir, issue.ID, "--due", "")
+		if !strings.Contains(out, "--force-no-due") {
+			t.Errorf("refusal did not name the gate:\n%s", out)
+		}
+		if got := bdShow(t, bd, dir, issue.ID); got.DueAt == nil {
+			t.Error("a refused clear still removed the due date")
+		}
+	})
+
+	t.Run("the_reason_is_recorded_on_the_update_event", func(t *testing.T) {
+		issue := bdCreate(t, bd, dir, "Loses its deadline", "--type", "task", "--due", "2030-01-01")
+		const why = "tracked upstream in gh-4242"
+		bdUpdate(t, bd, dir, issue.ID, "--due", "", "--force-no-due", "--reason", why)
+		if got := bdShow(t, bd, dir, issue.ID); got.DueAt != nil {
+			t.Fatalf("due_at = %v after a forced clear, want nil", got.DueAt)
+		}
+		events := bdHistoryJSON(t, bd, dir, issue.ID, "--events")
+		if !eventsContain(events, "updated", why) {
+			t.Errorf("no update event carrying the reason %q in:\n%+v", why, events)
 		}
 	})
 }

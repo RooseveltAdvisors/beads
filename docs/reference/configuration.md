@@ -217,9 +217,9 @@ to be deliberate:
 bd update bd-a1b2 --due "" --force-no-due --reason "tracked upstream instead"
 ```
 
-A bead held to the rule also gets an assignee — the actor creating it, when
-nothing else claims it — so whatever reads the deadline later has somewhere to
-send it.
+The reason is recorded on the update event, so `bd history bd-a1b2 --events`
+shows why the deadline went away. The HTTP API applies the same rule: a patch
+that sets `due_at` to `null` is refused unless it carries `due_clear_reason`.
 
 ## Dolt History, Backup, and Push
 

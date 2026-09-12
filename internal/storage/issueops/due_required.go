@@ -2,6 +2,7 @@ package issueops
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/steveyegge/beads/internal/config"
 	"github.com/steveyegge/beads/internal/storage"
@@ -79,14 +80,51 @@ func ValidateDueRequired(issue *types.Issue) error {
 		storage.ErrValidation, issue.IssueType.Normalize(), issue.Title, DueRequiredKey)
 }
 
-// DefaultDueRequiredAssignee gives a required-due issue a destination, so
-// whatever later reads the deadline has a seat to notify. An explicit assignee
-// or owner wins; otherwise the actor creating the work owns it.
-func DefaultDueRequiredAssignee(issue *types.Issue, actor string) {
-	if !DueRequiredEnabled() || DueRequiredExempt(issue) {
+// OpDueClearReason carries the reason for clearing a due date into a generic
+// update, the way OpForceClosePolicy carries the close-policy override: a
+// map key that is not a column, popped by the write funnels before the field
+// allowlist sees it. It is set by UpdateRequest.DueClearReason.
+const OpDueClearReason = "_due_clear_reason"
+
+// PopDueClearReason removes OpDueClearReason from updates and returns it,
+// trimmed; an absent or non-string value reads as no reason.
+func PopDueClearReason(updates map[string]interface{}) string {
+	raw, present := updates[OpDueClearReason]
+	if !present {
+		return ""
+	}
+	delete(updates, OpDueClearReason)
+	reason, _ := raw.(string)
+	return strings.TrimSpace(reason)
+}
+
+// ValidateDueClear refuses an update that clears a due date without saying
+// why, while the workspace requires due dates and the row is held to the rule.
+// It is the one statement of the gate both write funnels and every transport
+// (CLI --force-no-due --reason, HTTP due_clear_reason) answer to; the funnels
+// call it after the no-op filter, so clearing an already-empty due date needs
+// no reason.
+func ValidateDueClear(oldIssue *types.Issue, updates map[string]interface{}, reason string) error {
+	value, clearing := updates["due_at"]
+	if !clearing || value != nil {
+		return nil
+	}
+	if !DueRequiredEnabled() || DueRequiredExempt(oldIssue) || reason != "" {
+		return nil
+	}
+	return fmt.Errorf("%w: clearing a due date needs a reason while %s is on (bd update --due \"\" --force-no-due --reason \"<why>\", or due_clear_reason over HTTP)",
+		storage.ErrValidation, DueRequiredKey)
+}
+
+// AnchorRecurrence records where a recurring series was first scheduled: a
+// bead created with a repeat pattern and a due date but no repeat_start takes
+// its first due date as the start bound. That bound is what later steps read
+// as the series' anchor (types.Issue.NextOccurrence), so a monthly rule keeps
+// its original day-of-month after a short month has clamped it.
+func AnchorRecurrence(issue *types.Issue) {
+	if issue == nil || !issue.IsRecurring() || issue.RepeatStart != nil || issue.DueAt == nil {
 		return
 	}
-	if issue.Assignee == "" && issue.Owner == "" {
-		issue.Assignee = actor
-	}
+	start := issue.DueAt.UTC()
+	issue.RepeatStart = &start
 }

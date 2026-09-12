@@ -9048,6 +9048,17 @@ components:
             idempotent and needs no force. It requires `patch.assignee` — a
             request setting it without one is a `400` — and it must be false
             when `expected_assignee` is sent.
+        due_clear_reason:
+          type: string
+          maxLength: 1000
+          description: >-
+            Why a `patch.due_at` of `null` is clearing the due date. While the
+            workspace requires due dates (`due.required`, on by default),
+            clearing one is the single edit that can undo the invariant, so
+            the workspace refuses the clear as a `400` unless a non-blank
+            reason accompanies it; the reason is then recorded on the update
+            event, where `bd history --events` shows it. It has no effect on
+            any other patch.
 
     ApplyPatchBody:
       type: object
@@ -10348,6 +10359,17 @@ components:
             idempotent and needs no force. It requires `patch.assignee` — a
             request setting it without one is a `400` — and it must be false
             when `expected_assignee` is sent.
+        due_clear_reason:
+          type: string
+          maxLength: 1000
+          description: >-
+            Why a `patch.due_at` of `null` is clearing the due date. While the
+            workspace requires due dates (`due.required`, on by default),
+            clearing one is the single edit that can undo the invariant, so
+            the workspace refuses the clear as a `400` unless a non-blank
+            reason accompanies it; the reason is then recorded on the update
+            event, where `bd history --events` shows it. It has no effect on
+            any other patch.
 
     IssuePatchBody:
       type: object

@@ -51,52 +51,61 @@ func TestParseRepeatInterval(t *testing.T) {
 	}
 }
 
-// A monthly or yearly series keeps its anchor day: it clamps to a shorter
-// month instead of overflowing, and an end-of-month anchor stays at the end of
-// every month, so the series never walks off its day for good.
-func TestMonthIntervalKeepsItsAnchorDay(t *testing.T) {
+func ymd(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 9, 0, 0, 0, time.UTC) }
+
+// A monthly or yearly series keeps the ORIGINAL anchor day: each step clamps
+// to the target month's length, and an anchor that is itself a month end is a
+// month-end series. The anchor is what the series was first scheduled on, not
+// whatever a short month clamped the previous occurrence to.
+func TestNextFromKeepsTheAnchorDay(t *testing.T) {
 	monthly := mustParseRepeat(t, "+1m")
-	cur := time.Date(2026, 1, 31, 9, 0, 0, 0, time.UTC)
-	for _, want := range []time.Time{
-		time.Date(2026, 2, 28, 9, 0, 0, 0, time.UTC),
-		time.Date(2026, 3, 31, 9, 0, 0, 0, time.UTC),
-		time.Date(2026, 4, 30, 9, 0, 0, 0, time.UTC),
-		time.Date(2026, 5, 31, 9, 0, 0, 0, time.UTC),
-	} {
-		next, err := monthly.Next(cur)
-		if err != nil {
-			t.Fatalf("Next(%v) error = %v", cur, err)
-		}
-		if !next.Equal(want) {
-			t.Fatalf("Next(%v) = %v, want %v", cur, next, want)
-		}
-		cur = next
-	}
-
-	// A mid-month anchor is untouched.
-	mid, err := monthly.Next(time.Date(2026, 1, 15, 9, 0, 0, 0, time.UTC))
-	if err != nil || !mid.Equal(time.Date(2026, 2, 15, 9, 0, 0, 0, time.UTC)) {
-		t.Errorf("Next(Jan 15) = %v, %v; want Feb 15", mid, err)
-	}
-
-	// A leap-day anchor lands on Feb 28 in a common year and returns to
-	// Feb 29 when the calendar has one again.
 	yearly := mustParseRepeat(t, "+1y")
-	cur = time.Date(2028, 2, 29, 9, 0, 0, 0, time.UTC)
-	for _, want := range []time.Time{
-		time.Date(2029, 2, 28, 9, 0, 0, 0, time.UTC),
-		time.Date(2030, 2, 28, 9, 0, 0, 0, time.UTC),
-		time.Date(2031, 2, 28, 9, 0, 0, 0, time.UTC),
-		time.Date(2032, 2, 29, 9, 0, 0, 0, time.UTC),
-	} {
-		next, err := yearly.Next(cur)
-		if err != nil {
-			t.Fatalf("Next(%v) error = %v", cur, err)
-		}
-		if !next.Equal(want) {
-			t.Fatalf("Next(%v) = %v, want %v", cur, next, want)
-		}
-		cur = next
+	tests := []struct {
+		name   string
+		rule   Repeat
+		anchor time.Time
+		want   []time.Time
+	}{
+		{"Jan 30 clamps to Feb and returns to the 30th", monthly, ymd(2026, 1, 30),
+			[]time.Time{ymd(2026, 2, 28), ymd(2026, 3, 30), ymd(2026, 4, 30), ymd(2026, 5, 30)}},
+		{"Apr 30 stays on the 30th, not on month ends", monthly, ymd(2026, 4, 30),
+			[]time.Time{ymd(2026, 5, 30), ymd(2026, 6, 30), ymd(2026, 7, 30)}},
+		{"Jan 31 is a month-end series", monthly, ymd(2026, 1, 31),
+			[]time.Time{ymd(2026, 2, 28), ymd(2026, 3, 31), ymd(2026, 4, 30), ymd(2026, 5, 31)}},
+		{"a mid-month anchor is untouched", monthly, ymd(2026, 1, 15),
+			[]time.Time{ymd(2026, 2, 15), ymd(2026, 3, 15)}},
+		{"a leap-day anchor returns to Feb 29 when the calendar has one", yearly, ymd(2028, 2, 29),
+			[]time.Time{ymd(2029, 2, 28), ymd(2030, 2, 28), ymd(2031, 2, 28), ymd(2032, 2, 29)}},
+		{"Jan 30 in a leap year", monthly, ymd(2028, 1, 30),
+			[]time.Time{ymd(2028, 2, 29), ymd(2028, 3, 30)}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cur := tc.anchor
+			for _, want := range tc.want {
+				next, err := tc.rule.NextFrom(cur, tc.anchor)
+				if err != nil {
+					t.Fatalf("NextFrom(%v, anchor %v) error = %v", cur, tc.anchor, err)
+				}
+				if !next.Equal(want) {
+					t.Fatalf("NextFrom(%v, anchor %v) = %v, want %v", cur, tc.anchor, next, want)
+				}
+				cur = next
+			}
+		})
+	}
+
+	// Without an anchor, Next only clamps; it does not promote a clamped
+	// occurrence to a month-end series.
+	plain, err := monthly.Next(ymd(2026, 2, 28))
+	if err != nil || !plain.Equal(ymd(2026, 3, 28)) {
+		t.Errorf("Next(Feb 28) = %v, %v; want Mar 28", plain, err)
+	}
+	// Non-calendar rules ignore the anchor entirely.
+	weekly := mustParseRepeat(t, "+1w")
+	w, err := weekly.NextFrom(ymd(2026, 3, 2), ymd(2026, 1, 31))
+	if err != nil || !w.Equal(ymd(2026, 3, 9)) {
+		t.Errorf("weekly NextFrom = %v, %v; want Mar 9", w, err)
 	}
 }
 

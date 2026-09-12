@@ -112,11 +112,11 @@ func CreateIssueInTxWithResult(ctx context.Context, tx DBTX, bc *BatchContext, i
 	// capture, batch create) with the wisp/plane routing already settled. The
 	// public leg has its own call in ValidatePublicCreateRequest.
 	if !bc.Opts.SkipDueRequired {
-		DefaultDueRequiredAssignee(issue, actor)
 		if err := ValidateDueRequired(issue); err != nil {
 			return result, err
 		}
 		StampExplicitDueSource(issue)
+		AnchorRecurrence(issue)
 	}
 	if err := PrepareIssueForInsert(issue, bc.CustomStatuses, bc.CustomTypes); err != nil {
 		return result, err

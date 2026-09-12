@@ -66,10 +66,8 @@ func ValidatePublicCreateRequest(request publicops.CreateRequest) error {
 func PreparePublicCreateRequest(request publicops.CreateRequest, context PublicCreateContext) (publicops.CreateRequest, error) {
 	request = CloneCreateRequest(request)
 	if request.Issue != nil {
-		// Normalization, not validation: an issue held to the invariant gets a
-		// destination before the second validation pass reads it.
-		DefaultDueRequiredAssignee(request.Issue, request.Actor)
 		StampExplicitDueSource(request.Issue)
+		AnchorRecurrence(request.Issue)
 	}
 	if err := ValidatePublicCreateRequest(request); err != nil {
 		return publicops.CreateRequest{}, err
