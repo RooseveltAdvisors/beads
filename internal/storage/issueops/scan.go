@@ -87,6 +87,7 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	// Recurrence columns (migration 0067); scanned defensively so a row written
 	// before the migration's DEFAULT '' took effect maps to the empty rule.
 	var repeatPattern, dueSource sql.NullString
+	var dueMissed sql.NullInt64
 	var repeatStart, repeatEnd sql.NullTime
 
 	dests := []any{
@@ -99,7 +100,7 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 		&awaitType, &awaitID, &timeoutNs, &waiters,
 		&molType,
 		&eventKind, &actor, &target, &payload,
-		&dueAt, &deferUntil, &repeatPattern, &repeatStart, &repeatEnd, &dueSource,
+		&dueAt, &deferUntil, &repeatPattern, &repeatStart, &repeatEnd, &dueSource, &dueMissed,
 		&workType, &sourceSystem, &metadata, &rowLock, &storageClass,
 		&leaseExpiresAt, &heartbeatAt, &leaseGrantedNode,
 	}
@@ -226,6 +227,9 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	if dueSource.Valid {
 		issue.DueSource = types.DueSource(dueSource.String)
 	}
+	if dueMissed.Valid {
+		issue.DueMissed = int(dueMissed.Int64)
+	}
 	if workType.Valid {
 		issue.WorkType = types.WorkType(workType.String)
 	}
@@ -284,6 +288,7 @@ func ScanIssueLiteFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	// Recurrence columns (migration 0067); scanned defensively so a row written
 	// before the migration's DEFAULT '' took effect maps to the empty rule.
 	var repeatPattern, dueSource sql.NullString
+	var dueMissed sql.NullInt64
 	var repeatStart, repeatEnd sql.NullTime
 
 	dests := []any{
@@ -296,7 +301,7 @@ func ScanIssueLiteFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 		&awaitType, &awaitID, &timeoutNs,
 		&molType,
 		&eventKind, &actor, &target,
-		&dueAt, &deferUntil, &repeatPattern, &repeatStart, &repeatEnd, &dueSource,
+		&dueAt, &deferUntil, &repeatPattern, &repeatStart, &repeatEnd, &dueSource, &dueMissed,
 		&workType, &sourceSystem, &metadata, &rowLock, &storageClass,
 		&leaseExpiresAt, &heartbeatAt, &leaseGrantedNode,
 	}
@@ -414,6 +419,9 @@ func ScanIssueLiteFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	}
 	if dueSource.Valid {
 		issue.DueSource = types.DueSource(dueSource.String)
+	}
+	if dueMissed.Valid {
+		issue.DueMissed = int(dueMissed.Int64)
 	}
 	if workType.Valid {
 		issue.WorkType = types.WorkType(workType.String)

@@ -52,6 +52,7 @@ type GraphApplyNode struct {
 	RepeatPattern      string                     `json:"repeat_pattern,omitempty"`    // interval (+1w) or 5-field cron (0 9 * * 1)
 	RepeatStart        *time.Time                 `json:"repeat_start,omitempty"`      // RFC3339
 	RepeatEnd          *time.Time                 `json:"repeat_end,omitempty"`        // RFC3339
+	DueSource          types.DueSource            `json:"due_source,omitempty"`        // provenance of due_at: explicit | default
 	Labels             []string                   `json:"labels,omitempty"`
 	Metadata           map[string]json.RawMessage `json:"metadata,omitempty"`
 	MetadataRefs       map[string]string          `json:"metadata_refs,omitempty"`
@@ -863,6 +864,7 @@ func graphApplyNodeIssue(node GraphApplyNode, opts GraphApplyOptions, createdBy,
 		RepeatPattern:      node.RepeatPattern,
 		RepeatStart:        node.RepeatStart,
 		RepeatEnd:          node.RepeatEnd,
+		DueSource:          node.DueSource,
 		Metadata:           metadataJSON,
 	})
 	// Backfill status-coupled timestamps: the proxied domain insert does no

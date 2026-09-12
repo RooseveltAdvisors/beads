@@ -135,7 +135,7 @@ func executeIssueInsert(ctx context.Context, tx DBTX, table string, issue *types
 			mol_type, work_type, source_system, source_repo, close_reason, closed_by_session,
 			event_kind, actor, target, payload,
 			await_type, await_id, timeout_ns, waiters,
-			due_at, defer_until, repeat_pattern, repeat_start, repeat_end, due_source,
+			due_at, defer_until, repeat_pattern, repeat_start, repeat_end, due_source, due_missed,
 			metadata,
 			row_lock, storage_class
 		) VALUES (
@@ -147,7 +147,7 @@ func executeIssueInsert(ctx context.Context, tx DBTX, table string, issue *types
 			?, ?, ?, ?, ?,
 			?, ?, ?, ?,
 			?, ?, ?, ?,
-			?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?,
 			?,
 			?, ?
 		)
@@ -161,7 +161,7 @@ func executeIssueInsert(ctx context.Context, tx DBTX, table string, issue *types
 		issue.MolType, issue.WorkType, issue.SourceSystem, issue.SourceRepo, issue.CloseReason, issue.ClosedBySession,
 		issue.EventKind, issue.Actor, issue.Target, issue.Payload,
 		issue.AwaitType, issue.AwaitID, issue.Timeout.Nanoseconds(), FormatJSONStringArray(issue.Waiters),
-		issue.DueAt, issue.DeferUntil, issue.RepeatPattern, issue.RepeatStart, issue.RepeatEnd, string(issue.DueSource),
+		issue.DueAt, issue.DeferUntil, issue.RepeatPattern, issue.RepeatStart, issue.RepeatEnd, string(issue.DueSource), issue.DueMissed,
 		JSONMetadata(issue.Metadata),
 		freshRowLock(), NullString(string(issue.StorageClass.Normalize())),
 	)

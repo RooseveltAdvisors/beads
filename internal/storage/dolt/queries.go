@@ -55,27 +55,16 @@ func (s *DoltStore) SearchIssuesWithCounts(ctx context.Context, query string, fi
 // write circuit, closed store), with a stderr warning otherwise. It runs
 // OUTSIDE the read tx below because withReadTx unconditionally rolls back (and
 // may retry its body on the read-only justification).
+//
+// The body lives on RunScheduledSweeps (due_sweep.go), which `bd due sweep`
+// and the external clock call directly; this is that same pass with its
+// result discarded and its error reduced to a warning.
 func (s *DoltStore) runScheduledSweeps(ctx context.Context) {
 	if s.readOnly {
 		return
 	}
-	err := s.withCircuitWrite(ctx, func(ctx context.Context) error {
-		return s.runIssueOperationTxWithMessage(ctx, func(tx *sql.Tx) (issueops.ChangedTables, string, error) {
-			swept, err := issueops.RunScheduledSweepsInTx(ctx, tx)
-			if err != nil {
-				return nil, "", err
-			}
-			if swept.IssueRows() == 0 {
-				// Wisp-only sweeps persist with the SQL commit but mint no
-				// version commit: wisp tables are dolt_ignored.
-				return nil, "", nil
-			}
-			tables := issueops.ChangedTables{}
-			tables.Add("issues", "events")
-			return tables, swept.CommitMessage(), nil
-		})
-	})
-	if err != nil && !errors.Is(err, ErrCircuitOpen) && !errors.Is(err, ErrStoreClosed) {
+	if _, err := s.RunScheduledSweeps(ctx); err != nil &&
+		!errors.Is(err, ErrCircuitOpen) && !errors.Is(err, ErrStoreClosed) {
 		warnScheduledSweepSkipped(err)
 	}
 }

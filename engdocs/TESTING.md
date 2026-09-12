@@ -34,6 +34,15 @@ isolated test environment, applies `.test-skip`, and defaults to a **25m
 per-package** Go-test timeout. The timeout is a hang backstop, not a target
 runtime. Override it only when diagnosing a legitimate slow path:
 
+Use the runner rather than a bare `go test` for a second reason beyond build
+tags: the isolated environment it creates also CLEARS ambient `BEADS_*` and
+`BD_*` variables. Several config tests assert which source a setting resolved
+from, so a `BEADS_ACTOR` exported by whatever launched your shell makes
+`TestCollectViperEntriesWithEnvOverride` and the
+`TestPrepareSelectedCommandContext_*` pair fail against perfectly good code —
+a failure that reproduces locally, never in CI, and looks like a real
+regression until you check `env | grep BEADS_`.
+
 ```bash
 TEST_TIMEOUT=30m ./scripts/test.sh ./cmd/bd/...
 TEST_VERBOSE=1 ./scripts/test.sh ./cmd/bd/...
