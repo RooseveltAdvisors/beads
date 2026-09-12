@@ -91,7 +91,7 @@ func TestEmbeddedDueSweepFiresAndEscalates(t *testing.T) {
 		for round := 1; round <= issueops.DueMissEscalateAt+2; round++ {
 			bdUpdate(t, bd, dir, issue.ID, "--due", pastDue())
 			report := bdDueSweep(t, bd, dir)
-			if containsString(report.EscalatedID, issue.ID) {
+			if containsString(report.EscalatedIDs, issue.ID) {
 				escalatedOn = append(escalatedOn, round)
 			}
 		}
@@ -134,7 +134,7 @@ func TestEmbeddedDueSweepFiresAndEscalates(t *testing.T) {
 		// The summary is what an external clock publishes, so an empty sweep
 		// must still produce one: a blank line on the rail is indistinguishable
 		// from a clock that did not run.
-		if report.Summaries == "" {
+		if report.Summary == "" {
 			t.Error("summary is empty on a quiet sweep; a clock with nothing to say must still say it")
 		}
 	})

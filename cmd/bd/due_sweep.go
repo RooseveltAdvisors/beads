@@ -28,13 +28,13 @@ type scheduledSweeper interface {
 // dueSweepReport is what one sweep did. It is the timer's payload: counts to
 // put in a summary line, and ids so a human reading the line can go look.
 type dueSweepReport struct {
-	SweptAt     string   `json:"swept_at"`
-	Summaries   string   `json:"summary"`
-	DueFired    int      `json:"due_fired"`
-	DueIDs      []string `json:"due_ids,omitempty"`
-	DueWisps    int      `json:"due_wisps"`
-	Escalated   int      `json:"escalated"`
-	EscalatedID []string `json:"escalated_ids,omitempty"`
+	SweptAt      string   `json:"swept_at"`
+	Summary      string   `json:"summary"`
+	DueFired     int      `json:"due_fired"`
+	DueIDs       []string `json:"due_ids,omitempty"`
+	DueWisps     int      `json:"due_wisps"`
+	Escalated    int      `json:"escalated"`
+	EscalatedIDs []string `json:"escalated_ids,omitempty"`
 	// EscalatedWisps is reported separately rather than folded into Escalated
 	// for the reason DueWisps is: the two planes are different namespaces, and
 	// a count that mixed them would make a wisp-plane escalation look like
@@ -48,7 +48,7 @@ type dueSweepReport struct {
 // Summary is the one line an external clock publishes. It names both sweeps
 // because they run in one pass and a reader who sees only the due half cannot
 // tell a quiet clock from a half-broken one.
-func (r dueSweepReport) Summary() string {
+func (r dueSweepReport) summaryLine() string {
 	return fmt.Sprintf("%d due, %d escalated, %d defer(s) woken",
 		r.DueFired, r.Escalated, r.DefersWoken)
 }
@@ -118,7 +118,7 @@ Examples:
 			DueIDs:         swept.Due.Issues,
 			DueWisps:       len(swept.Due.Wisps),
 			Escalated:      len(swept.Due.Escalated),
-			EscalatedID:    swept.Due.Escalated,
+			EscalatedIDs:   swept.Due.Escalated,
 			EscalatedWisps: len(swept.Due.EscalatedWisps),
 			DefersWoken:    len(swept.Defers.Issues),
 			DeferIDs:       swept.Defers.Issues,
@@ -128,7 +128,7 @@ Examples:
 		// can publish the line with one grep instead of reassembling it from
 		// counts — and so the line a human reads and the line a rail carries
 		// are the same string.
-		report.Summaries = report.Summary()
+		report.Summary = report.summaryLine()
 		if jsonOutput {
 			return printJSON(report)
 		}
@@ -155,9 +155,9 @@ func findScheduledSweeper(s storage.DoltStorage) (scheduledSweeper, bool) {
 }
 
 func printDueSweepReport(r dueSweepReport) {
-	fmt.Printf("%s %s\n", ui.RenderAccent("*"), r.Summary())
-	escalated := make(map[string]bool, len(r.EscalatedID))
-	for _, id := range r.EscalatedID {
+	fmt.Printf("%s %s\n", ui.RenderAccent("*"), r.summaryLine())
+	escalated := make(map[string]bool, len(r.EscalatedIDs))
+	for _, id := range r.EscalatedIDs {
 		escalated[id] = true
 	}
 	for _, id := range r.DueIDs {
