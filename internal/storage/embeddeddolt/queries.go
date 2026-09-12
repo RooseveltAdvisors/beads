@@ -21,22 +21,12 @@ import (
 // mirroring the tip-metadata write's tolerance), anything else warns. It runs
 // OUTSIDE the read connections below because withConn(ctx, false, …) always
 // rolls back.
+//
+// The body lives on RunScheduledSweeps (due_sweep.go), which `bd due sweep`
+// and the external clock call directly; this is that same pass with its
+// result discarded and its error reduced to a warning.
 func (s *EmbeddedDoltStore) runScheduledSweeps(ctx context.Context) {
-	err := s.runIssueOperationTxWithMessage(ctx, func(tx *sql.Tx) (issueops.ChangedTables, string, error) {
-		swept, err := issueops.RunScheduledSweepsInTx(ctx, tx)
-		if err != nil {
-			return nil, "", err
-		}
-		if swept.IssueRows() == 0 {
-			// Wisp-only sweeps persist with the SQL commit but mint no version
-			// commit: wisp tables are dolt_ignored.
-			return nil, "", nil
-		}
-		tables := issueops.ChangedTables{}
-		tables.Add("issues", "events")
-		return tables, swept.CommitMessage(), nil
-	})
-	if err != nil && !errors.Is(err, ErrReadOnly) {
+	if _, err := s.RunScheduledSweeps(ctx); err != nil && !errors.Is(err, ErrReadOnly) {
 		fmt.Fprintf(os.Stderr, "warning: scheduled sweep skipped: %v\n", err)
 	}
 }

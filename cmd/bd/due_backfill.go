@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"sort"
 	"time"
@@ -66,7 +67,10 @@ var dueCmd = &cobra.Command{
 	Short: "Inspect and repair due dates",
 	Long: `Commands for the due-date invariant.
 
-See 'bd due backfill --help' for giving legacy beads a due date.`,
+  sweep     fire the beads whose due date has arrived (the external clock's seam)
+  backfill  give legacy beads that predate the invariant a due date
+
+See 'bd due sweep --help' and 'bd due backfill --help'.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 }
@@ -84,8 +88,9 @@ re-run with --apply if it looks right.
 Each candidate is dated --interval past its OWN creation (default +7d), not
 past today, so the relative order of a backlog survives the backfill. A bead
 older than the interval would land in the past and fire on the next ready
-read, so its date is floored to --interval past now instead; the report marks
-those rows. Every bead written is stamped due_source=backfill, so a
+read, so its date is instead spread across the window starting --interval past
+now — placed by the bead's own id, so the report and --apply agree, and a whole
+legacy backlog does not come due in one herd; the report marks those rows. Every bead written is stamped due_source=backfill, so a
 synthesized date stays distinguishable from one a human chose.
 
 Beads that are not work awaiting completion are skipped: events, wisps,
@@ -154,6 +159,33 @@ Examples:
 	},
 }
 
+// spreadFlooredDue places a bead whose own creation date would put it in the
+// past somewhere inside the interval window that starts at floor, rather than
+// exactly on floor.
+//
+// Dating each bead from its OWN created_at is what keeps a backlog's relative
+// order through a backfill — but every bead older than the interval collapses
+// onto the same floor, and in a repository being backfilled for the first time
+// that is most of them. Stacking a whole legacy backlog on one instant means
+// the clock fires thousands of beads in a single sweep: thousands of events in
+// one transaction, one summary line that says only "2000 due", and an
+// escalation signal that has told nobody anything. Spreading them turns that
+// cliff into a slope.
+//
+// The offset is DERIVED FROM THE ID, not drawn at random, because the report a
+// human reads and the dates `--apply` writes must be the same dates. A random
+// offset would make the dry run a description of a different backfill than the
+// one that eventually runs, which is the one thing the report exists to
+// prevent.
+func spreadFlooredDue(id string, floor time.Time, interval time.Duration) time.Time {
+	if interval <= 0 {
+		return floor
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(id))
+	return floor.Add(time.Duration(h.Sum64() % uint64(interval))).UTC()
+}
+
 // parseBackfillInterval reads the offset a proposed due date sits past its
 // bead's creation. It takes the compact-duration spelling the rest of the CLI
 // uses (+7d, +2w, +12h) and nothing else: a cron expression is a SCHEDULE, and
@@ -208,7 +240,7 @@ func planDueBackfill(issues []*types.Issue, interval time.Duration, now time.Tim
 		due := issue.CreatedAt.Add(interval).UTC()
 		floored := !due.After(now)
 		if floored {
-			due = floor
+			due = spreadFlooredDue(issue.ID, floor, interval)
 			report.Floored++
 		}
 		report.Candidates++

@@ -132,6 +132,12 @@ func cliCompatibleMigrationSQL(name, sqlText string) string {
 		// 2.2.x CLI no-ops a prepared ALTER (dolthub/dolt#11345). 0067 is
 		// schema-only, so this substitute is the whole migration.
 		return cliMigration0067AddRecurrenceColumns
+	case "0068_add_due_missed.up.sql":
+		// Direct DDL for the same reason as 0067: the source migration's
+		// PREPARE guards make it idempotent on upgraded databases, and the
+		// 2.2.x CLI no-ops a prepared ALTER (dolthub/dolt#11345). 0068 is
+		// schema-only, so this substitute is the whole migration.
+		return cliMigration0068AddDueMissed
 	default:
 		return sqlText
 	}
@@ -167,6 +173,10 @@ func cliSubstituteAssumesWispTables(name string) bool {
 	case "0067_add_recurrence_columns.up.sql":
 		// cliMigration0067AddRecurrenceColumns drops the @has_wisps guard and
 		// ALTERs wisps unconditionally.
+		return true
+	case "0068_add_due_missed.up.sql":
+		// cliMigration0068AddDueMissed drops the @has_wisps guard and ALTERs
+		// wisps unconditionally.
 		return true
 	default:
 		return false
@@ -220,6 +230,9 @@ ALTER TABLE wisps ADD COLUMN repeat_pattern VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE wisps ADD COLUMN repeat_start DATETIME;
 ALTER TABLE wisps ADD COLUMN repeat_end DATETIME;
 ALTER TABLE wisps ADD COLUMN due_source VARCHAR(16) NOT NULL DEFAULT '';`
+
+const cliMigration0068AddDueMissed = `ALTER TABLE issues ADD COLUMN due_missed INT NOT NULL DEFAULT 0;
+ALTER TABLE wisps ADD COLUMN due_missed INT NOT NULL DEFAULT 0;`
 
 const cliMigration0065WidenWispCommentsText = `ALTER TABLE wisp_comments MODIFY COLUMN text LONGTEXT NOT NULL;`
 const cliMigration0066AddEventsJournalActor = `ALTER TABLE bd_events_journal ADD COLUMN actor VARCHAR(255) NOT NULL DEFAULT '';`

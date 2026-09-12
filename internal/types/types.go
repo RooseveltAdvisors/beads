@@ -117,10 +117,17 @@ type Issue struct {
 	// RepeatStart are skipped; the series stops once the next occurrence would
 	// fall after RepeatEnd. Both are optional and independent: an unbounded
 	// series leaves them nil.
+	//
+	// DueMissed counts how many times DueAt has ARRIVED with the work still
+	// open. The due sweep is its only writer; nothing sets it by hand. It is
+	// what makes a repeated miss legible — a deadline rescheduled forever at
+	// the same priority is a nag, not an escalation — and what the single
+	// priority raise at issueops.DueMissEscalateAt stands on.
 	RepeatPattern string     `json:"repeat_pattern,omitempty"`
 	RepeatStart   *time.Time `json:"repeat_start,omitempty"`
 	RepeatEnd     *time.Time `json:"repeat_end,omitempty"`
 	DueSource     DueSource  `json:"due_source,omitempty"`
+	DueMissed     int        `json:"due_missed,omitempty"`
 
 	// ===== External Integration =====
 	ExternalRef  *string `json:"external_ref,omitempty"`  // e.g., "gh-9", "jira-ABC"

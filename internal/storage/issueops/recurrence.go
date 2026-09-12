@@ -36,12 +36,37 @@ const RecurrenceSpawnActor = "bd-recurrence"
 // next read. A recurring bead uses its own pattern instead.
 const DueMissGrace = 24 * time.Hour
 
+// DueMissEscalateAt is how many misses it takes before a bead's priority is
+// raised once.
+//
+// Rescheduling alone (DueMissGrace above) keeps a deadline visible, but at a
+// FIXED priority: a bead missed once and a bead missed twenty times sit at the
+// same place in the ready front, so a chronically missed deadline is
+// indistinguishable from a fresh one and nothing ever changes. One raise at a
+// small threshold is the whole escalation — it moves the bead where a human
+// looks, once, and then stops. It does NOT walk the bead up to P0 over
+// successive misses: an escalation that repeats is just the nag again, one
+// rung higher each time, and would eventually flatten every priority in the
+// workspace to P0.
+//
+// Three is the smallest count that distinguishes a pattern from an accident:
+// one miss is a bad day, two is bad luck, three is the deadline being wrong or
+// the work being stuck, and either wants a person.
+const DueMissEscalateAt = 3
+
 // DueSweepResult reports what one sweep fired, per table. Issues are
 // permanent-table ids and are the only ones that decide whether the caller
 // mints a Dolt commit; wisp tables are dolt_ignored.
 type DueSweepResult struct {
 	Issues []string
 	Wisps  []string
+	// Escalated names the beads whose miss count reached DueMissEscalateAt in
+	// THIS sweep and whose priority was therefore raised — split by plane the
+	// same way Issues and Wisps are, and a SUBSET of them. It is what a clock
+	// publishes as the actionable half of its summary: "fired 9, escalated 1"
+	// says where to look, where "fired 9" alone does not.
+	Escalated      []string
+	EscalatedWisps []string
 }
 
 // DueSweepCommitMessage names a sweep's dolt commit. n is the number of
@@ -71,12 +96,13 @@ func SweepDueBeadsInTx(ctx context.Context, tx DBTX) (DueSweepResult, error) {
 	if err != nil {
 		return result, err
 	}
-	issues, err := sweepDueBeadsInTable(ctx, tx, "issues", "events", live)
+	issues, escalated, err := sweepDueBeadsInTable(ctx, tx, "issues", "events", live)
 	if err != nil {
 		return result, err
 	}
 	result.Issues = issues
-	wisps, err := sweepDueBeadsInTable(ctx, tx, "wisps", "wisp_events", live)
+	result.Escalated = escalated
+	wisps, escalatedWisps, err := sweepDueBeadsInTable(ctx, tx, "wisps", "wisp_events", live)
 	if err != nil {
 		if dberrors.IsTableNotExist(err) {
 			return result, nil
@@ -84,6 +110,7 @@ func SweepDueBeadsInTx(ctx context.Context, tx DBTX) (DueSweepResult, error) {
 		return result, err
 	}
 	result.Wisps = wisps
+	result.EscalatedWisps = escalatedWisps
 	return result, nil
 }
 
@@ -131,33 +158,35 @@ type dueCandidate struct {
 	repeatPattern string
 	repeatStart   *time.Time
 	repeatEnd     *time.Time
+	dueMissed     int
+	priority      int
 }
 
 // the status placeholders are generated, never interpolated values.
 //
 //nolint:gosec // G201: table and eventsTable are hardcoded constants from the caller;
-func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable string, live []types.Status) ([]string, error) {
+func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable string, live []types.Status) (fired, escalated []string, err error) {
 	if len(live) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	statusList, statusArgs := statusPlaceholders(live)
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
-		SELECT id, due_at, repeat_pattern, repeat_start, repeat_end
+		SELECT id, due_at, repeat_pattern, repeat_start, repeat_end, due_missed, priority
 		FROM %s
 		WHERE due_at IS NOT NULL AND due_at <= UTC_TIMESTAMP()
 		  AND status IN (%s)
 	`, table, statusList), statusArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("due sweep: scan %s: %w", table, err)
+		return nil, nil, fmt.Errorf("due sweep: scan %s: %w", table, err)
 	}
 	var candidates []dueCandidate
 	for rows.Next() {
 		var c dueCandidate
 		var pattern sql.NullString
 		var start, end sql.NullTime
-		if err := rows.Scan(&c.id, &c.dueAt, &pattern, &start, &end); err != nil {
+		if err := rows.Scan(&c.id, &c.dueAt, &pattern, &start, &end, &c.dueMissed, &c.priority); err != nil {
 			_ = rows.Close()
-			return nil, fmt.Errorf("due sweep: scan %s row: %w", table, err)
+			return nil, nil, fmt.Errorf("due sweep: scan %s row: %w", table, err)
 		}
 		c.repeatPattern = pattern.String
 		if start.Valid {
@@ -170,16 +199,15 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
-		return nil, fmt.Errorf("due sweep: iterate %s: %w", table, err)
+		return nil, nil, fmt.Errorf("due sweep: iterate %s: %w", table, err)
 	}
 	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("due sweep: close %s rows: %w", table, err)
+		return nil, nil, fmt.Errorf("due sweep: close %s rows: %w", table, err)
 	}
 	if len(candidates) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
-	var fired []string
 	now := time.Now().UTC()
 	for _, c := range candidates {
 		next, fromPattern := nextDueAfterMiss(c, now)
@@ -196,36 +224,65 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 			sourceClause = ", due_source = ?"
 			args = append(args, string(types.DueSourceRepeat))
 		}
-		args = append(args, now, freshRowLock(), c.id, c.dueAt)
+
+		// The miss is counted on the same UPDATE that reschedules, so a bead
+		// can never be rescheduled without its miss being recorded: a counter
+		// written separately could be lost to a crash in between, and the
+		// escalation would then never arrive for a bead that had genuinely
+		// missed its threshold.
+		//
+		// The raise fires on the sweep that REACHES the threshold and on no
+		// other, so escalation happens once per bead rather than on every
+		// subsequent miss (see DueMissEscalateAt). A bead already at P0 has
+		// nowhere to go and is counted, rescheduled, and left at P0.
+		missed := c.dueMissed + 1
+		raisedTo, raised := escalatedPriority(c.priority, missed)
+		priorityClause := ""
+		if raised {
+			priorityClause = ", priority = ?"
+			args = append(args, raisedTo)
+		}
+
+		args = append(args, missed, now, freshRowLock(), c.id, c.dueAt)
 		args = append(args, statusArgs...)
 		res, err := tx.ExecContext(ctx, fmt.Sprintf(`
 			UPDATE %s
-			SET due_at = ?%s, updated_at = ?, row_lock = ?
+			SET due_at = ?%s%s, due_missed = ?, updated_at = ?, row_lock = ?
 			WHERE id = ? AND due_at = ? AND status IN (%s)
-		`, table, sourceClause, statusList), args...)
+		`, table, sourceClause, priorityClause, statusList), args...)
 		if err != nil {
-			return fired, fmt.Errorf("due sweep reschedule %s: %w", c.id, err)
+			return fired, escalated, fmt.Errorf("due sweep reschedule %s: %w", c.id, err)
 		}
 		n, err := res.RowsAffected()
 		if err != nil {
-			return fired, fmt.Errorf("due sweep reschedule %s rows affected: %w", c.id, err)
+			return fired, escalated, fmt.Errorf("due sweep reschedule %s rows affected: %w", c.id, err)
 		}
 		if n == 0 {
 			continue // rescued concurrently — leave it be
 		}
-		if err := RecordFullEventInTable(ctx, tx, eventsTable, c.id, types.EventDue,
-			DueTriggerActor, c.dueAt.UTC().Format(time.RFC3339), next.Format(time.RFC3339)); err != nil {
-			return fired, fmt.Errorf("record due event for %s: %w", c.id, err)
+		// The event carries the miss count, so a consumer reading the rail
+		// sees a first miss and a third one as different facts without
+		// re-reading the bead.
+		comment := fmt.Sprintf("missed %d", missed)
+		if raised {
+			comment = fmt.Sprintf("missed %d; priority raised to P%d", missed, raisedTo)
+		}
+		if err := RecordFullEventWithCommentInTable(ctx, tx, eventsTable, c.id, types.EventDue,
+			DueTriggerActor, c.dueAt.UTC().Format(time.RFC3339), next.Format(time.RFC3339), comment); err != nil {
+			return fired, escalated, fmt.Errorf("record due event for %s: %w", c.id, err)
 		}
 		// A reschedule is a field change, so it journals as an update — past
 		// the rows-affected recheck, so a concurrently-rescued bead records
 		// nothing.
 		if err := RecordEventInTx(ctx, tx, EventUpdate, c.id, DueTriggerActor); err != nil {
-			return fired, err
+			return fired, escalated, err
 		}
 		fired = append(fired, c.id)
+		if raised {
+			escalated = append(escalated, c.id)
+		}
 	}
-	return fired, nil
+	return fired, escalated, nil
 }
 
 // statusPlaceholders renders a status set as a bound-parameter list, so the
@@ -238,6 +295,25 @@ func statusPlaceholders(statuses []types.Status) (string, []any) {
 		args[i] = string(status)
 	}
 	return strings.Join(marks, ", "), args
+}
+
+// escalatedPriority decides whether THIS miss raises the bead's priority, and
+// to what.
+//
+// It raises on the miss that REACHES DueMissEscalateAt and on no other, which
+// is what makes the escalation a step rather than a ramp: `>=` would raise
+// again on every subsequent miss and walk a chronically-late bead to P0 one
+// rung per miss, until a workspace with a stale backlog has nothing but P0s
+// and the priority field has stopped meaning anything.
+//
+// P0 is the ceiling and is expressed as "there is somewhere to go" rather than
+// as a named floor value: a bead already at the top is counted and rescheduled
+// like any other, and simply has no raise to apply.
+func escalatedPriority(current, missed int) (raised int, ok bool) {
+	if missed != DueMissEscalateAt || current <= 0 {
+		return current, false
+	}
+	return current - 1, true
 }
 
 // nextDueAfterMiss computes where a fired bead's due date moves to. A recurring

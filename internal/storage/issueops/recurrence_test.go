@@ -443,3 +443,66 @@ func TestStatusPlaceholdersBindRatherThanInterpolate(t *testing.T) {
 		t.Errorf("args = %v, want [open in_progress]", args)
 	}
 }
+
+// A missed deadline that only ever reschedules is a nag at a fixed priority:
+// a bead missed once and a bead missed twenty times sit in the same place in
+// the ready front. The escalation is what distinguishes them — ONCE, at the
+// threshold, and never again.
+func TestEscalatedPriorityRaisesOnceAtTheThreshold(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		current  int
+		missed   int
+		wantPrio int
+		wantOK   bool
+	}{
+		{"first miss does not escalate", 2, 1, 2, false},
+		{"second miss does not escalate", 2, 2, 2, false},
+		{"threshold miss raises one rung", 2, DueMissEscalateAt, 1, true},
+		{"miss past the threshold does not raise again", 1, DueMissEscalateAt + 1, 1, false},
+		{"far past the threshold still does not raise", 1, DueMissEscalateAt + 17, 1, false},
+		{"lowest priority raises one rung, not to the top", 4, DueMissEscalateAt, 3, true},
+		{"a bead already at P0 has nowhere to go", 0, DueMissEscalateAt, 0, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := escalatedPriority(tc.current, tc.missed)
+			if ok != tc.wantOK {
+				t.Errorf("escalatedPriority(%d, %d) raised = %v, want %v",
+					tc.current, tc.missed, ok, tc.wantOK)
+			}
+			if got != tc.wantPrio {
+				t.Errorf("escalatedPriority(%d, %d) priority = %d, want %d",
+					tc.current, tc.missed, got, tc.wantPrio)
+			}
+		})
+	}
+}
+
+// The escalation must be a STEP, not a ramp. Walking a chronically-late bead
+// up one rung per miss flattens a stale backlog to P0 and destroys the
+// priority field's meaning, so this pins the whole trajectory rather than a
+// single call: one raise, then never again no matter how long the miss streak
+// runs.
+func TestEscalatedPriorityIsAStepNotARamp(t *testing.T) {
+	t.Parallel()
+
+	priority := 3
+	raises := 0
+	for missed := 1; missed <= 25; missed++ {
+		next, ok := escalatedPriority(priority, missed)
+		priority = next
+		if ok {
+			raises++
+		}
+	}
+	if raises != 1 {
+		t.Errorf("25 consecutive misses raised priority %d times, want exactly 1", raises)
+	}
+	if priority != 2 {
+		t.Errorf("priority after 25 misses = %d, want 2 (one rung up from 3)", priority)
+	}
+}
