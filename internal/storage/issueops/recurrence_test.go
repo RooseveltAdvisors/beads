@@ -296,9 +296,10 @@ func TestNextSeriesOccurrenceAnchorsOnTheSeriesNotTheSweptDue(t *testing.T) {
 	anchor := at(2026, time.March, 2, 9) // Monday 09:00, the series' start
 	now := at(2026, time.March, 25, 15)  // Wednesday 15:00, three weeks later
 
-	// A ready read on Mar 4 swept the overdue bead to Mar 30 (the first
-	// occurrence after the sweep). Closing on Mar 25 must file THAT
-	// occurrence, not one interval past it.
+	// A ready read sweeps the overdue bead to the first occurrence after the
+	// sweep - Mar 4's read reaches Mar 9, and later reads reach Mar 30.
+	// Closing on Mar 25 must file the first occurrence strictly after now,
+	// Mar 30, not one interval past whatever the last sweep teed up.
 	swept := &types.Issue{
 		RepeatPattern: "+1w",
 		DueAt:         ptr(at(2026, time.March, 30, 9)),
@@ -309,8 +310,10 @@ func TestNextSeriesOccurrenceAnchorsOnTheSeriesNotTheSweptDue(t *testing.T) {
 		t.Fatalf("swept close: (%v, %v), want Mar 30 09:00 - the occurrence the sweep teed up", got, ok)
 	}
 
-	// A due date the user dragged off the grid does not drag the series:
-	// the successor stays on the anchor's weekday.
+	// The helper walks the series grid and ignores a due date the user
+	// dragged off it; SpawnRecurrenceInTx's early-close fallback may still
+	// follow the dragged date when the anchor-walk result precedes the
+	// closed instance's own due date.
 	edited := &types.Issue{
 		RepeatPattern: "+1w",
 		DueAt:         ptr(at(2026, time.April, 15, 12)),

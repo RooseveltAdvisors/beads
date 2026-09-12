@@ -414,6 +414,124 @@ async def test_update_with_optional_fields(bd_client, mock_process):
 
 
 @pytest.mark.asyncio
+async def test_create_passes_due_and_echoes_it_back(bd_client, mock_process):
+    """Create passes --due through and the returned issue carries due_at."""
+    issue_data = {
+        "id": "bd-5",
+        "title": "New issue",
+        "status": "open",
+        "priority": 2,
+        "issue_type": "task",
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2025-01-25T00:00:00Z",
+        "due_at": "2026-03-01T09:00:00Z",
+        "repeat_pattern": "+1w",
+    }
+    mock_process.communicate = AsyncMock(return_value=(json.dumps(issue_data).encode(), b""))
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_exec:
+        issue = await bd_client.create(
+            CreateIssueParams(title="New issue", priority=2, issue_type="task", due="2026-03-01")
+        )
+
+    cmd = list(mock_exec.call_args[0])
+    assert ["--due", "2026-03-01"] == cmd[cmd.index("--due") : cmd.index("--due") + 2]
+    assert issue.due_at is not None
+    assert issue.due_at.year == 2026
+    assert issue.repeat_pattern == "+1w"
+
+
+@pytest.mark.asyncio
+async def test_update_passes_due_and_repeat(bd_client, mock_process):
+    """Update passes --due and --repeat through to the CLI."""
+    issue_data = {
+        "id": "bd-1",
+        "title": "Updated",
+        "status": "open",
+        "priority": 2,
+        "issue_type": "task",
+        "created_at": "2025-01-25T00:00:00Z",
+        "updated_at": "2025-01-25T00:00:00Z",
+        "repeat_pattern": "+1w",
+    }
+    mock_process.communicate = AsyncMock(return_value=(json.dumps(issue_data).encode(), b""))
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_exec:
+        await bd_client.update(
+            UpdateIssueParams(issue_id="bd-1", due="+3d", repeat="+1w")
+        )
+
+    cmd = list(mock_exec.call_args[0])
+    assert ["--due", "+3d"] == cmd[cmd.index("--due") : cmd.index("--due") + 2]
+    assert ["--repeat", "+1w"] == cmd[cmd.index("--repeat") : cmd.index("--repeat") + 2]
+
+
+@pytest.mark.asyncio
+async def test_update_clear_due_follows_the_force_gate(bd_client, mock_process):
+    """Clearing a due date rides the same force+reason gate the CLI enforces."""
+    issue_data = {
+        "id": "bd-1",
+        "title": "Updated",
+        "status": "open",
+        "priority": 2,
+        "issue_type": "task",
+        "created_at": "2025-01-25T00:00:00Z",
+        "updated_at": "2025-01-25T00:00:00Z",
+    }
+
+    # A bare clear is refused before any bd process runs.
+    with pytest.raises(BdCommandError, match="force_no_due"):
+        await bd_client.update(UpdateIssueParams(issue_id="bd-1", due=""))
+
+    # Force without a reason is refused too.
+    with pytest.raises(BdCommandError, match="clear_due_reason"):
+        await bd_client.update(
+            UpdateIssueParams(issue_id="bd-1", due="", force_no_due=True)
+        )
+
+    # force_no_due outside a clear is a misuse.
+    with pytest.raises(BdCommandError, match="only applies when clearing"):
+        await bd_client.update(UpdateIssueParams(issue_id="bd-1", force_no_due=True))
+
+    # The gated clear forwards due, force and reason to the CLI.
+    mock_process.communicate = AsyncMock(return_value=(json.dumps(issue_data).encode(), b""))
+    with patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_exec:
+        await bd_client.update(
+            UpdateIssueParams(
+                issue_id="bd-1",
+                due="",
+                force_no_due=True,
+                clear_due_reason="work is done, series ends",
+            )
+        )
+    cmd = list(mock_exec.call_args[0])
+    assert cmd[cmd.index("--due") : cmd.index("--due") + 2] == ["--due", ""]
+    assert "--force-no-due" in cmd
+    assert cmd[cmd.index("--reason") + 1] == "work is done, series ends"
+
+
+@pytest.mark.asyncio
+async def test_update_stops_a_series_with_empty_repeat(bd_client, mock_process):
+    """An empty --repeat stops the series, mirroring bd update --repeat=\"\"."""
+    issue_data = {
+        "id": "bd-1",
+        "title": "Updated",
+        "status": "open",
+        "priority": 2,
+        "issue_type": "task",
+        "created_at": "2025-01-25T00:00:00Z",
+        "updated_at": "2025-01-25T00:00:00Z",
+    }
+    mock_process.communicate = AsyncMock(return_value=(json.dumps(issue_data).encode(), b""))
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_exec:
+        await bd_client.update(UpdateIssueParams(issue_id="bd-1", repeat=""))
+
+    cmd = list(mock_exec.call_args[0])
+    assert ["--repeat", ""] == cmd[cmd.index("--repeat") : cmd.index("--repeat") + 2]
+
+
+@pytest.mark.asyncio
 async def test_update_invalid_response(bd_client, mock_process):
     """Test update method with invalid response type."""
     mock_process.communicate = AsyncMock(return_value=(json.dumps(["not a dict"]).encode(), b""))

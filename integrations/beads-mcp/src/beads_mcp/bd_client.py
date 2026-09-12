@@ -538,6 +538,8 @@ class BdCliClient(BdClientBase):
             args.extend(["--assignee", params.assignee])
         if params.id:
             args.extend(["--id", params.id])
+        if params.due:
+            args.extend(["--due", params.due])
         for label in params.labels:
             args.extend(["-l", label])
         if params.deps:
@@ -578,6 +580,21 @@ class BdCliClient(BdClientBase):
             args.extend(["--notes", params.notes])
         if params.external_ref:
             args.extend(["--external-ref", params.external_ref])
+        if params.due is not None:
+            if params.due == "":
+                if not params.force_no_due:
+                    raise BdCommandError(
+                        'clearing a due date needs force_no_due=True and clear_due_reason (mirrors bd update --due="" --force-no-due --reason)'
+                    )
+                if not (params.clear_due_reason or "").strip():
+                    raise BdCommandError('force_no_due=True needs clear_due_reason (mirrors bd update --reason "<why>")')
+                args.extend(["--due", "", "--force-no-due", "--reason", params.clear_due_reason])
+            else:
+                args.extend(["--due", params.due])
+        elif params.force_no_due:
+            raise BdCommandError("force_no_due=True only applies when clearing a due date (due='')")
+        if params.repeat is not None:
+            args.extend(["--repeat", params.repeat])
 
         data = await self._run_command(*args)
         # bd update returns an array, extract first element

@@ -55,6 +55,11 @@ _version_checked: set[str] = set()
 DEFAULT_ISSUE_TYPE: IssueType = "task"
 DEFAULT_DEPENDENCY_TYPE: DependencyType = "blocks"
 
+# Days-from-now a captured issue is due, by priority, the same ladder `bd q`
+# applies: the more urgent the work, the sooner the deadline it inherits.
+# Indexed by priority 0-4 (mirrors quickDueLadderDays in cmd/bd/quick_due.go).
+PRIORITY_DUE_LADDER_DAYS = (1, 3, 7, 14, 30)
+
 
 def _register_client_for_cleanup(client: BdClientBase) -> None:
     """Register client with server cleanup system.
@@ -465,6 +470,13 @@ async def beads_create_issue(
     labels: Annotated[list[str] | None, "List of labels"] = None,
     id: Annotated[str | None, "Explicit issue ID (e.g., bd-42)"] = None,
     deps: Annotated[list[str] | None, "Dependencies (e.g., ['bd-20', 'blocks:bd-15'])"] = None,
+    due: Annotated[
+        str | None,
+        "Due date in the bd CLI's formats: +6h, +3d, tomorrow, next monday, or ISO "
+        "(2026-03-01). Omit it and a priority ladder assigns one "
+        "(P0 +1d, P1 +3d, P2 +7d, P3 +14d, P4 +30d); the assigned date is echoed "
+        "back on the returned issue's due_at",
+    ] = None,
 ) -> Issue:
     """Create a new issue.
 
@@ -475,10 +487,16 @@ async def beads_create_issue(
 
     Issues without descriptions lack context for future work and make prioritization difficult.
 
+    Every bead carries a due date: pass one via `due`, or a priority-based
+    default is assigned and echoed back on the result's due_at.
+
     Use this when you discover new work during your session.
     Link it back with beads_add_dependency using 'discovered-from' type.
     """
     client = await _get_client()
+    if due is None:
+        ladder_index = priority if 0 <= priority < len(PRIORITY_DUE_LADDER_DAYS) else len(PRIORITY_DUE_LADDER_DAYS) - 1
+        due = f"+{PRIORITY_DUE_LADDER_DAYS[ladder_index]}d"
     params = CreateIssueParams(
         title=title,
         description=description,
@@ -491,6 +509,7 @@ async def beads_create_issue(
         labels=labels or [],
         id=id,
         deps=deps or [],
+        due=due,
     )
     return await client.create(params)
 
@@ -508,6 +527,24 @@ async def beads_update_issue(
     acceptance_criteria: Annotated[str | None, "Acceptance criteria"] = None,
     notes: Annotated[str | None, "Additional notes"] = None,
     external_ref: Annotated[str | None, "External reference (e.g., gh-9, jira-ABC)"] = None,
+    due: Annotated[
+        str | None,
+        "New due date in the bd CLI's formats (+6h, +3d, tomorrow, next monday, ISO). "
+        "Pass an empty string to CLEAR it: that is a gated act that also requires "
+        "force_no_due=True and clear_due_reason, mirroring bd update --due=\"\" --force-no-due --reason",
+    ] = None,
+    force_no_due: Annotated[
+        bool, "Permit clearing the due date with due=''. Requires clear_due_reason"
+    ] = False,
+    clear_due_reason: Annotated[
+        str | None, "Why the due date is being cleared (required with force_no_due)"
+    ] = None,
+    repeat: Annotated[
+        str | None,
+        "Recurrence rule: an interval (+1d, +2w, +1m) or a 5-field cron expression "
+        '(\"0 9 * * 1\"). Closing the bead then spawns the next instance. An empty '
+        "string stops the series; the bd CLI validates the grammar",
+    ] = None,
 ) -> Issue | list[Issue]:
     """Update an existing issue.
 
@@ -539,6 +576,10 @@ async def beads_update_issue(
         acceptance_criteria=acceptance_criteria,
         notes=notes,
         external_ref=external_ref,
+        due=due,
+        force_no_due=force_no_due,
+        clear_due_reason=clear_due_reason,
+        repeat=repeat,
     )
     return await client.update(params)
 

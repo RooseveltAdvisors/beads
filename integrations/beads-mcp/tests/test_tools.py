@@ -155,6 +155,77 @@ async def test_beads_create_issue_with_labels(sample_issue):
 
 
 @pytest.mark.asyncio
+async def test_beads_create_issue_assigns_a_due_date_and_echoes_it_back():
+    """Every created bead gets a deadline: an explicit due wins, otherwise the
+    priority ladder supplies one and the result echoes the assigned date."""
+    now = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    assigned = Issue(
+        id="bd-9",
+        title="New issue",
+        status="open",
+        priority=0,
+        issue_type="task",
+        created_at=now,
+        updated_at=now,
+        due_at=now,
+    )
+    mock_client = AsyncMock()
+    mock_client.create = AsyncMock(return_value=assigned)
+
+    with patch("beads_mcp.tools._get_client", return_value=mock_client):
+        # Omitted due: the priority ladder applies (P0 = +1d, P4 = +30d).
+        await beads_create_issue(title="New issue", priority=0)
+        ladder_p0 = mock_client.create.call_args[0][0].due
+        await beads_create_issue(title="New issue", priority=4)
+        ladder_p4 = mock_client.create.call_args[0][0].due
+
+        # An explicit due passes through untouched.
+        await beads_create_issue(title="New issue", priority=2, due="tomorrow")
+        explicit = mock_client.create.call_args[0][0].due
+
+    assert ladder_p0 == "+1d"
+    assert ladder_p4 == "+30d"
+    assert explicit == "tomorrow"
+
+
+@pytest.mark.asyncio
+async def test_beads_create_issue_result_carries_due_at(sample_issue):
+    """The tool result carries the assigned deadline on due_at."""
+    dated = sample_issue.model_copy(update={"due_at": datetime(2026, 3, 1, tzinfo=timezone.utc)})
+    mock_client = AsyncMock()
+    mock_client.create = AsyncMock(return_value=dated)
+
+    with patch("beads_mcp.tools._get_client", return_value=mock_client):
+        issue = await beads_create_issue(title="New issue", priority=2)
+
+    assert issue.due_at == datetime(2026, 3, 1, tzinfo=timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_beads_update_issue_due_and_repeat_reach_the_client(sample_issue):
+    """The update tool forwards due (with force-gate fields) and repeat."""
+    mock_client = AsyncMock()
+    mock_client.update = AsyncMock(return_value=sample_issue)
+
+    with patch("beads_mcp.tools._get_client", return_value=mock_client):
+        await beads_update_issue(issue_id="bd-1", due="+3d", repeat="0 9 * * 1")
+        gated = mock_client.update.call_args[0][0]
+        assert gated.due == "+3d"
+        assert gated.repeat == "0 9 * * 1"
+
+        await beads_update_issue(
+            issue_id="bd-1",
+            due="",
+            force_no_due=True,
+            clear_due_reason="series ends here",
+        )
+        cleared = mock_client.update.call_args[0][0]
+        assert cleared.due == ""
+        assert cleared.force_no_due is True
+        assert cleared.clear_due_reason == "series ends here"
+
+
+@pytest.mark.asyncio
 async def test_beads_update_issue(sample_issue):
     """Test beads_update_issue tool."""
     updated_issue = sample_issue.model_copy(update={"status": "blocked"})
