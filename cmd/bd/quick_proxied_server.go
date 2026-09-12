@@ -40,6 +40,10 @@ func runQuickProxiedServer(cmd *cobra.Command, ctx context.Context, args []strin
 		IssueType: types.IssueType(issueType).Normalize(),
 	}
 
+	if err := resolveQuickDue(cmd, issue); err != nil {
+		return err
+	}
+
 	res, err := uow.RunTxResult(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (*types.Issue, string, error) {
 		params := domain.CreateIssueParams{
 			Issue:                   issue,
@@ -58,6 +62,7 @@ func runQuickProxiedServer(cmd *cobra.Command, ctx context.Context, args []strin
 	}
 	commandDidWrite.Store(true)
 
+	echoQuickDue(res)
 	fmt.Println(res.ID)
 	return nil
 }

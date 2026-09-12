@@ -88,7 +88,7 @@ The full namespaces routed to YAML are:
 
 Plus these individual keys:
 
-`no-db`, `json`, `db`, `actor`, `identity`, `no-push`, `no-git-ops`, `agent.profile`, `create.require-description`, `import.auto`, `import.path`, `prime.max-memories`, `prime.max-memory-chars`, and the secret keys `github.token`, `gitlab.token`, `jira.api_token`, `ado.pat`, `linear.api_key`, `linear.oauth_client_id`, `linear.oauth_client_secret`.
+`no-db`, `json`, `db`, `actor`, `identity`, `no-push`, `no-git-ops`, `agent.profile`, `create.require-description`, `due.required`, `import.auto`, `import.path`, `prime.max-memories`, `prime.max-memory-chars`, and the secret keys `github.token`, `gitlab.token`, `jira.api_token`, `ado.pat`, `linear.api_key`, `linear.oauth_client_id`, `linear.oauth_client_secret`.
 
 Any key whose name contains `api_key`, `api-key`, `secret`, `token`, or `password` is treated as a secret: it is refused on git-tracked `config.yaml` files unless you pass `--force-git-tracked`. Prefer exporting the value as an environment variable instead (e.g. `LINEAR_API_KEY`).
 
@@ -115,6 +115,7 @@ Any key whose name contains `api_key`, `api-key`, `secret`, `token`, or `passwor
 | `git.author` | — | `BD_GIT_AUTHOR` | (none) | Override commit author for beads commits |
 | `git.no-gpg-sign` | — | `BD_GIT_NO_GPG_SIGN` | `false` | Disable GPG signing for beads commits |
 | `create.require-description` | — | `BD_CREATE_REQUIRE_DESCRIPTION` | `false` | Require description on `bd create` |
+| `due.required` | — | `BD_DUE_REQUIRED` | `false` | Require a due date on new work (see [below](#mandatory-due-dates)) |
 | `validation.on-create` | — | `BD_VALIDATION_ON_CREATE` | `none` | Template validation: `none`, `warn`, `error` |
 | `validation.on-close` | — | `BD_VALIDATION_ON_CLOSE` | `none` | Template validation on close |
 | `validation.on-sync` | — | `BD_VALIDATION_ON_SYNC` | `none` | Template validation before sync |
@@ -168,6 +169,51 @@ database backups.
 Routing note: `output.title-length` and `agents.file` are functionally tool-level settings, but `bd config set` writes them to the Dolt database. They are typically read from `config.yaml` when set there directly.
 
 `bd config show` is the source of truth for what's currently effective on your machine, including provenance.
+
+## Mandatory Due Dates
+
+A bead with no deadline is a bead nothing ever escalates. Turn `due.required`
+on and every new bead must carry one:
+
+```bash
+bd config set due.required true
+
+bd create "Rotate the signing key"
+# error: due date is required for task "Rotate the signing key" (pass --due, ...)
+
+bd create "Rotate the signing key" --due +7d
+```
+
+The rule lives at the storage boundary, not in the CLI flags, so every create
+surface answers to it — `bd create`, the HTTP and MCP servers, and the issueops
+API alike. It is off by default.
+
+**Quick capture stays a one-liner.** `bd q` fills in a due date from the
+priority ladder when you do not pass `--due`, and reports the one it chose:
+
+| Priority | Due |
+|---|---|
+| P0 | +1 day |
+| P1 | +3 days |
+| P2 | +7 days |
+| P3 | +14 days |
+| P4 | +30 days |
+
+**Exemptions.** Records that are not work with a deadline are never asked for
+one: `event` beads, wisps, protos, and beads a federation peer authored.
+`bd import` is exempt too, so restoring a snapshot — or backfilling due dates
+onto beads created before you turned the rule on — always works.
+
+**Clearing a due date** is the one edit that can undo the invariant, so it has
+to be deliberate:
+
+```bash
+bd update bd-a1b2 --due "" --force-no-due --reason "tracked upstream instead"
+```
+
+A bead held to the rule also gets an assignee — the actor creating it, when
+nothing else claims it — so whatever reads the deadline later has somewhere to
+send it.
 
 ## Dolt History, Backup, and Push
 
@@ -487,6 +533,9 @@ dolt:
 # Issue creation policies
 create:
   require-description: true
+
+due:
+  required: true     # Every new bead must carry a due date
 
 validation:
   on-create: warn    # Warn when creating issues missing required sections

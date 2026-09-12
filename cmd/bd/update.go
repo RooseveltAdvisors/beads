@@ -280,7 +280,18 @@ pointless).`,
 		if cmd.Flags().Changed("due") {
 			dueStr, _ := cmd.Flags().GetString("due")
 			if dueStr == "" {
-				// Empty string clears the due date
+				// Empty string clears the due date. Under `due.required` that
+				// is the one edit that can put an issue back into the state the
+				// invariant exists to prevent, so it has to be deliberate and
+				// it has to say why.
+				//
+				// ponytail: the requirement is flat rather than per-target —
+				// no type lookup, no exempt-row carve-out — because nothing
+				// clears a due date off an event or a wisp, and a stray --force-
+				// no-due on one costs a flag, not correctness.
+				if err := requireForceNoDue(cmd); err != nil {
+					return HandleErrorRespectJSON("%v", err)
+				}
 				updates["due_at"] = nil
 			} else {
 				t, err := timeparsing.ParseRelativeTime(dueStr, time.Now())
@@ -1011,6 +1022,8 @@ func init() {
 	//   --defer=+1h         Hidden from bd ready for 1 hour
 	//   --defer=""          Clear defer (show in bd ready immediately)
 	updateCmd.Flags().String("due", "", "Due date/time (empty to clear). Formats: +6h, +1d, +2w, tomorrow, next monday, 2025-01-15")
+	updateCmd.Flags().Bool("force-no-due", false, "Permit --due=\"\" to clear the due date when due.required is on. Requires --reason")
+	updateCmd.Flags().String("reason", "", "Why the due date is being cleared (required with --force-no-due)")
 	updateCmd.Flags().String("defer", "", "Defer until date (empty to clear). Issue hidden from bd ready until then, then auto-wakes to open")
 	// Gate fields (bd-z6kw)
 	updateCmd.Flags().String("await-id", "", "Set gate await_id (e.g., GitHub run ID for gh:run gates)")
@@ -1026,4 +1039,22 @@ func init() {
 	updateCmd.Flags().StringArray("unset-metadata", nil, "Remove metadata key (repeatable, e.g., --unset-metadata team)")
 	updateCmd.ValidArgsFunction = issueIDCompletion
 	rootCmd.AddCommand(updateCmd)
+}
+
+// requireForceNoDue gates clearing a due date under the mandatory-due
+// invariant. It is a no-op in a workspace that has not turned the invariant on,
+// so upstream `bd update --due ""` is unchanged.
+func requireForceNoDue(cmd *cobra.Command) error {
+	if !storageissueops.DueRequiredEnabled() {
+		return nil
+	}
+	force, _ := cmd.Flags().GetBool("force-no-due")
+	reason, _ := cmd.Flags().GetString("reason")
+	if !force {
+		return fmt.Errorf("clearing a due date needs --force-no-due --reason \"<why>\" while due.required is on")
+	}
+	if strings.TrimSpace(reason) == "" {
+		return fmt.Errorf("--force-no-due needs --reason \"<why>\"")
+	}
+	return nil
 }

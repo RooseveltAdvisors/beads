@@ -47,6 +47,17 @@ func ValidatePublicCreateRequest(request publicops.CreateRequest) error {
 	if err := types.CheckFieldLen("parent ID", request.ParentID); err != nil {
 		return publicCreateValidationError(fmt.Errorf("create: %w", err))
 	}
+	// The mandatory-due invariant, on the public leg. It is checked here rather
+	// than only in the CLI so HTTP, MCP and the issueops facade answer to it
+	// too; the classic/store leg checks it in CreateIssueInTxWithResult.
+	//
+	// ponytail: a workspace-configured infra type is marked wisp-plane by the
+	// unit of work AFTER this validator runs, so such a create is held to the
+	// invariant like any other work type. Give it a due date or list it as an
+	// exempt type; do not special-case it here, where the routing is not known.
+	if err := ValidateDueRequired(request.Issue); err != nil {
+		return err
+	}
 	return validatePublicCreateDependencies(request)
 }
 
@@ -54,6 +65,11 @@ func ValidatePublicCreateRequest(request publicops.CreateRequest) error {
 // create request using the supplied configuration.
 func PreparePublicCreateRequest(request publicops.CreateRequest, context PublicCreateContext) (publicops.CreateRequest, error) {
 	request = CloneCreateRequest(request)
+	if request.Issue != nil {
+		// Normalization, not validation: an issue held to the invariant gets a
+		// destination before the second validation pass reads it.
+		DefaultDueRequiredAssignee(request.Issue, request.Actor)
+	}
 	if err := ValidatePublicCreateRequest(request); err != nil {
 		return publicops.CreateRequest{}, err
 	}
