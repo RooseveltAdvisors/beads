@@ -29,6 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   count. The `due` audit event carries the miss count, and the sweep's JSON
   names the beads that escalated.
 
+  `bd due backfill` no longer stacks a legacy backlog on one instant. Beads are
+  dated from their own creation, but every bead older than the interval used to
+  collapse onto the same floor — most of them, in a repository being backfilled
+  for the first time — so the clock would fire thousands at once and say only
+  "2000 due". Floored beads are now spread across the window by their own id,
+  deterministically, so the dry-run report and `--apply` still agree.
+
   Graph plans can set `due_source` too. `bd create --due-source` had given
   single-issue creates a way to declare a due date's provenance and left
   `--graph` without one, so every bead a plan created carried the default

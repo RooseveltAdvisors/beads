@@ -149,8 +149,12 @@ func TestPlanDueBackfillFloorsDatesToNowPlusInterval(t *testing.T) {
 	for _, row := range report.Rows {
 		switch row.ID {
 		case "bd-ancient", "bd-edge":
-			if !row.Floored || !row.ProposedDue.Equal(floor) {
-				t.Errorf("%s: proposed %v floored=%v, want %v floored=true", row.ID, row.ProposedDue, row.Floored, floor)
+			// Floored rows land INSIDE the window that starts at the floor,
+			// not exactly on it: a whole legacy backlog stacked on one instant
+			// fires as one herd (see spreadFlooredDue).
+			if !row.Floored || row.ProposedDue.Before(floor) || !row.ProposedDue.Before(floor.Add(interval)) {
+				t.Errorf("%s: proposed %v floored=%v, want floored=true inside [%v, %v)",
+					row.ID, row.ProposedDue, row.Floored, floor, floor.Add(interval))
 			}
 		case "bd-recent":
 			if row.Floored || !row.ProposedDue.Equal(day(28)) {
@@ -205,5 +209,39 @@ func TestFormatCountMapIsStable(t *testing.T) {
 	}
 	if got := formatCountMap(nil); got != "(none)" {
 		t.Errorf("formatCountMap(nil) = %q, want (none)", got)
+	}
+}
+
+// The backfill's report is a promise: a human reads the proposed dates, then
+// re-runs with --apply expecting those dates. A spread drawn at random would
+// break that — the dry run would describe a different backfill than the one
+// that runs — so the offset must be derived from the bead's identity.
+func TestSpreadFlooredDueIsDeterministicAndInsideTheWindow(t *testing.T) {
+	interval := 7 * 24 * time.Hour
+	floor := day(20)
+
+	first := spreadFlooredDue("bd-ancient", floor, interval)
+	if second := spreadFlooredDue("bd-ancient", floor, interval); !first.Equal(second) {
+		t.Errorf("same id produced %v then %v; the report and --apply would disagree", first, second)
+	}
+	if first.Before(floor) || !first.Before(floor.Add(interval)) {
+		t.Errorf("proposed %v is outside [%v, %v)", first, floor, floor.Add(interval))
+	}
+
+	// The point of the spread is that a backlog does not collapse onto one
+	// instant, so distinct beads must genuinely land on distinct dates.
+	seen := map[time.Time]string{}
+	for _, id := range []string{"bd-1", "bd-2", "bd-3", "bd-4", "bd-5", "bd-6", "bd-7", "bd-8"} {
+		at := spreadFlooredDue(id, floor, interval)
+		if other, clash := seen[at]; clash {
+			t.Errorf("%s and %s both land on %v", id, other, at)
+		}
+		seen[at] = id
+	}
+
+	// A degenerate interval has no window to spread across and must not panic
+	// or produce a date before the floor.
+	if got := spreadFlooredDue("bd-1", floor, 0); !got.Equal(floor) {
+		t.Errorf("zero interval produced %v, want the floor %v", got, floor)
 	}
 }
