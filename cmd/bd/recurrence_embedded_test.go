@@ -371,6 +371,39 @@ func TestEmbeddedRecurrenceSpawnOnClose(t *testing.T) {
 		}
 	})
 
+	// A ready-front read between the deadline and the close sweeps the
+	// overdue bead forward by its pattern, but that sweep-advanced date must
+	// not re-anchor the series: the successor lands on the occurrence the
+	// sweep teed up, not one interval past it, whether or not any read ran
+	// between the deadline and the close.
+	t.Run("a_ready_read_before_a_late_close_does_not_skip_an_occurrence", func(t *testing.T) {
+		const title = "Swept then closed"
+		first := bdCreate(t, bd, dir, title, "--type", "chore",
+			"--due", time.Now().UTC().AddDate(0, 0, -8).Format("2006-01-02"), "--repeat", "+1w")
+		if first.DueAt == nil {
+			t.Fatal("setup: the recurring bead has no due date")
+		}
+
+		bdReadyRun(t, bd, dir)
+		swept := bdShow(t, bd, dir, first.ID)
+		if swept.DueAt == nil || !swept.DueAt.After(first.DueAt.UTC()) {
+			t.Fatalf("setup: the ready read did not sweep the overdue bead forward: %v", swept.DueAt)
+		}
+		if swept.DueSource != types.DueSourceRepeat {
+			t.Fatalf("setup: swept due_source = %q, want %q", swept.DueSource, types.DueSourceRepeat)
+		}
+
+		bdClose(t, bd, dir, first.ID)
+		successor := otherThan(t, bdIssuesByTitle(t, bd, dir, title), first.ID)
+		if successor.DueAt == nil {
+			t.Fatal("successor has no due date")
+		}
+		if !successor.DueAt.Equal(*swept.DueAt) {
+			t.Errorf("successor due = %v, want the sweep-teed-up occurrence %v; a later date means the sweep re-anchored the series and dropped an occurrence",
+				successor.DueAt.UTC(), swept.DueAt.UTC())
+		}
+	})
+
 	// Closing the successor keeps the chain going, which is what makes this a
 	// series rather than a single extra instance.
 	t.Run("the_series_continues_past_the_second_instance", func(t *testing.T) {

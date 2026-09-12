@@ -147,6 +147,7 @@ func (r *issueSQLRepositoryImpl) Update(ctx context.Context, id string, updates 
 	// allowlist and be refused by name.
 	forceClosePolicy := issueops.PopForceClosePolicy(updates)
 	dueClearReason := issueops.PopDueClearReason(updates)
+	issueops.ClearRecurrenceBoundsOnStop(updates)
 
 	// Bound the VARCHAR(255) assignment columns before touching SQL, mirroring
 	// issueops.updateIssueInTx: an over-length assignee/owner aborts with a typed
@@ -216,9 +217,18 @@ func (r *issueSQLRepositoryImpl) Update(ctx context.Context, id string, updates 
 	if err := issueops.ValidateDueClear(oldIssue, updates, dueClearReason); err != nil {
 		return fmt.Errorf("db: Update %s: %w", id, err)
 	}
+	// Recurrence parity with issueops.updateIssueInTx: an update that gives a
+	// bead a pattern records the series' start, and the triple the update
+	// would LAND validates against the same rule every create path applies,
+	// over the row this transaction read, so a refusal writes nothing.
+	issueops.AnchorRecurrenceUpdate(oldIssue, updates)
+	if err := issueops.ValidateRecurrenceUpdate(oldIssue, updates); err != nil {
+		return fmt.Errorf("db: Update %s: %w", id, err)
+	}
 	// A status that matched the row was already dropped as a no-op, so the
 	// lifecycle side effects below only fire on a real transition.
 	_, statusChanging := updates["status"]
+	crossing := false
 
 	// Close-policy parity with issueops.updateIssueInTx: a status that crosses
 	// into the done category is a close by another name and answers to close
@@ -226,9 +236,10 @@ func (r *issueSQLRepositoryImpl) Update(ctx context.Context, id string, updates 
 	// work. The wrap keeps the sentinels matchable, so a caller distinguishes
 	// these refusals here exactly as it does on the close path.
 	if statusChanging {
-		crossing, err := issueops.CrossesIntoDoneCategoryInTx(ctx, r.runner, oldIssue.Status, updates)
-		if err != nil {
-			return fmt.Errorf("db: Update %s: %w", id, err)
+		var cerr error
+		crossing, cerr = issueops.CrossesIntoDoneCategoryInTx(ctx, r.runner, oldIssue.Status, updates)
+		if cerr != nil {
+			return fmt.Errorf("db: Update %s: %w", id, cerr)
 		}
 		if crossing {
 			if _, err := issueops.EnforceClosePolicyInTx(ctx, r.runner, id, forceClosePolicy); err != nil {
@@ -307,6 +318,16 @@ func (r *issueSQLRepositoryImpl) Update(ctx context.Context, id string, updates 
 		Comment: dueClearReason,
 	}, domain.RecordEventOpts{UseWispsTable: opts.UseWispsTable}); err != nil {
 		return err
+	}
+
+	// Spawn parity with issueops.updateIssueInTx: a status update that closes
+	// a recurring bead is a close by another name, so it files the successor
+	// inside this transaction. The unit-of-work commit is DOLT_COMMIT('-Am'),
+	// which stages every table the spawn wrote.
+	if crossing {
+		if _, err := issueops.SpawnRecurrenceInTx(ctx, r.runner, id, actor); err != nil {
+			return fmt.Errorf("db: Update %s: spawn recurrence: %w", id, err)
+		}
 	}
 
 	if statusChanging {

@@ -289,6 +289,60 @@ func TestNextOccurrencePastNeverLandsInThePast(t *testing.T) {
 	}
 }
 
+// The spawn walks the series from its recorded anchor, never from the due
+// date the sweep advanced past the deadline: whether a ready read ran between
+// the deadline and the close must not change the successor's date.
+func TestNextSeriesOccurrenceAnchorsOnTheSeriesNotTheSweptDue(t *testing.T) {
+	anchor := at(2026, time.March, 2, 9) // Monday 09:00, the series' start
+	now := at(2026, time.March, 25, 15)  // Wednesday 15:00, three weeks later
+
+	// A ready read on Mar 4 swept the overdue bead to Mar 30 (the first
+	// occurrence after the sweep). Closing on Mar 25 must file THAT
+	// occurrence, not one interval past it.
+	swept := &types.Issue{
+		RepeatPattern: "+1w",
+		DueAt:         ptr(at(2026, time.March, 30, 9)),
+		RepeatStart:   &anchor,
+	}
+	got, ok := nextSeriesOccurrence(swept, anchor, now)
+	if !ok || !got.Equal(at(2026, time.March, 30, 9)) {
+		t.Fatalf("swept close: (%v, %v), want Mar 30 09:00 - the occurrence the sweep teed up", got, ok)
+	}
+
+	// A due date the user dragged off the grid does not drag the series:
+	// the successor stays on the anchor's weekday.
+	edited := &types.Issue{
+		RepeatPattern: "+1w",
+		DueAt:         ptr(at(2026, time.April, 15, 12)),
+		RepeatStart:   &anchor,
+	}
+	got, ok = nextSeriesOccurrence(edited, anchor, now)
+	if !ok || !got.Equal(at(2026, time.March, 30, 9)) {
+		t.Fatalf("edited close: (%v, %v), want the grid's Mar 30 09:00", got, ok)
+	}
+
+	// A series whose start bound predates the horizon by years still walks:
+	// the result is bounded by now + RepeatHorizon, not by the anchor's.
+	ancient := time.Date(2015, time.March, 2, 9, 0, 0, 0, time.UTC)
+	old := &types.Issue{RepeatPattern: "+1w", RepeatStart: &ancient}
+	got, ok = nextSeriesOccurrence(old, ancient, now)
+	if !ok || !got.Equal(at(2026, time.March, 30, 9)) {
+		t.Fatalf("ancient anchor: (%v, %v), want Mar 30 09:00", got, ok)
+	}
+
+	// An exhausted series files nothing, exactly as the instance-anchored
+	// walk does.
+	ended := &types.Issue{
+		RepeatPattern: "+1w",
+		DueAt:         ptr(at(2026, time.March, 30, 9)),
+		RepeatStart:   &anchor,
+		RepeatEnd:     ptr(at(2026, time.March, 20, 0)),
+	}
+	if got, ok := nextSeriesOccurrence(ended, anchor, now); ok {
+		t.Fatalf("exhausted series produced %v past repeat_end", got)
+	}
+}
+
 // Giving a bead a repeat pattern records where the series starts, so a
 // monthly rule keeps its original day-of-month; a caller's own bound wins.
 func TestAnchorRecurrenceUpdateRecordsTheSeriesStart(t *testing.T) {

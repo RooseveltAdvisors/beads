@@ -281,7 +281,38 @@ func nextOccurrencePast(probe *types.Issue, dueAt, now time.Time) (time.Time, bo
 	if !repeat.IsInterval() && now.After(from) {
 		from = now
 	}
-	horizon := from.Add(timeparsing.RepeatHorizon)
+	return walkOccurrences(probe, from, now, from.Add(timeparsing.RepeatHorizon))
+}
+
+// nextSeriesOccurrence is nextOccurrencePast walked from a series anchor
+// rather than from an instance's current due date: it steps the pattern from
+// anchor and returns the first occurrence strictly after now, bounded by the
+// later of anchor and now plus RepeatHorizon. Walking from the recorded
+// anchor keeps a close's answer independent of the due sweep, which re-dates
+// an open overdue recurring bead on every ready-front read — anchoring on
+// that swept date instead would drop the occurrence the sweep had teed up
+// whenever a read fell between the deadline and the close.
+func nextSeriesOccurrence(probe *types.Issue, anchor, now time.Time) (time.Time, bool) {
+	repeat, err := probe.Repeat()
+	if err != nil {
+		return time.Time{}, false
+	}
+	from := anchor
+	if !repeat.IsInterval() && now.After(from) {
+		from = now
+	}
+	horizon := from
+	if now.After(horizon) {
+		horizon = now
+	}
+	return walkOccurrences(probe, from, now, horizon.Add(timeparsing.RepeatHorizon))
+}
+
+// walkOccurrences steps a series forward from `from`, returning the first
+// occurrence strictly after `now` and within `horizon`, or ok=false when the
+// series cannot supply one: it has ended (repeat_end), its pattern is
+// unusable, or the next occurrence falls beyond the horizon.
+func walkOccurrences(probe *types.Issue, from, now, horizon time.Time) (time.Time, bool) {
 	for {
 		next, ok, err := probe.NextOccurrence(from)
 		if err != nil || !ok || !next.After(from) || next.After(horizon) {
@@ -335,20 +366,33 @@ func SpawnRecurrenceInTx(ctx context.Context, tx DBTX, id, actor string) (SpawnR
 		return result, nil
 	}
 
-	// The series advances from the instance's OWN due date when it has one —
-	// whole steps from the original anchor, so a bead closed early or late
-	// keeps its schedule's phase — but walks forward until the successor is
-	// strictly in the future, so a late close never files a bead that is
-	// already overdue. It is the sweep's walk, for the same reason.
+	// The series advances from its recorded anchor, never from the due date a
+	// due sweep may have advanced past the deadline: the sweep re-dates an
+	// open overdue recurring bead on every ready-front read, and anchoring on
+	// that date would make the successor depend on how much read traffic
+	// happened between the deadline and this close, silently dropping the
+	// occurrence the sweep had teed up. repeat_start is the anchor — create,
+	// update, and every successor record it — with the instance's own due
+	// date as the fallback for series that predate it. The walk still ends
+	// strictly in the future, so a late close never files an overdue bead,
+	// and a successor never lands BEFORE the closed instance's own due date:
+	// an early close keeps the occurrence after THAT date rather than
+	// re-filing a slot the series has already passed.
 	if _, err := issue.Repeat(); err != nil {
 		return result, fmt.Errorf("spawn recurrence for %s: %w", id, err)
 	}
 	now := time.Now().UTC()
-	from := now
+	anchor := now
 	if issue.DueAt != nil {
-		from = issue.DueAt.UTC()
+		anchor = issue.DueAt.UTC()
 	}
-	next, ok := nextOccurrencePast(issue, from, now)
+	if issue.RepeatStart != nil {
+		anchor = issue.RepeatStart.UTC()
+	}
+	next, ok := nextSeriesOccurrence(issue, anchor, now)
+	if ok && issue.DueAt != nil && next.Before(issue.DueAt.UTC()) {
+		next, ok = nextSeriesOccurrence(issue, issue.DueAt.UTC(), now)
+	}
 	if !ok {
 		return result, nil // series exhausted: repeat_end reached
 	}
