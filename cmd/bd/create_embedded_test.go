@@ -1348,3 +1348,22 @@ func TestEmbeddedCreateConcurrent(t *testing.T) {
 		}
 	}
 }
+
+// TestEmbeddedCreateDueSource pins the provenance a create records for its
+// due date: a caller-chosen date is explicit, `--due-source default` marks a
+// synthesized one (the MCP ladder's stamp), and an unknown value is refused
+// rather than silently mislabeled.
+func TestEmbeddedCreateDueSource(t *testing.T) {
+	bd := buildEmbeddedBD(t)
+	dir, _, _ := bdInit(t, bd, "--prefix", "dsrc")
+
+	if issue := bdCreate(t, bd, dir, "Chosen date", "--due", "+48h"); issue.DueSource != types.DueSourceExplicit {
+		t.Fatalf("default provenance = %q, want %q", issue.DueSource, types.DueSourceExplicit)
+	}
+	if issue := bdCreate(t, bd, dir, "Synthesized date", "--due", "+48h", "--due-source", "default"); issue.DueSource != types.DueSourceDefault {
+		t.Fatalf("--due-source default provenance = %q, want %q", issue.DueSource, types.DueSourceDefault)
+	}
+	if out := bdCreateFail(t, bd, dir, "Bad provenance", "--due", "+48h", "--due-source", "invented"); !strings.Contains(out, "invalid --due-source") {
+		t.Fatalf("invalid --due-source output = %s", out)
+	}
+}

@@ -53,6 +53,7 @@ type createInput struct {
 	eventTarget        string
 	eventPayload       string
 	dueAt              *time.Time
+	dueSource          types.DueSource
 	deferUntil         *time.Time
 	repeat             recurrenceFlags
 	metadata           json.RawMessage
@@ -240,6 +241,12 @@ func gatherCreateInput(cmd *cobra.Command, args []string) (createInput, error) {
 		}
 		in.dueAt = &t
 	}
+
+	dueSource, err := dueSourceFromFlag(cmd)
+	if err != nil {
+		return in, err
+	}
+	in.dueSource = dueSource
 
 	repeat, err := gatherRecurrenceFlags(cmd)
 	if err != nil {

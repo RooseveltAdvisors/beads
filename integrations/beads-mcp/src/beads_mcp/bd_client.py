@@ -121,6 +121,11 @@ class BdClientBase(ABC):
         pass
 
     @abstractmethod
+    async def get_config(self, key: str) -> str:
+        """Read a workspace configuration value; "" when unset."""
+        pass
+
+    @abstractmethod
     async def update(self, params: UpdateIssueParams) -> Issue:
         """Update an existing issue."""
         pass
@@ -515,6 +520,22 @@ class BdCliClient(BdClientBase):
 
         return Issue.model_validate(data)
 
+    async def get_config(self, key: str) -> str:
+        """Read a workspace configuration value.
+
+        Args:
+            key: Configuration key (e.g., "due.required")
+
+        Returns:
+            The stored value, or "" when the key is not set (the caller
+            applies the key's default, mirroring the CLI's own defaults).
+        """
+        data = await self._run_command("config", "get", key)
+        if isinstance(data, dict):
+            value = data.get("value")
+            return str(value) if value is not None else ""
+        return ""
+
     async def create(self, params: CreateIssueParams) -> Issue:
         """Create a new issue.
 
@@ -540,6 +561,8 @@ class BdCliClient(BdClientBase):
             args.extend(["--id", params.id])
         if params.due:
             args.extend(["--due", params.due])
+        if params.due_source:
+            args.extend(["--due-source", params.due_source])
         for label in params.labels:
             args.extend(["-l", label])
         if params.deps:

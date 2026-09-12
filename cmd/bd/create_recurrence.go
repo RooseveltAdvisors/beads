@@ -68,6 +68,20 @@ func registerRecurrenceFlags(cmd *cobra.Command) {
 	cmd.Flags().String("repeat-end", "", "Last occurrence of a recurring bead; the series stops after it. Same formats as --due")
 }
 
+// dueSourceFromFlag reads the --due-source provenance flag. Empty keeps the
+// CLI's explicit default; anything else must name a valid due source.
+func dueSourceFromFlag(cmd *cobra.Command) (types.DueSource, error) {
+	raw, _ := cmd.Flags().GetString("due-source")
+	if raw == "" {
+		return types.DueSourceExplicit, nil
+	}
+	source := types.DueSource(raw)
+	if !source.IsValid() {
+		return "", HandleError("invalid --due-source %q (must be %s)", raw, types.ValidDueSourceNames())
+	}
+	return source, nil
+}
+
 // firstOccurrenceDue derives the due date of a recurring bead's FIRST instance
 // when the caller gave --repeat without --due: the rule alone already says when
 // the work is next expected, so asking for a redundant --due would be busywork.

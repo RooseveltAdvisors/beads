@@ -72,8 +72,11 @@ var issueUpsertColumns = []string{
 	// JSONL interchange carries, so an edited pattern must reach peers on
 	// re-import rather than being frozen at whatever the first import saw.
 	// due_at/defer_until are deliberately NOT in this list — that predates
-	// recurrence and is left as it was.
-	"repeat_pattern", "repeat_start", "repeat_end", "due_source",
+	// recurrence and is left as it was. due_source stays out too: it labels
+	// the locally stamped due_at, which itself never syncs here, so a legacy
+	// snapshot without the field must not reset the provenance of a date the
+	// snapshot does not even carry.
+	"repeat_pattern", "repeat_start", "repeat_end",
 }
 
 // issueUpsertAssignments renders the ON DUPLICATE KEY UPDATE clause. With

@@ -431,14 +431,64 @@ async def test_create_passes_due_and_echoes_it_back(bd_client, mock_process):
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_exec:
         issue = await bd_client.create(
-            CreateIssueParams(title="New issue", priority=2, issue_type="task", due="2026-03-01")
+            CreateIssueParams(
+                title="New issue",
+                priority=2,
+                issue_type="task",
+                due="2026-03-01",
+                due_source="default",
+            )
         )
 
     cmd = list(mock_exec.call_args[0])
     assert ["--due", "2026-03-01"] == cmd[cmd.index("--due") : cmd.index("--due") + 2]
+    assert ["--due-source", "default"] == cmd[cmd.index("--due-source") : cmd.index("--due-source") + 2]
     assert issue.due_at is not None
     assert issue.due_at.year == 2026
     assert issue.repeat_pattern == "+1w"
+
+
+@pytest.mark.asyncio
+async def test_create_omits_due_source_when_unset(bd_client, mock_process):
+    """A caller-chosen due date rides the CLI's explicit default."""
+    issue_data = {
+        "id": "bd-5",
+        "title": "New issue",
+        "status": "open",
+        "priority": 2,
+        "issue_type": "task",
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2025-01-25T00:00:00Z",
+        "due_at": "2026-03-01T09:00:00Z",
+    }
+    mock_process.communicate = AsyncMock(return_value=(json.dumps(issue_data).encode(), b""))
+
+    with patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_exec:
+        await bd_client.create(
+            CreateIssueParams(title="New issue", priority=2, issue_type="task", due="tomorrow")
+        )
+
+    cmd = list(mock_exec.call_args[0])
+    assert "--due-source" not in cmd
+
+
+@pytest.mark.asyncio
+async def test_get_config_returns_the_stored_value_or_empty(bd_client, mock_process):
+    """get_config unwraps `bd config get --json`; an unset key reads empty."""
+    mock_process.communicate = AsyncMock(
+        return_value=(json.dumps({"key": "due.required", "value": "false"}).encode(), b"")
+    )
+    with patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_exec:
+        assert await bd_client.get_config("due.required") == "false"
+    cmd = list(mock_exec.call_args[0])
+    assert cmd[cmd.index("config") + 1] == "get"
+    assert cmd[cmd.index("config") + 2] == "due.required"
+
+    mock_process.communicate = AsyncMock(
+        return_value=(json.dumps({"key": "due.required", "value": ""}).encode(), b"")
+    )
+    with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+        assert await bd_client.get_config("due.required") == ""
 
 
 @pytest.mark.asyncio

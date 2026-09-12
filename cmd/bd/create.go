@@ -261,6 +261,11 @@ var createCmd = &cobra.Command{
 			dueAt = &t
 		}
 
+		dueSource, err := dueSourceFromFlag(cmd)
+		if err != nil {
+			return err
+		}
+
 		repeat, err := gatherRecurrenceFlags(cmd)
 		if err != nil {
 			return err
@@ -401,6 +406,7 @@ var createCmd = &cobra.Command{
 				WispType:           wispType,
 				InitialStatus:      statusFlag,
 				DueAt:              dueAt,
+				DueSource:          dueSource,
 				DeferUntil:         deferUntil,
 				RepeatPattern:      repeat.pattern,
 				RepeatStart:        repeat.start,
@@ -577,6 +583,7 @@ var createCmd = &cobra.Command{
 			Payload:            eventPayload,
 			InitialStatus:      statusFlag,
 			DueAt:              dueAt,
+			DueSource:          dueSource,
 			DeferUntil:         deferUntil,
 			RepeatPattern:      repeat.pattern,
 			RepeatStart:        repeat.start,
@@ -721,6 +728,7 @@ type createIssueParams struct {
 	Payload            string
 	InitialStatus      string
 	DueAt              *time.Time
+	DueSource          types.DueSource
 	DeferUntil         *time.Time
 	RepeatPattern      string
 	RepeatStart        *time.Time
@@ -820,6 +828,7 @@ func buildCreateIssue(params createIssueParams) *types.Issue {
 		Target:             params.Target,
 		Payload:            params.Payload,
 		DueAt:              params.DueAt,
+		DueSource:          params.DueSource,
 		DeferUntil:         params.DeferUntil,
 		RepeatPattern:      params.RepeatPattern,
 		RepeatStart:        params.RepeatStart,
@@ -965,6 +974,7 @@ func init() {
 	//   --defer=+1h         Hidden from bd ready for 1 hour
 	//   --defer=tomorrow    Hidden until tomorrow
 	createCmd.Flags().String("due", "", "Due date/time. Formats: +6h, +1d, +2w, tomorrow, next monday, 2025-01-15")
+	createCmd.Flags().String("due-source", string(types.DueSourceExplicit), "Provenance recorded for --due: explicit (caller supplied) or default (synthesized)")
 	createCmd.Flags().String("defer", "", "Defer until date (issue hidden from bd ready until then). Same formats as --due")
 	registerRecurrenceFlags(createCmd)
 	createCmd.Flags().String("metadata", "", "Set custom metadata (JSON string or @file.json to read from file)")

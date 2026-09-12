@@ -193,6 +193,7 @@ class CreateIssueParams(BaseModel):
     id: str | None = None
     deps: list[str] = Field(default_factory=list)
     due: str | None = None
+    due_source: str | None = None
 
 
 class UpdateIssueParams(BaseModel):

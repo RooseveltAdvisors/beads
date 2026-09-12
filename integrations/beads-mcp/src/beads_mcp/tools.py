@@ -60,6 +60,26 @@ DEFAULT_DEPENDENCY_TYPE: DependencyType = "blocks"
 # Indexed by priority 0-4 (mirrors quickDueLadderDays in cmd/bd/quick_due.go).
 PRIORITY_DUE_LADDER_DAYS = (1, 3, 7, 14, 30)
 
+# The workspace switch behind the mandatory-due invariant (mirrors
+# issueops.DueRequiredKey); its default, when unset, is on.
+DUE_REQUIRED_KEY = "due.required"
+
+# String tokens the CLI's bool coercion reads as false; anything else (including
+# the empty "not set" value, whose default is true) keeps due.required on.
+_FALSE_CONFIG_TOKENS = {"false", "0", "no", "off", "n"}
+
+
+async def _due_required_enabled(client: BdClientBase) -> bool:
+    """Mirror the CLI's `due.required` gate, whose yaml default is on."""
+    raw = (await client.get_config(DUE_REQUIRED_KEY)).strip().lower()
+    return raw not in _FALSE_CONFIG_TOKENS
+
+
+def _due_required_exempt(issue_type: IssueType) -> bool:
+    """Mirror the CLI's exemption classes that this tool's parameters can reach:
+    events stay undated, and wisp/template/federated rows cannot be built here."""
+    return issue_type == "event"
+
 
 def _register_client_for_cleanup(client: BdClientBase) -> None:
     """Register client with server cleanup system.
@@ -473,8 +493,9 @@ async def beads_create_issue(
     due: Annotated[
         str | None,
         "Due date in the bd CLI's formats: +6h, +3d, tomorrow, next monday, or ISO "
-        "(2026-03-01). Omit it and a priority ladder assigns one "
-        "(P0 +1d, P1 +3d, P2 +7d, P3 +14d, P4 +30d); the assigned date is echoed "
+        "(2026-03-01). Omit it and, while the workspace requires due dates, a "
+        "priority ladder assigns one (P0 +1d, P1 +3d, P2 +7d, P3 +14d, P4 +30d) "
+        "stamped as a default, not a chosen date; the assigned date is echoed "
         "back on the returned issue's due_at",
     ] = None,
 ) -> Issue:
@@ -487,16 +508,20 @@ async def beads_create_issue(
 
     Issues without descriptions lack context for future work and make prioritization difficult.
 
-    Every bead carries a due date: pass one via `due`, or a priority-based
-    default is assigned and echoed back on the result's due_at.
+    Every bead carries a due date: pass one via `due`, or - exactly like `bd q` -
+    a priority-based default is assigned while the workspace requires due dates
+    (events stay undated) and echoed back on the result's due_at.
 
     Use this when you discover new work during your session.
     Link it back with beads_add_dependency using 'discovered-from' type.
     """
     client = await _get_client()
-    if due is None:
-        ladder_index = priority if 0 <= priority < len(PRIORITY_DUE_LADDER_DAYS) else len(PRIORITY_DUE_LADDER_DAYS) - 1
-        due = f"+{PRIORITY_DUE_LADDER_DAYS[ladder_index]}d"
+    due_source: str | None = None
+    if due is None and not _due_required_exempt(issue_type):
+        if await _due_required_enabled(client):
+            ladder_index = priority if 0 <= priority < len(PRIORITY_DUE_LADDER_DAYS) else len(PRIORITY_DUE_LADDER_DAYS) - 1
+            due = f"+{PRIORITY_DUE_LADDER_DAYS[ladder_index]}d"
+            due_source = "default"
     params = CreateIssueParams(
         title=title,
         description=description,
@@ -510,6 +535,7 @@ async def beads_create_issue(
         id=id,
         deps=deps or [],
         due=due,
+        due_source=due_source,
     )
     return await client.create(params)
 
