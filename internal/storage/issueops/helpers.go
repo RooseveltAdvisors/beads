@@ -68,6 +68,12 @@ var issueUpsertColumns = []string{
 	"estimated_minutes", "started_at", "closed_at", "external_ref",
 	"source_repo", "close_reason", "closed_by_session", "metadata",
 	"row_lock", "updated_at",
+	// Recurrence (migration 0067). A bead's repeat rule is part of what the
+	// JSONL interchange carries, so an edited pattern must reach peers on
+	// re-import rather than being frozen at whatever the first import saw.
+	// due_at/defer_until are deliberately NOT in this list — that predates
+	// recurrence and is left as it was.
+	"repeat_pattern", "repeat_start", "repeat_end", "due_source",
 }
 
 // issueUpsertAssignments renders the ON DUPLICATE KEY UPDATE clause. With
@@ -126,7 +132,8 @@ func executeIssueInsert(ctx context.Context, tx DBTX, table string, issue *types
 			mol_type, work_type, source_system, source_repo, close_reason, closed_by_session,
 			event_kind, actor, target, payload,
 			await_type, await_id, timeout_ns, waiters,
-			due_at, defer_until, metadata,
+			due_at, defer_until, repeat_pattern, repeat_start, repeat_end, due_source,
+			metadata,
 			row_lock, storage_class
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
@@ -137,7 +144,8 @@ func executeIssueInsert(ctx context.Context, tx DBTX, table string, issue *types
 			?, ?, ?, ?, ?,
 			?, ?, ?, ?,
 			?, ?, ?, ?,
-			?, ?, ?,
+			?, ?, ?, ?, ?, ?,
+			?,
 			?, ?
 		)
 		%s
@@ -150,7 +158,8 @@ func executeIssueInsert(ctx context.Context, tx DBTX, table string, issue *types
 		issue.MolType, issue.WorkType, issue.SourceSystem, issue.SourceRepo, issue.CloseReason, issue.ClosedBySession,
 		issue.EventKind, issue.Actor, issue.Target, issue.Payload,
 		issue.AwaitType, issue.AwaitID, issue.Timeout.Nanoseconds(), FormatJSONStringArray(issue.Waiters),
-		issue.DueAt, issue.DeferUntil, JSONMetadata(issue.Metadata),
+		issue.DueAt, issue.DeferUntil, issue.RepeatPattern, issue.RepeatStart, issue.RepeatEnd, string(issue.DueSource),
+		JSONMetadata(issue.Metadata),
 		freshRowLock(), NullString(string(issue.StorageClass.Normalize())),
 	)
 	if err != nil {

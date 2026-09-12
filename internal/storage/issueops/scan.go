@@ -84,6 +84,10 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	var metadata sql.NullString
 	var rowLock sql.NullInt64       // row_lock column (NOT NULL DEFAULT 0); scanned defensively so NULL maps to 0
 	var storageClass sql.NullString // storage_class column (migration 0060); NULL = unset, resolves per EffectiveStorageClass
+	// Recurrence columns (migration 0067); scanned defensively so a row written
+	// before the migration's DEFAULT '' took effect maps to the empty rule.
+	var repeatPattern, dueSource sql.NullString
+	var repeatStart, repeatEnd sql.NullTime
 
 	dests := []any{
 		&issue.ID, &contentHash, &issue.Title, &issue.Description, &issue.Design,
@@ -95,7 +99,7 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 		&awaitType, &awaitID, &timeoutNs, &waiters,
 		&molType,
 		&eventKind, &actor, &target, &payload,
-		&dueAt, &deferUntil,
+		&dueAt, &deferUntil, &repeatPattern, &repeatStart, &repeatEnd, &dueSource,
 		&workType, &sourceSystem, &metadata, &rowLock, &storageClass,
 		&leaseExpiresAt, &heartbeatAt, &leaseGrantedNode,
 	}
@@ -210,6 +214,18 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	if deferUntil.Valid {
 		issue.DeferUntil = &deferUntil.Time
 	}
+	if repeatPattern.Valid {
+		issue.RepeatPattern = repeatPattern.String
+	}
+	if repeatStart.Valid {
+		issue.RepeatStart = &repeatStart.Time
+	}
+	if repeatEnd.Valid {
+		issue.RepeatEnd = &repeatEnd.Time
+	}
+	if dueSource.Valid {
+		issue.DueSource = types.DueSource(dueSource.String)
+	}
 	if workType.Valid {
 		issue.WorkType = types.WorkType(workType.String)
 	}
@@ -265,6 +281,10 @@ func ScanIssueLiteFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	var metadata sql.NullString
 	var rowLock sql.NullInt64       // row_lock column (NOT NULL DEFAULT 0); scanned defensively so NULL maps to 0
 	var storageClass sql.NullString // storage_class column (migration 0060); NULL = unset, resolves per EffectiveStorageClass
+	// Recurrence columns (migration 0067); scanned defensively so a row written
+	// before the migration's DEFAULT '' took effect maps to the empty rule.
+	var repeatPattern, dueSource sql.NullString
+	var repeatStart, repeatEnd sql.NullTime
 
 	dests := []any{
 		&issue.ID, &contentHash, &issue.Title,
@@ -276,7 +296,7 @@ func ScanIssueLiteFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 		&awaitType, &awaitID, &timeoutNs,
 		&molType,
 		&eventKind, &actor, &target,
-		&dueAt, &deferUntil,
+		&dueAt, &deferUntil, &repeatPattern, &repeatStart, &repeatEnd, &dueSource,
 		&workType, &sourceSystem, &metadata, &rowLock, &storageClass,
 		&leaseExpiresAt, &heartbeatAt, &leaseGrantedNode,
 	}
@@ -382,6 +402,18 @@ func ScanIssueLiteFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	}
 	if deferUntil.Valid {
 		issue.DeferUntil = &deferUntil.Time
+	}
+	if repeatPattern.Valid {
+		issue.RepeatPattern = repeatPattern.String
+	}
+	if repeatStart.Valid {
+		issue.RepeatStart = &repeatStart.Time
+	}
+	if repeatEnd.Valid {
+		issue.RepeatEnd = &repeatEnd.Time
+	}
+	if dueSource.Valid {
+		issue.DueSource = types.DueSource(dueSource.String)
 	}
 	if workType.Valid {
 		issue.WorkType = types.WorkType(workType.String)

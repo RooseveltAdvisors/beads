@@ -181,6 +181,9 @@ func gatherUpdateInput(ctx context.Context, cmd *cobra.Command) (*updateInput, e
 			in.fields["due_at"] = t
 		}
 	}
+	if err := applyRecurrenceUpdateFlags(cmd, in.fields); err != nil {
+		return nil, err
+	}
 	if cmd.Flags().Changed("defer") {
 		deferStr, _ := cmd.Flags().GetString("defer")
 		jsonOut, _ := cmd.Flags().GetBool("json")

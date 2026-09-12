@@ -475,6 +475,15 @@ type ApplyCreateItem struct {
 	// Priority 0 is P0/critical. Absent means the workspace default.
 	Priority *int `json:"priority,omitempty"`
 
+	// RepeatEnd RFC 3339. Last occurrence of a recurring bead; the series stops once the next occurrence would fall after it. Absent means unbounded. Requires `repeat_pattern`.
+	RepeatEnd *time.Time `json:"repeat_end,omitempty"`
+
+	// RepeatPattern Recurrence rule: an interval (`+1d`, `+2w`, `+1m`, `+1y`) or a five-field cron expression (`0 9 * * 1`, "minute hour day-of-month month day-of-week"). Closing a recurring bead spawns its next instance. Absent or empty means the bead does not repeat.
+	RepeatPattern *string `json:"repeat_pattern,omitempty"`
+
+	// RepeatStart RFC 3339. Earliest occurrence of a recurring bead. Absent means unbounded. Requires `repeat_pattern`.
+	RepeatStart *time.Time `json:"repeat_start,omitempty"`
+
 	// Sender Who sent this, for the message-shaped rows a plan creates. Stored verbatim and interpreted by nothing on this surface.
 	Sender *string `json:"sender,omitempty"`
 
@@ -678,6 +687,15 @@ type ApplyPatchBody struct {
 	Notes    *string `json:"notes,omitempty"`
 	Owner    *string `json:"owner,omitempty"`
 	Priority *int    `json:"priority,omitempty"`
+
+	// RepeatEnd RFC 3339. Explicit `null` CLEARS the end bound.
+	RepeatEnd *time.Time `json:"repeat_end,omitempty"`
+
+	// RepeatPattern Recurrence rule: an interval (`+1d`, `+2w`) or a five-field cron expression (`0 9 * * 1`). An EMPTY STRING stops the series; the bead keeps its own due date.
+	RepeatPattern *string `json:"repeat_pattern,omitempty"`
+
+	// RepeatStart RFC 3339. Explicit `null` CLEARS the start bound.
+	RepeatStart *time.Time `json:"repeat_start,omitempty"`
 
 	// Status The issue's status, from this workspace's own configured vocabulary.
 	//
@@ -1103,6 +1121,15 @@ type CreateIssueRequest struct {
 	// Priority 0 is P0/critical. Absent means the workspace default.
 	Priority *int `json:"priority,omitempty"`
 
+	// RepeatEnd RFC 3339. Last occurrence of a recurring bead; the series stops once the next occurrence would fall after it. Absent means unbounded. Requires `repeat_pattern`.
+	RepeatEnd *time.Time `json:"repeat_end,omitempty"`
+
+	// RepeatPattern Recurrence rule: an interval (`+1d`, `+2w`, `+1m`, `+1y`) or a five-field cron expression (`0 9 * * 1`, "minute hour day-of-month month day-of-week"). Closing a recurring bead spawns its next instance. Absent or empty means the bead does not repeat.
+	RepeatPattern *string `json:"repeat_pattern,omitempty"`
+
+	// RepeatStart RFC 3339. Earliest occurrence of a recurring bead. Absent means unbounded. Requires `repeat_pattern`.
+	RepeatStart *time.Time `json:"repeat_start,omitempty"`
+
 	// Sender Who sent this, for the message-shaped rows an orchestrator creates. Stored verbatim and interpreted by nothing on this surface.
 	Sender *string `json:"sender,omitempty"`
 
@@ -1389,6 +1416,15 @@ type IssuePatchBody struct {
 	//
 	// Removing a label the issue does not carry CHANGES NO LABELS; it is not a `404` and not a conflict. Whether the RESPONSE reports `changed: false` is a fact about the whole patch, not about this member — a request that also moved a title changed the row. The same repetition and empty-string rules as `add_labels` apply, and a value longer than the column is refused here as it is there — the length rule is about what a label may BE, not about whether this particular row happens to carry one.
 	RemoveLabels *[]string `json:"remove_labels,omitempty"`
+
+	// RepeatEnd RFC 3339. Explicit `null` CLEARS the end bound.
+	RepeatEnd *time.Time `json:"repeat_end,omitempty"`
+
+	// RepeatPattern Recurrence rule: an interval (`+1d`, `+2w`) or a five-field cron expression (`0 9 * * 1`). An EMPTY STRING stops the series; the bead keeps its own due date.
+	RepeatPattern *string `json:"repeat_pattern,omitempty"`
+
+	// RepeatStart RFC 3339. Explicit `null` CLEARS the start bound.
+	RepeatStart *time.Time `json:"repeat_start,omitempty"`
 
 	// Status The issue's status, from this workspace's own configured vocabulary.
 	//

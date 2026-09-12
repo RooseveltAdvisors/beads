@@ -598,7 +598,11 @@ func (s *DoltStore) closeIssue(ctx context.Context, id string, reason string, ac
 		}
 
 		commitMsg := fmt.Sprintf("bd: close %s", id)
-		return s.doltAddAndCommitInTx(ctx, tx, []string{"issues", "events"}, commitMsg)
+		// RecurrenceSpawnTables, not {issues, events}: closing a recurring bead
+		// files its successor in this transaction, and that successor's labels
+		// live in their own table. Staging a table the close did not touch is
+		// free (DOLT_ADD on a clean table stages nothing).
+		return s.doltAddAndCommitInTx(ctx, tx, issueops.RecurrenceSpawnTables(), commitMsg)
 	})
 }
 
@@ -641,7 +645,8 @@ func (s *DoltStore) closeIssueChecked(ctx context.Context, id string, actor stri
 		result = storage.CloseIssueResult{Unchanged: res.AlreadyClosed, OpenChildren: res.OpenChildren}
 
 		commitMsg := fmt.Sprintf("bd: close %s", id)
-		return s.doltAddAndCommitInTx(ctx, tx, []string{"issues", "events"}, commitMsg)
+		// See CloseIssue: a recurring close also writes its successor's labels.
+		return s.doltAddAndCommitInTx(ctx, tx, issueops.RecurrenceSpawnTables(), commitMsg)
 	}); err != nil {
 		return storage.CloseIssueResult{}, err
 	}

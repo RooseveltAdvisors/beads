@@ -45,6 +45,7 @@ var allowedUpdateFields = map[string]struct{}{
 	"source_repo": {}, "sender": {}, "wisp": {}, "wisp_type": {}, "no_history": {}, "pinned": {},
 	"mol_type": {}, "event_kind": {}, "actor": {}, "target": {}, "payload": {},
 	"due_at": {}, "defer_until": {}, "await_id": {}, "waiters": {},
+	"repeat_pattern": {}, "repeat_start": {}, "repeat_end": {}, "due_source": {},
 	"metadata": {},
 }
 
@@ -770,7 +771,8 @@ func insertIssueRow(ctx context.Context, runner Runner, table string, issue *typ
 			mol_type, work_type, source_system, source_repo, close_reason,
 			event_kind, actor, target, payload,
 			await_type, await_id, timeout_ns, waiters,
-			due_at, defer_until, metadata,
+			due_at, defer_until, repeat_pattern, repeat_start, repeat_end, due_source,
+			metadata,
 			row_lock, storage_class
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
@@ -781,7 +783,8 @@ func insertIssueRow(ctx context.Context, runner Runner, table string, issue *typ
 			?, ?, ?, ?, ?,
 			?, ?, ?, ?,
 			?, ?, ?, ?,
-			?, ?, ?,
+			?, ?, ?, ?, ?, ?,
+			?,
 			?, ?
 		)
 		ON DUPLICATE KEY UPDATE
@@ -803,6 +806,10 @@ func insertIssueRow(ctx context.Context, runner Runner, table string, issue *typ
 			source_repo = VALUES(source_repo),
 			close_reason = VALUES(close_reason),
 			metadata = VALUES(metadata),
+			repeat_pattern = VALUES(repeat_pattern),
+			repeat_start = VALUES(repeat_start),
+			repeat_end = VALUES(repeat_end),
+			due_source = VALUES(due_source),
 			row_lock = VALUES(row_lock)
 	`, table),
 		issue.ID, issue.ContentHash, issue.Title, issue.Description, issue.Design, issue.AcceptanceCriteria, issue.Notes,
@@ -813,7 +820,8 @@ func insertIssueRow(ctx context.Context, runner Runner, table string, issue *typ
 		string(issue.MolType), string(issue.WorkType), issue.SourceSystem, issue.SourceRepo, issue.CloseReason,
 		issue.EventKind, issue.Actor, issue.Target, issue.Payload,
 		issue.AwaitType, issue.AwaitID, issue.Timeout.Nanoseconds(), formatJSONStringArray(issue.Waiters),
-		issue.DueAt, issue.DeferUntil, jsonMetadata(issue.Metadata),
+		issue.DueAt, issue.DeferUntil, issue.RepeatPattern, issue.RepeatStart, issue.RepeatEnd, string(issue.DueSource),
+		jsonMetadata(issue.Metadata),
 		issueops.FreshRowLock(), nullString(string(issue.StorageClass.Normalize())),
 	)
 	if err != nil {
@@ -883,6 +891,7 @@ func formatJSONStringArray(items []string) string {
 
 var timestampUpdateFields = map[string]struct{}{
 	"started_at": {}, "closed_at": {}, "due_at": {}, "defer_until": {},
+	"repeat_start": {}, "repeat_end": {},
 }
 
 func normalizeUpdateValue(key string, value any) any {
@@ -1257,12 +1266,17 @@ func (r *issueSQLRepositoryImpl) HeartbeatIssue(ctx context.Context, id, actor s
 // whether it must still issue a plain SQL commit — wisp tables are
 // dolt_ignored, so a wisp-only wake mints no version commit, but a caller
 // that treats it as "nothing happened" rolls the wisp writes back.
+//
+// It runs the DUE sweep in the same pass (issueops.RunScheduledSweepsInTx):
+// both are lazy time-based sweeps a ready read triggers, and the counts they
+// contribute drive the same commit decision, so they share one transaction
+// here exactly as they do on the embedded legs.
 func (r *issueSQLRepositoryImpl) WakeExpiredDefers(ctx context.Context) (issues, wisps int, err error) {
-	out, err := issueops.WakeExpiredDefersInTx(ctx, r.runner)
+	out, err := issueops.RunScheduledSweepsInTx(ctx, r.runner)
 	if err != nil {
 		return 0, 0, fmt.Errorf("db: IssueSQLRepository.WakeExpiredDefers: %w", err)
 	}
-	return len(out.Issues), len(out.Wisps), nil
+	return out.IssueRows(), out.WispRows(), nil
 }
 
 func (r *issueSQLRepositoryImpl) ReclaimExpiredLeases(ctx context.Context, olderThan time.Duration, filter types.ReclaimFilter, actor string) ([]types.ReclaimedLease, error) {

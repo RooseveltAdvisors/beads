@@ -26,7 +26,14 @@ func IsAllowedUpdateField(key string) bool {
 		"mol_type":       true,
 		"event_category": true, "event_actor": true, "event_target": true, "event_payload": true,
 		"due_at": true, "defer_until": true, "await_id": true, "waiters": true,
-		"metadata": true,
+		"repeat_pattern": true, "repeat_start": true, "repeat_end": true,
+		// due_source is provenance, written by the paths that SET a due date
+		// (create, the due sweep, `bd due backfill`). It is updatable rather
+		// than sealed so those paths reach it through the one update funnel
+		// every backend shares; ValidateScalarUpdates bounds it to the known
+		// vocabulary, so an arbitrary value cannot be stored.
+		"due_source": true,
+		"metadata":   true,
 	}
 	return allowed[key]
 }
@@ -699,6 +706,14 @@ func issueFieldMatches(issue *types.Issue, key string, value interface{}) (bool,
 		return matchesTimePointer(issue.DueAt, value), nil
 	case "defer_until":
 		return matchesTimePointer(issue.DeferUntil, value), nil
+	case "repeat_pattern":
+		return matchesString(issue.RepeatPattern, value), nil
+	case "repeat_start":
+		return matchesTimePointer(issue.RepeatStart, value), nil
+	case "repeat_end":
+		return matchesTimePointer(issue.RepeatEnd, value), nil
+	case "due_source":
+		return matchesString(string(issue.DueSource), value), nil
 	case "close_reason":
 		return matchesString(issue.CloseReason, value), nil
 	case "closed_by_session":

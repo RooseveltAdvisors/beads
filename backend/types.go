@@ -44,11 +44,14 @@ type (
 	Status                      = types.Status
 	StatusCategory              = types.StatusCategory
 	StorageClass                = types.StorageClass
-	TreeNode                    = types.TreeNode
-	WispFilter                  = types.WispFilter
-	WispType                    = types.WispType
-	WorkFilter                  = types.WorkFilter
-	WorkType                    = types.WorkType
+	// DueSource records where an issue's due date came from: chosen by a
+	// caller, defaulted, backfilled, or computed from a repeat pattern.
+	DueSource  = types.DueSource
+	TreeNode   = types.TreeNode
+	WispFilter = types.WispFilter
+	WispType   = types.WispType
+	WorkFilter = types.WorkFilter
+	WorkType   = types.WorkType
 )
 
 // Status values.
@@ -140,6 +143,14 @@ const (
 	StorageClassVersioned   = types.StorageClassVersioned
 	StorageClassUnversioned = types.StorageClassUnversioned
 	StorageClassEphemeral   = types.StorageClassEphemeral
+)
+
+// DueSource values.
+const (
+	DueSourceExplicit = types.DueSourceExplicit
+	DueSourceDefault  = types.DueSourceDefault
+	DueSourceBackfill = types.DueSourceBackfill
+	DueSourceRepeat   = types.DueSourceRepeat
 )
 
 // WispType values.

@@ -295,6 +295,12 @@ func ExecuteClose(ctx context.Context, tx *sql.Tx, request publicops.CloseReques
 	if closed.IssueRowsChanged {
 		tables.Add("issues")
 	}
+	// A recurring close also filed its successor, whose labels live in their
+	// own table: stage what the spawn actually wrote, or those rows stay in the
+	// working set and never reach a clone.
+	for table := range closed.Spawned.ChangedTables {
+		tables.Add(table)
+	}
 	hydrated, err := HydrateIssueOperationResult(ctx, tx, attempt.IssueID, false)
 	if err != nil {
 		return publicops.CloseResult{}, nil, err

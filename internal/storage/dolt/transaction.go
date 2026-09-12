@@ -777,6 +777,11 @@ func (t *doltTransaction) CloseIssue(ctx context.Context, id string, reason stri
 	if result.IssueRowsChanged {
 		t.dirty.MarkDirty("issues")
 	}
+	// A recurring close filed its successor in this transaction; its labels
+	// live in their own table, so mark what the spawn actually wrote.
+	for spawnTable := range result.Spawned.ChangedTables {
+		t.dirty.MarkDirty(spawnTable)
+	}
 	return nil
 }
 
