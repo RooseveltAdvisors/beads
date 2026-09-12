@@ -91,3 +91,7 @@ instruction-file generation.
 ## When Adding Features
 
 See AGENTS.md "Adding a New Command" and "Adding Storage Features" sections for step-by-step guidance.
+
+Adding a COLUMN to the issue row shape is its own checklist — the row is
+projected positionally in a dozen places and mirrored onto `wisps`, so it is
+never one edit. See [EXTENDING.md](EXTENDING.md) before you start.
