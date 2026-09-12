@@ -35,9 +35,14 @@ type dueSweepReport struct {
 	DueWisps    int      `json:"due_wisps"`
 	Escalated   int      `json:"escalated"`
 	EscalatedID []string `json:"escalated_ids,omitempty"`
-	DefersWoken int      `json:"defers_woken"`
-	DeferIDs    []string `json:"defer_ids,omitempty"`
-	DeferWisps  int      `json:"defer_wisps"`
+	// EscalatedWisps is reported separately rather than folded into Escalated
+	// for the reason DueWisps is: the two planes are different namespaces, and
+	// a count that mixed them would make a wisp-plane escalation look like
+	// work a human should go read.
+	EscalatedWisps int      `json:"escalated_wisps"`
+	DefersWoken    int      `json:"defers_woken"`
+	DeferIDs       []string `json:"defer_ids,omitempty"`
+	DeferWisps     int      `json:"defer_wisps"`
 }
 
 // Summary is the one line an external clock publishes. It names both sweeps
@@ -108,15 +113,16 @@ Examples:
 		}
 
 		report := dueSweepReport{
-			SweptAt:     time.Now().UTC().Format(time.RFC3339),
-			DueFired:    len(swept.Due.Issues),
-			DueIDs:      swept.Due.Issues,
-			DueWisps:    len(swept.Due.Wisps),
-			Escalated:   len(swept.Due.Escalated),
-			EscalatedID: swept.Due.Escalated,
-			DefersWoken: len(swept.Defers.Issues),
-			DeferIDs:    swept.Defers.Issues,
-			DeferWisps:  len(swept.Defers.Wisps),
+			SweptAt:        time.Now().UTC().Format(time.RFC3339),
+			DueFired:       len(swept.Due.Issues),
+			DueIDs:         swept.Due.Issues,
+			DueWisps:       len(swept.Due.Wisps),
+			Escalated:      len(swept.Due.Escalated),
+			EscalatedID:    swept.Due.Escalated,
+			EscalatedWisps: len(swept.Due.EscalatedWisps),
+			DefersWoken:    len(swept.Defers.Issues),
+			DeferIDs:       swept.Defers.Issues,
+			DeferWisps:     len(swept.Defers.Wisps),
 		}
 		// The summary is a FIELD, not only a rendering, so an external clock
 		// can publish the line with one grep instead of reassembling it from
@@ -164,8 +170,9 @@ func printDueSweepReport(r dueSweepReport) {
 	for _, id := range r.DeferIDs {
 		fmt.Printf("  woken %s\n", id)
 	}
-	if r.DueWisps > 0 || r.DeferWisps > 0 {
-		fmt.Printf("  (%d due, %d woken in the wisp plane)\n", r.DueWisps, r.DeferWisps)
+	if r.DueWisps > 0 || r.DeferWisps > 0 || r.EscalatedWisps > 0 {
+		fmt.Printf("  (%d due, %d escalated, %d woken in the wisp plane)\n",
+			r.DueWisps, r.EscalatedWisps, r.DeferWisps)
 	}
 }
 
