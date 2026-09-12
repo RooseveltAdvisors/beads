@@ -517,11 +517,12 @@ async def beads_create_issue(
     """
     client = await _get_client()
     due_source: str | None = None
-    if due is None and not _due_required_exempt(issue_type):
-        if await _due_required_enabled(client):
-            ladder_index = priority if 0 <= priority < len(PRIORITY_DUE_LADDER_DAYS) else len(PRIORITY_DUE_LADDER_DAYS) - 1
-            due = f"+{PRIORITY_DUE_LADDER_DAYS[ladder_index]}d"
-            due_source = "default"
+    if due is None and not _due_required_exempt(issue_type) and await _due_required_enabled(client):
+        ladder_index = (
+            priority if 0 <= priority < len(PRIORITY_DUE_LADDER_DAYS) else len(PRIORITY_DUE_LADDER_DAYS) - 1
+        )
+        due = f"+{PRIORITY_DUE_LADDER_DAYS[ladder_index]}d"
+        due_source = "default"
     params = CreateIssueParams(
         title=title,
         description=description,
@@ -557,18 +558,16 @@ async def beads_update_issue(
         str | None,
         "New due date in the bd CLI's formats (+6h, +3d, tomorrow, next monday, ISO). "
         "Pass an empty string to CLEAR it: that is a gated act that also requires "
-        "force_no_due=True and clear_due_reason, mirroring bd update --due=\"\" --force-no-due --reason",
+        'force_no_due=True and clear_due_reason, mirroring bd update --due="" --force-no-due --reason',
     ] = None,
-    force_no_due: Annotated[
-        bool, "Permit clearing the due date with due=''. Requires clear_due_reason"
-    ] = False,
+    force_no_due: Annotated[bool, "Permit clearing the due date with due=''. Requires clear_due_reason"] = False,
     clear_due_reason: Annotated[
         str | None, "Why the due date is being cleared (required with force_no_due)"
     ] = None,
     repeat: Annotated[
         str | None,
         "Recurrence rule: an interval (+1d, +2w, +1m) or a 5-field cron expression "
-        '(\"0 9 * * 1\"). Closing the bead then spawns the next instance. An empty '
+        '("0 9 * * 1"). Closing the bead then spawns the next instance. An empty '
         "string stops the series; the bd CLI validates the grammar",
     ] = None,
 ) -> Issue | list[Issue]:

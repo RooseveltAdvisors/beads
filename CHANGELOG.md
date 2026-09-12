@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Every new bead needs a due date.** `due.required` is on by default, and the
+  rule is enforced at the storage boundary, so `bd create`, the HTTP and MCP
+  servers, and the issueops API all refuse work with no deadline; `bd config
+  set due.required false` turns it off once per workspace. Capture surfaces used
+  without naming a deadline (`bd q`, which also takes `--due`, `bd todo add`,
+  `bd gate create`, molecule instantiation, `--graph`/`--file`/`bd batch`
+  plans) fill one in from a priority ladder (P0 +1d, P1 +3d, P2 +7d, P3 +14d,
+  P4 +30d) stamped `due_source=default`, so a synthesized deadline stays
+  distinguishable from a chosen one; `bd q` echoes the date it picked, and
+  `bd create --due-source` lets an integration record the same provenance.
+  Events, wisps, protos, federated rows, and `bd import` are exempt.
+  Clearing a due date is gated: `bd update --due "" --force-no-due --reason
+  "<why>"` on the CLI, or `due_clear_reason` on an HTTP patch, and the reason
+  lands on the update event. The MCP `create`/`update` tools gain `due` and
+  `repeat` parameters with the same rules.
+
 - **Beads can repeat.** `bd create --repeat` makes a bead recurring, with an
   interval (`+1d`, `+2w`, `+1m`) or a five-field cron expression
   (`"0 9 * * 1"`); `--repeat-start` and `--repeat-end` bound the series.

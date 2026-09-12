@@ -5,9 +5,9 @@ description: Complete reference for bd configuration across config.yaml and data
 
 Complete configuration reference for beads.
 
-Last reviewed: 2026-07-10
+Last reviewed: 2026-09-12
 
-Freshness source: `cmd/bd/main.go`, `cmd/bd/config.go`, and `internal/configfile/`.
+Freshness source: `cmd/bd/main.go`, `cmd/bd/config.go`, `internal/configfile/`, and `internal/storage/issueops/due_required.go`.
 
 beads has two complementary configuration systems:
 
@@ -190,12 +190,12 @@ API alike. A workspace that does not want it turns it off once:
 bd config set due.required false
 ```
 
-**Capture stays a one-liner.** Surfaces that do not take a `--due` of their
-own — `bd q`, `bd todo add`, `bd gate create`, molecule instantiation, and the
-multi-bead plans (`--graph`, `--file`, `bd batch`) — fill in a due date from
-the priority ladder and record it as `due_source: default`, so a synthesized
-deadline stays distinguishable from one you chose. `bd q` reports the one it
-picked:
+**Capture stays a one-liner.** When a capture surface is used without naming a
+deadline — `bd q` (which also takes `--due`), `bd todo add`, `bd gate create`,
+molecule instantiation, and the multi-bead plans (`--graph`, `--file`,
+`bd batch`) — it fills in a due date from the priority ladder and records it
+as `due_source: default`, so a synthesized deadline stays distinguishable from
+one you chose. `bd q` reports the one it picked:
 
 | Priority | Due |
 |---|---|

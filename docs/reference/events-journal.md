@@ -245,7 +245,7 @@ feed built on the journal may carry:
 | `op` | Recorded when |
 |---|---|
 | `create` | A bead (or wisp) is created. |
-| `update` | Any field, label, metadata, claim, unclaim, lease reclaim, promote, defer wake, or derived `is_blocked` flip changes the bead. |
+| `update` | Any field, label, metadata, claim, unclaim, lease reclaim, promote, defer wake, due sweep (an arrived due date pushed forward), or derived `is_blocked` flip changes the bead. |
 | `close` | A bead is closed. A reopen is an `update`. |
 | `delete` | A bead is removed. |
 | `dep_add` | A [dependency](/core-concepts/dependencies) edge is written. |

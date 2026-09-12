@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `create` gains a `due` parameter (the bd CLI formats: `+3d`, `tomorrow`,
+  `next monday`, ISO). When omitted and the workspace requires due dates
+  (`due.required`, on by default), a priority ladder assigns one — P0 +1d,
+  P1 +3d, P2 +7d, P3 +14d, P4 +30d — passed through `bd create --due-source
+  default` so it is recorded as synthesized, not chosen, and echoed back on the
+  returned issue's `due_at`. Event issues stay undated.
+- `update` gains `due`, `force_no_due`, `clear_due_reason`, and `repeat`.
+  Clearing a due date (`due=""`) requires `force_no_due=True` plus a
+  `clear_due_reason`, mirroring `bd update --due "" --force-no-due --reason`;
+  `repeat` takes an interval (`+1d`, `+2w`) or five-field cron rule, and `""`
+  stops the series.
+- Issue models expose `due_at`, `due_source`, `repeat_pattern`, `repeat_start`,
+  and `repeat_end`.
 - New `comment`, `comments`, and `note` MCP tools, wrapping the existing
   `bd comment` / `bd comments` / `bd note` CLI commands. Previously the MCP
   server exposed no way to add or read comments, so MCP-only agents could only

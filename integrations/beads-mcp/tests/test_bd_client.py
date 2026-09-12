@@ -441,8 +441,8 @@ async def test_create_passes_due_and_echoes_it_back(bd_client, mock_process):
         )
 
     cmd = list(mock_exec.call_args[0])
-    assert ["--due", "2026-03-01"] == cmd[cmd.index("--due") : cmd.index("--due") + 2]
-    assert ["--due-source", "default"] == cmd[cmd.index("--due-source") : cmd.index("--due-source") + 2]
+    assert cmd[cmd.index("--due") : cmd.index("--due") + 2] == ["--due", "2026-03-01"]
+    assert cmd[cmd.index("--due-source") : cmd.index("--due-source") + 2] == ["--due-source", "default"]
     assert issue.due_at is not None
     assert issue.due_at.year == 2026
     assert issue.repeat_pattern == "+1w"
@@ -464,9 +464,7 @@ async def test_create_omits_due_source_when_unset(bd_client, mock_process):
     mock_process.communicate = AsyncMock(return_value=(json.dumps(issue_data).encode(), b""))
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_exec:
-        await bd_client.create(
-            CreateIssueParams(title="New issue", priority=2, issue_type="task", due="tomorrow")
-        )
+        await bd_client.create(CreateIssueParams(title="New issue", priority=2, issue_type="task", due="tomorrow"))
 
     cmd = list(mock_exec.call_args[0])
     assert "--due-source" not in cmd
@@ -507,13 +505,11 @@ async def test_update_passes_due_and_repeat(bd_client, mock_process):
     mock_process.communicate = AsyncMock(return_value=(json.dumps(issue_data).encode(), b""))
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_exec:
-        await bd_client.update(
-            UpdateIssueParams(issue_id="bd-1", due="+3d", repeat="+1w")
-        )
+        await bd_client.update(UpdateIssueParams(issue_id="bd-1", due="+3d", repeat="+1w"))
 
     cmd = list(mock_exec.call_args[0])
-    assert ["--due", "+3d"] == cmd[cmd.index("--due") : cmd.index("--due") + 2]
-    assert ["--repeat", "+1w"] == cmd[cmd.index("--repeat") : cmd.index("--repeat") + 2]
+    assert cmd[cmd.index("--due") : cmd.index("--due") + 2] == ["--due", "+3d"]
+    assert cmd[cmd.index("--repeat") : cmd.index("--repeat") + 2] == ["--repeat", "+1w"]
 
 
 @pytest.mark.asyncio
@@ -535,9 +531,7 @@ async def test_update_clear_due_follows_the_force_gate(bd_client, mock_process):
 
     # Force without a reason is refused too.
     with pytest.raises(BdCommandError, match="clear_due_reason"):
-        await bd_client.update(
-            UpdateIssueParams(issue_id="bd-1", due="", force_no_due=True)
-        )
+        await bd_client.update(UpdateIssueParams(issue_id="bd-1", due="", force_no_due=True))
 
     # force_no_due outside a clear is a misuse.
     with pytest.raises(BdCommandError, match="only applies when clearing"):
@@ -578,7 +572,7 @@ async def test_update_stops_a_series_with_empty_repeat(bd_client, mock_process):
         await bd_client.update(UpdateIssueParams(issue_id="bd-1", repeat=""))
 
     cmd = list(mock_exec.call_args[0])
-    assert ["--repeat", ""] == cmd[cmd.index("--repeat") : cmd.index("--repeat") + 2]
+    assert cmd[cmd.index("--repeat") : cmd.index("--repeat") + 2] == ["--repeat", ""]
 
 
 @pytest.mark.asyncio

@@ -607,11 +607,15 @@ class BdCliClient(BdClientBase):
             if params.due == "":
                 if not params.force_no_due:
                     raise BdCommandError(
-                        'clearing a due date needs force_no_due=True and clear_due_reason (mirrors bd update --due="" --force-no-due --reason)'
+                        "clearing a due date needs force_no_due=True and clear_due_reason "
+                        '(mirrors bd update --due="" --force-no-due --reason)'
                     )
-                if not (params.clear_due_reason or "").strip():
-                    raise BdCommandError('force_no_due=True needs clear_due_reason (mirrors bd update --reason "<why>")')
-                args.extend(["--due", "", "--force-no-due", "--reason", params.clear_due_reason])
+                clear_due_reason = params.clear_due_reason or ""
+                if not clear_due_reason.strip():
+                    raise BdCommandError(
+                        'force_no_due=True needs clear_due_reason (mirrors bd update --reason "<why>")'
+                    )
+                args.extend(["--due", "", "--force-no-due", "--reason", clear_due_reason])
             else:
                 args.extend(["--due", params.due])
         elif params.force_no_due:

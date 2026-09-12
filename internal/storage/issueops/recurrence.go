@@ -246,7 +246,7 @@ func statusPlaceholders(statuses []types.Status) (string, []any) {
 // DueMissGrace, so a deadline keeps nagging instead of going silent.
 //
 // The second result reports whether the PATTERN produced the date, so a grace
-// fallback is never labelled as pattern-computed.
+// fallback is never labeled as pattern-computed.
 func nextDueAfterMiss(c dueCandidate, now time.Time) (time.Time, bool) {
 	if c.repeatPattern != "" {
 		probe := &types.Issue{
