@@ -1,6 +1,6 @@
 [Unit]
 Description=Run the beads due sweep on a fixed cadence
-Documentation=man:bd(1)
+Documentation=https://github.com/steveyegge/beads/blob/main/contrib/systemd/README.md
 
 [Timer]
 OnBootSec=2min

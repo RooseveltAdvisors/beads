@@ -1,6 +1,6 @@
 [Unit]
 Description=Fire beads whose due date has arrived
-Documentation=man:bd(1)
+Documentation=https://github.com/steveyegge/beads/blob/main/contrib/systemd/README.md
 # A failed sweep is announced rather than buried in the journal. Without this
 # a clock fails silently, which is worse than no clock: everything downstream
 # keeps reading an ever-staler world and nothing says why.
