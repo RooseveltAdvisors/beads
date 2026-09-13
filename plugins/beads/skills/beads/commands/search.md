@@ -25,6 +25,8 @@ The search command finds issues where your query appears in **any** of:
 
 Unlike `bd list`, which requires you to specify which field to search, `bd search` automatically searches all text fields, making it faster and more intuitive for exploratory searches.
 
+**Caveat — hyphenated terms.** Free-text queries search titles and descriptions, but a hyphenated, space-free term (e.g. `use-after-free`, `race-condition`) is treated as an ID-like query and searches titles, IDs and external refs only. It is retried as free text only when it matches nothing at all, so a single title hit hides every description-only match. Use `bd list --desc-contains "<term>"` for an unconditional description search.
+
 ## Filters
 
 - **--status, -s**: Filter by status (open, in_progress, blocked, closed)

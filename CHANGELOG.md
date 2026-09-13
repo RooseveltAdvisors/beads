@@ -289,10 +289,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an ID, so `bd search use-after-free` (likewise `race-condition`,
   `rate-limit`) is an ID query and does not scan descriptions. Such a query is
   retried as free text only when it returns no rows at all, so one bead
-  carrying the term in its title suppresses every description-only match. Use
-  `--desc-contains` when a hyphenated term needs description coverage;
-  `--notes-contains` and `--external-contains` remain the other single-field
-  filters.
+  carrying the term in its title suppresses every description-only match. When
+  a hyphenated term needs description coverage, reach for `bd list
+  --desc-contains "<term>"`: on `bd search` the single-field filters
+  (`--desc-contains`, `--notes-contains`, `--external-contains`) are AND-ed
+  with the query, so they narrow its matches instead of widening them to
+  descriptions.
 
 - **`bd prime` says when it could NOT read the memory plane**
   ([#5877](https://github.com/gastownhall/beads/issues/5877)). A broken or

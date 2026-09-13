@@ -609,13 +609,19 @@ func testSearchByIDsFilter(t *testing.T, f Factory) {
 // testSearchIssueIDsProjection pins the narrow projection the partial-id
 // resolver walks when the exact-id fast path misses
 // (internal/utils/id_parser.go): SearchIssueIDs answers the bare ids of every
-// issue carrying the hash token, and its Ephemeral leg answers wisp ids so a
-// wisp stays resolvable by partial id.
+// issue whose id carries the hash token, and its Ephemeral leg answers wisp
+// ids so a wisp stays resolvable by partial id.
 //
-// SearchIssueIDs appears nowhere else in this suite, and the id arm of the
-// query is unpinned: the audit's SearchTextIDBranchExternalRef covers the
-// adjacent SearchIssues text branch only. Assert ids, never issues — not
-// hydrating 45 columns to read one is the whole point of the method.
+// The call shape mirrors the resolver exactly — an empty query plus
+// IssueFilter.IDContains, never a free-text query. The resolver keeps only ids
+// containing the search part, so a free-text query would make every backend
+// LOWER() and scan the title and description of every row to produce matches
+// the resolver then discards.
+//
+// SearchIssueIDs appears nowhere else in this suite; the adjacent SearchIssues
+// free-text branch is covered by the audit's SearchTextIDBranchExternalRef.
+// Assert ids, never issues — not hydrating 45 columns to read one is the whole
+// point of the method.
 //
 // Subject: SearchIssueIDs. A backend whose allowlist refuses it does not run
 // this case.
@@ -627,18 +633,18 @@ func testSearchIssueIDsProjection(t *testing.T, f Factory) {
 	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-b111", Title: "Three"}), "a"))
 	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-wisp-b7c2", Title: "Wisp", Ephemeral: true}), "a"))
 
-	ids, err := s.SearchIssueIDs(c, "a3f8", types.IssueFilter{})
+	ids, err := s.SearchIssueIDs(c, "", types.IssueFilter{IDContains: "a3f8"})
 	must(t, err)
 	sort.Strings(ids)
 	if !slices.Equal(ids, []string{"test-a3f8aa", "test-a3f8e9"}) {
-		t.Errorf("SearchIssueIDs(%q) = %v, want [test-a3f8aa test-a3f8e9]", "a3f8", ids)
+		t.Errorf("SearchIssueIDs(IDContains=%q) = %v, want [test-a3f8aa test-a3f8e9]", "a3f8", ids)
 	}
 
 	ephemeral := true
-	wispIDs, err := s.SearchIssueIDs(c, "b7c2", types.IssueFilter{Ephemeral: &ephemeral})
+	wispIDs, err := s.SearchIssueIDs(c, "", types.IssueFilter{Ephemeral: &ephemeral, IDContains: "b7c2"})
 	must(t, err)
 	if !slices.Equal(wispIDs, []string{"test-wisp-b7c2"}) {
-		t.Errorf("SearchIssueIDs(%q, Ephemeral=true) = %v, want [test-wisp-b7c2]", "b7c2", wispIDs)
+		t.Errorf("SearchIssueIDs(IDContains=%q, Ephemeral=true) = %v, want [test-wisp-b7c2]", "b7c2", wispIDs)
 	}
 }
 

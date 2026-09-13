@@ -33,9 +33,12 @@ An ID-like query is retried as free text ONLY when it returns no rows at all
 — including when active filters (--status, --assignee, --label,
 --created-after) excluded the named bead. One title or external-ref hit
 suppresses the retry, so a description-only match for "use-after-free" is
-missed whenever any other bead carries that term in its title. Reach for
---desc-contains to search descriptions unconditionally; --notes-contains and
---external-contains are the other single-field filters.
+missed whenever any other bead carries that term in its title.
+
+--desc-contains, --notes-contains and --external-contains are AND-ed with the
+query here, so they NARROW its matches; --desc-contains cannot widen an ID-like
+query to descriptions, and this command always requires a query. The
+unconditional description search is: bd list --desc-contains "<term>".
 Use --status open (etc.) to narrow; closed issues are included by default
 so "was this already filed/fixed?" cannot silently answer no. Matches
 beyond --limit are dropped status-blind, so when hunting live work in a
