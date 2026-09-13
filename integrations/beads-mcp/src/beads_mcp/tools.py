@@ -61,18 +61,18 @@ DEFAULT_DEPENDENCY_TYPE: DependencyType = "blocks"
 PRIORITY_DUE_LADDER_DAYS = (1, 3, 7, 14, 30)
 
 # The workspace switch behind the mandatory-due invariant (mirrors
-# issueops.DueRequiredKey); its default, when unset, is on.
+# issueops.DueRequiredKey); its default, when unset, is off.
 DUE_REQUIRED_KEY = "due.required"
 
-# String tokens the CLI's bool coercion reads as false; anything else (including
-# the empty "not set" value, whose default is true) keeps due.required on.
-_FALSE_CONFIG_TOKENS = {"false", "0", "no", "off", "n"}
+# String tokens the CLI's bool coercion reads as true; anything else (including
+# the empty "not set" value, whose default is false) leaves due.required off.
+_TRUE_CONFIG_TOKENS = {"true", "1", "yes", "on", "y", "t"}
 
 
 async def _due_required_enabled(client: BdClientBase) -> bool:
-    """Mirror the CLI's `due.required` gate, whose yaml default is on."""
+    """Mirror the CLI's `due.required` gate, whose yaml default is off."""
     raw = (await client.get_config(DUE_REQUIRED_KEY)).strip().lower()
-    return raw not in _FALSE_CONFIG_TOKENS
+    return raw in _TRUE_CONFIG_TOKENS
 
 
 def _due_required_exempt(issue_type: IssueType) -> bool:

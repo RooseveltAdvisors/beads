@@ -545,7 +545,9 @@ func TestEmbeddedDueTrigger(t *testing.T) {
 
 // Clearing a due date is gated on a reason, and the reason is what makes the
 // gate worth having: it must be readable afterwards, on the update event,
-// through `bd history --events`.
+// through `bd history --events`. The gate only exists while the workspace
+// requires due dates, so the workspace opts in first: `due.required` is off by
+// default.
 func TestEmbeddedDueClearReason(t *testing.T) {
 	if os.Getenv("BEADS_TEST_EMBEDDED_DOLT") != "1" {
 		t.Skip("set BEADS_TEST_EMBEDDED_DOLT=1 to run embedded dolt integration tests")
@@ -554,6 +556,7 @@ func TestEmbeddedDueClearReason(t *testing.T) {
 
 	bd := buildEmbeddedBD(t)
 	dir, _, _ := bdInit(t, bd, "--prefix", "dc")
+	bdRunOK(t, bd, dir, "config", "set", "due.required", "true")
 
 	t.Run("a_clear_without_the_gate_is_refused_and_writes_nothing", func(t *testing.T) {
 		issue := bdCreate(t, bd, dir, "Keeps its deadline", "--type", "task", "--due", "2030-01-01")
@@ -609,9 +612,10 @@ func TestEmbeddedDueBackfill(t *testing.T) {
 	bd := buildEmbeddedBD(t)
 	dir, _, _ := bdInit(t, bd, "--prefix", "bf")
 
-	// The invariant is on by default, so the legacy shape the backfill exists
-	// for — a bead with no due date — is produced by a workspace that turned
-	// it off, exactly as a pre-invariant repository looks.
+	// The legacy shape the backfill exists for — a bead with no due date — is
+	// what a workspace with the invariant off produces, exactly as a
+	// pre-invariant repository looks. The key is off by default; setting it
+	// explicitly keeps the fixture independent of that default.
 	bdRunOK(t, bd, dir, "config", "set", "due.required", "false")
 	undated := bdCreateSilent(t, bd, dir, "Legacy work item", "--type", "task", "--due", "")
 	dated := bdCreate(t, bd, dir, "Already dated", "--type", "task", "--due", "2030-01-01")

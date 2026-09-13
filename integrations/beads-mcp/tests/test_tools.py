@@ -158,8 +158,9 @@ async def test_beads_create_issue_with_labels(sample_issue):
 
 @pytest.mark.asyncio
 async def test_beads_create_issue_assigns_a_due_date_and_echoes_it_back():
-    """Every created bead gets a deadline: an explicit due wins, otherwise the
-    priority ladder supplies one and the result echoes the assigned date."""
+    """In a workspace that opted into due.required, every created bead gets a
+    deadline: an explicit due wins, otherwise the priority ladder supplies one
+    and the result echoes the assigned date."""
     now = datetime(2024, 1, 1, tzinfo=timezone.utc)
     assigned = Issue(
         id="bd-9",
@@ -172,7 +173,7 @@ async def test_beads_create_issue_assigns_a_due_date_and_echoes_it_back():
         due_at=now,
     )
     mock_client = AsyncMock()
-    mock_client.get_config = AsyncMock(return_value="")
+    mock_client.get_config = AsyncMock(return_value="true")
     mock_client.create = AsyncMock(return_value=assigned)
 
     with patch("beads_mcp.tools._get_client", return_value=mock_client):
@@ -209,6 +210,15 @@ async def test_beads_create_issue_ladder_follows_the_due_required_gate():
         relaxed = mock_client.create.call_args[0][0]
         assert relaxed.due is None
         assert relaxed.due_source is None
+
+    # Neither does a workspace that never configured the key: the invariant is
+    # off by default, so an unset value reads exactly like an explicit false.
+    mock_client.get_config = AsyncMock(return_value="")
+    with patch("beads_mcp.tools._get_client", return_value=mock_client):
+        await beads_create_issue(title="New issue", priority=2)
+        unset = mock_client.create.call_args[0][0]
+        assert unset.due is None
+        assert unset.due_source is None
 
     # Events are exempt even while the invariant is on.
     mock_client.get_config = AsyncMock(return_value="true")
