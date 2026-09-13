@@ -20,8 +20,9 @@ import (
 )
 
 type closeProxiedInput struct {
-	force       bool
-	continueOn  bool
+	force          bool
+	forceNoComment bool
+	continueOn     bool
 	noAuto      bool
 	suggestNext bool
 	claimNext   bool
@@ -108,11 +109,12 @@ func runCloseProxiedServer(cmd *cobra.Command, ctx context.Context, args []strin
 			return HandleErrorRespectJSON("%v", cerr)
 		}
 		result, err = closer.CloseBatch(ctx, issueops.CloseBatchRequest{
-			Actor:     actor,
-			Items:     pre.items,
-			Session:   in.session,
-			Force:     in.force,
-			ClaimNext: closeClaimNextRequest(in.claimNext, in.continueOn),
+			Actor:          actor,
+			Items:          pre.items,
+			Session:        in.session,
+			Force:          in.force,
+			ForceNoComment: in.forceNoComment,
+			ClaimNext:      closeClaimNextRequest(in.claimNext, in.continueOn),
 		})
 		if err != nil {
 			return HandleErrorRespectJSON("%v", err)
@@ -191,6 +193,7 @@ func runCloseProxiedServer(cmd *cobra.Command, ctx context.Context, args []strin
 func gatherCloseProxiedInput(cmd *cobra.Command) closeProxiedInput {
 	in := closeProxiedInput{}
 	in.force, _ = cmd.Flags().GetBool("force")
+	in.forceNoComment, _ = cmd.Flags().GetBool("force-no-comment")
 	in.continueOn, _ = cmd.Flags().GetBool("continue")
 	in.noAuto, _ = cmd.Flags().GetBool("no-auto")
 	in.suggestNext, _ = cmd.Flags().GetBool("suggest-next")

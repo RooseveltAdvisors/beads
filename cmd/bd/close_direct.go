@@ -133,12 +133,13 @@ func closeDirectBatches(items []closeDirectItem) []closeDirectBatch {
 //
 // claimNext rides on the batch of claimStore and no other, because --claim-next
 // hands out ONE claim however many stores the ids spanned.
-func closeDirectRequest(batch closeDirectBatch, session string, force bool, claimStore storage.DoltStorage, claimNext *issueops.ReadyRequest) issueops.CloseBatchRequest {
+func closeDirectRequest(batch closeDirectBatch, session string, force, forceNoComment bool, claimStore storage.DoltStorage, claimNext *issueops.ReadyRequest) issueops.CloseBatchRequest {
 	request := issueops.CloseBatchRequest{
-		Actor:   actor,
-		Items:   make([]issueops.BatchCloseItem, 0, len(batch.items)),
-		Session: session,
-		Force:   force,
+		Actor:          actor,
+		Items:          make([]issueops.BatchCloseItem, 0, len(batch.items)),
+		Session:        session,
+		Force:          force,
+		ForceNoComment: forceNoComment,
 	}
 	if claimNext != nil && batch.store == claimStore {
 		request.ClaimNext = claimNext
@@ -159,12 +160,12 @@ func closeDirectRequest(batch closeDirectBatch, session string, force bool, clai
 // single failed close has always been reported here, and the remaining stores'
 // batches still run. That is the same skip-and-continue the per-id loop had:
 // one store's outage does not silently drop another store's closes.
-func closeDirectRun(ctx context.Context, batches []closeDirectBatch, argCount int, session string, force bool, claimStore storage.DoltStorage, claimNext *issueops.ReadyRequest) ([]*issueops.CloseOutcome, *types.IssueWithCounts) {
+func closeDirectRun(ctx context.Context, batches []closeDirectBatch, argCount int, session string, force, forceNoComment bool, claimStore storage.DoltStorage, claimNext *issueops.ReadyRequest) ([]*issueops.CloseOutcome, *types.IssueWithCounts) {
 	outcomes := make([]*issueops.CloseOutcome, argCount)
 	var claimed *types.IssueWithCounts
 
 	for _, batch := range batches {
-		result, err := closeDirectCloseBatch(ctx, batch.store, closeDirectRequest(batch, session, force, claimStore, claimNext))
+		result, err := closeDirectCloseBatch(ctx, batch.store, closeDirectRequest(batch, session, force, forceNoComment, claimStore, claimNext))
 		if err != nil {
 			for _, item := range batch.items {
 				refused := issueops.CloseOutcome{IssueID: item.id, Err: err}

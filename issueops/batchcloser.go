@@ -52,6 +52,9 @@ type CloseBatchRequest struct {
 	// an item grows a precondition, which is the day force stops being a
 	// question with only two answers.
 	Force bool
+	// ForceNoComment skips comment.progress_required for every item. Each item
+	// still needs a non-empty Reason explaining the skip (ValidateCommentProgress).
+	ForceNoComment bool
 	// ClaimNext claims the next ready issue after the closes land, in the same
 	// transaction, and only when at least one item closed — a claim handed out
 	// by a request that closed nothing would be a claim the caller never

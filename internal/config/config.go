@@ -295,6 +295,10 @@ func Initialize() error {
 	// A workspace that does not want the invariant turns it off in config.yaml.
 	v.SetDefault("due.required", true)
 
+	// Comment progress on close. House default ON; upstream contrib should
+	// ship false so adopters opt in. Scope is assignee-set only (issueops).
+	v.SetDefault("comment.progress_required", true)
+
 	// Validation configuration defaults (bd-t7jq)
 	// Values: "warn" | "error" | "none"
 	// - "none": no validation (default, backwards compatible)

@@ -82,6 +82,7 @@ the flags appear in the command line.`,
 		}
 
 		force, _ := cmd.Flags().GetBool("force")
+		forceNoComment, _ := cmd.Flags().GetBool("force-no-comment")
 		continueFlag, _ := cmd.Flags().GetBool("continue")
 		noAuto, _ := cmd.Flags().GetBool("no-auto")
 		suggestNext, _ := cmd.Flags().GetBool("suggest-next")
@@ -139,7 +140,7 @@ the flags appear in the command line.`,
 		// between the check and the close.
 		plan := closeDirectPreflight(results, resolvedIDs, reasons, force)
 		outcomes, claimedNext := closeDirectRun(opsCtx, closeDirectBatches(plan.items), len(resolvedIDs),
-			session, force, postCloseStore, closeClaimNextRequest(claimNext, continueFlag))
+			session, force, forceNoComment, postCloseStore, closeClaimNextRequest(claimNext, continueFlag))
 
 		// Report and follow up on every argument, in the order it was typed.
 		closedIssues := []*types.Issue{}
@@ -387,6 +388,7 @@ func init() {
 	_ = closeCmd.Flags().MarkHidden("comment") // Hidden alias for agent/CLI ergonomics
 	closeCmd.Flags().String("reason-file", "", "Read close reason from file (use - for stdin)")
 	closeCmd.Flags().BoolP("force", "f", false, "Force close pinned issues or unsatisfied gates")
+	closeCmd.Flags().Bool("force-no-comment", false, "Skip comment.progress_required gate (still requires --reason)")
 	closeCmd.Flags().Bool("continue", false, "Auto-advance to next step in molecule")
 	closeCmd.Flags().Bool("no-auto", false, "With --continue, show next step but don't claim it")
 	closeCmd.Flags().Bool("suggest-next", false, "Show newly unblocked issues after closing")

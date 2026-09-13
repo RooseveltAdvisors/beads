@@ -69,7 +69,7 @@ func CloseIssueWithoutEventInTx(ctx context.Context, tx DBTX, id string, reason,
 // so this guards against a concurrent lifecycle change — not against concurrent
 // label, dependency, rename, or is_blocked writes that leave row_lock untouched
 // (see the freshRowLock invariant in lease.go).
-func CloseIssueCheckedInTx(ctx context.Context, tx DBTX, id, reason, actor, session string, force bool, expectedVersion *int64) (*CloseResult, error) {
+func CloseIssueCheckedInTx(ctx context.Context, tx DBTX, id, reason, actor, session string, force bool, forceNoComment bool, expectedVersion *int64) (*CloseResult, error) {
 	if expectedVersion != nil {
 		if err := CheckVersionInTx(ctx, tx, id, *expectedVersion); err != nil {
 			return nil, err
@@ -88,13 +88,13 @@ func CloseIssueCheckedInTx(ctx context.Context, tx DBTX, id, reason, actor, sess
 	// statements cannot retain a savepoint. The shared UOW uses a pinned
 	// *sql.Conn after START TRANSACTION, while embedded callers use *sql.Tx.
 	if !closeCheckedSavepointEligible(tx) {
-		return closeIssueCheckedAfterSavepoint(ctx, tx, id, reason, actor, session, force, closed, targetColumn)
+		return closeIssueCheckedAfterSavepoint(ctx, tx, id, reason, actor, session, force, forceNoComment, closed, targetColumn)
 	}
 	savepoint, err := createCloseCheckedSavepoint(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	result, scopedErr := closeIssueCheckedAfterSavepoint(ctx, tx, id, reason, actor, session, force, closed, targetColumn)
+	result, scopedErr := closeIssueCheckedAfterSavepoint(ctx, tx, id, reason, actor, session, force, forceNoComment, closed, targetColumn)
 	if scopedErr != nil {
 		if cleanupErr := rollbackAndReleaseCloseCheckedSavepoint(ctx, tx, savepoint); cleanupErr != nil {
 			return nil, fmt.Errorf("discard checked close savepoint after %v: %w", scopedErr, cleanupErr)
@@ -119,9 +119,14 @@ func closeCheckedSavepointEligible(tx DBTX) bool {
 	}
 }
 
-func closeIssueCheckedAfterSavepoint(ctx context.Context, tx DBTX, id, reason, actor, session string, force, closed bool, targetColumn string) (*CloseResult, error) {
+func closeIssueCheckedAfterSavepoint(ctx context.Context, tx DBTX, id, reason, actor, session string, force, forceNoComment, closed bool, targetColumn string) (*CloseResult, error) {
 	openChildren, err := enforceClosePolicyForTargetInTx(ctx, tx, id, targetColumn, force, closed)
 	if err != nil {
+		return nil, err
+	}
+	// comment.progress_required: beads-owned progress trail (outside firstmate).
+	// force bypasses blockers/children only — never this gate.
+	if err := ValidateCommentProgressForClose(ctx, tx, id, reason, forceNoComment, reason); err != nil {
 		return nil, err
 	}
 	result, err := CloseIssueInTx(ctx, tx, id, reason, actor, session)

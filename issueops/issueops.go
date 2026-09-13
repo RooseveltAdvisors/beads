@@ -349,8 +349,11 @@ type CloseRequest struct {
 	// first-close-wins rule as Reason.
 	Session string
 	// Force bypasses only blocker and open-child close policy. It never bypasses
-	// validation, ExpectedVersion, or lifecycle rules.
+	// validation, ExpectedVersion, comment.progress_required, or lifecycle rules.
 	Force bool
+	// ForceNoComment skips the comment.progress_required gate. Requires Reason
+	// (same string) to record why progress was skipped.
+	ForceNoComment bool
 	// ExpectedVersion requires the current row version to match, and is checked
 	// BEFORE the idempotent close — so a re-close of an already-closed issue
 	// still refuses on a stale token rather than reporting the no-op it would
