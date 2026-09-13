@@ -101,11 +101,11 @@ discover build tags the hard way.
 
 ## CLI Reference Docs
 
-`docs/CLI_REFERENCE.md` and `docs/cli-reference/` are generated, and
-`docs/cli-docs.pin` pins them to the last *released* bd, not main. Never
-hand-edit them, and do not regenerate them from your checkout: change the
-command's `Long` text in `cmd/bd/` and let the release's pin bump carry it.
-`make check-docs` is the gate.
+`docs/CLI_REFERENCE.md`, `docs/cli-reference/`, and the CLI Reference pages
+array in `docs/docs.json` are generated, and `docs/cli-docs.pin` pins them to
+the last *released* bd, not main. Never hand-edit them, and do not regenerate
+them from your checkout: change the command's `Long` text in `cmd/bd/` and let
+the release's pin bump carry it. `make check-docs` is the gate.
 
 ## Non-Interactive Shell Commands
 
