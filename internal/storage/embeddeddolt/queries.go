@@ -9,9 +9,19 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/storage/issueops"
 	"github.com/steveyegge/beads/internal/types"
 )
+
+// WakeExpiredDefersAdvisory preserves the backend wake contract for decorators.
+// The name is historical (defer-only on upstream); house due/repeat runs the
+// full scheduled sweeps (defer wake + due trigger) through RunScheduledSweeps.
+func (s *EmbeddedDoltStore) WakeExpiredDefersAdvisory(ctx context.Context) {
+	s.runScheduledSweeps(ctx)
+}
+
+var _ storage.ExpiredDeferWaker = (*EmbeddedDoltStore)(nil)
 
 // runScheduledSweeps runs the lazy time-based sweeps — defer wake and due
 // trigger (issueops.RunScheduledSweepsInTx) — in one write transaction before

@@ -127,17 +127,15 @@ func cliCompatibleMigrationSQL(name, sqlText string) string {
 		// 2.2.0 (same measurement), so a fresh bundle always needs the column.
 		return cliMigration0066AddEventsJournalActor
 	case "0067_add_recurrence_columns.up.sql":
-		// Direct DDL for the same reason as 0060: the source migration's
-		// PREPARE guards make it idempotent on upgraded databases, and the
-		// 2.2.x CLI no-ops a prepared ALTER (dolthub/dolt#11345). 0067 is
-		// schema-only, so this substitute is the whole migration.
+		// House due/repeat (fleet already applied as v67).
 		return cliMigration0067AddRecurrenceColumns
 	case "0068_add_due_missed.up.sql":
-		// Direct DDL for the same reason as 0067: the source migration's
-		// PREPARE guards make it idempotent on upgraded databases, and the
-		// 2.2.x CLI no-ops a prepared ALTER (dolthub/dolt#11345). 0068 is
-		// schema-only, so this substitute is the whole migration.
+		// House due-miss escalation (fleet already applied as v68).
 		return cliMigration0068AddDueMissed
+	case "0069_add_versioned_beads_schema.up.sql":
+		// Upstream versioned-beads Phase 1, renumbered 0067→0069 so it does
+		// not collide with house recurrence/due_missed already on fleet DBs.
+		return cliMigration0069AddVersionedBeadsSchema
 	default:
 		return sqlText
 	}
@@ -171,12 +169,12 @@ func cliSubstituteAssumesWispTables(name string) bool {
 		// wisp_comments.
 		return true
 	case "0067_add_recurrence_columns.up.sql":
-		// cliMigration0067AddRecurrenceColumns drops the @has_wisps guard and
-		// ALTERs wisps unconditionally.
 		return true
 	case "0068_add_due_missed.up.sql":
-		// cliMigration0068AddDueMissed drops the @has_wisps guard and ALTERs
-		// wisps unconditionally.
+		return true
+	case "0069_add_versioned_beads_schema.up.sql":
+		// cliMigration0069AddVersionedBeadsSchema drops the source's
+		// @wisps_cr_needs_add table-exists guard and ALTERs wisps directly.
 		return true
 	default:
 		return false
@@ -236,6 +234,34 @@ ALTER TABLE wisps ADD COLUMN due_missed INT NOT NULL DEFAULT 0;`
 
 const cliMigration0065WidenWispCommentsText = `ALTER TABLE wisp_comments MODIFY COLUMN text LONGTEXT NOT NULL;`
 const cliMigration0066AddEventsJournalActor = `ALTER TABLE bd_events_journal ADD COLUMN actor VARCHAR(255) NOT NULL DEFAULT '';`
+
+// cliMigration0069AddVersionedBeadsSchema is 0069 (upstream 0067) with its two guarded
+// PREPARE blocks replaced by the direct ALTERs they would run on a fresh
+// database. The CREATE TABLEs are the source file's own text: CREATE TABLE
+// IF NOT EXISTS executes on the CLI batch path unchanged.
+const cliMigration0069AddVersionedBeadsSchema = `CREATE TABLE IF NOT EXISTS issue_versions (
+    issue_id VARCHAR(255) NOT NULL,
+    revision BIGINT NOT NULL,
+    epoch INT NOT NULL,
+    durable_state JSON,
+    change_actor VARCHAR(255),
+    change_agent VARCHAR(255),
+    change_message TEXT,
+    change_at DATETIME NOT NULL,
+    removed_at DATETIME,
+    removed_reason VARCHAR(255),
+    PRIMARY KEY (issue_id, revision)
+);
+CREATE TABLE IF NOT EXISTS store_epoch (
+    id TINYINT(1) NOT NULL DEFAULT 1,
+    epoch INT NOT NULL DEFAULT 1,
+    bumped_at DATETIME,
+    bumped_reason VARCHAR(255),
+    PRIMARY KEY (id),
+    CONSTRAINT ck_store_epoch_singleton CHECK (id = 1)
+);
+ALTER TABLE issues ADD COLUMN current_revision BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE wisps ADD COLUMN current_revision BIGINT NOT NULL DEFAULT 1;`
 
 const cliMigration0041SplitDependenciesTarget = `DELETE FROM dolt_nonlocal_tables;
 CALL DOLT_COMMIT('-Am', 'disable nonlocal tables for fk migrations');
