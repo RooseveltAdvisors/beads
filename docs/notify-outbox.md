@@ -63,3 +63,24 @@ Supporting a new harness = herdr detecting it. Beads does not embed harness SDKs
 One systemd timer runs sweep then drain. No separate notify timer.
 Pending outbox rows retry on the next sweep when the agent is offline.
 
+
+## Prompt playbook (finish-line education)
+
+`notify.DefaultPrompt` always teaches how to end work in beads so harnesses
+that only chat or write status files still learn the real finish line:
+
+```text
+bd comment <id> "what landed"
+bd close <id> --reason "short real reason"
+```
+
+Kinds with stronger copy:
+
+| Kind | When | Message emphasis |
+|------|------|------------------|
+| `due` / `defer` / `manual` | normal fires | short close footer |
+| `stale-claim` | assigned open/in_progress gone quiet without close | full playbook: close / delta comment / reassign |
+| `progress` | missing comment.progress trail | comment then close |
+| `escalate` | escalations | show + comment + close if done |
+
+`comment.progress_required` is mentioned so agents do not bare-close.

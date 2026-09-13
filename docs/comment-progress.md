@@ -33,3 +33,20 @@ bd progress check <id...> --json
 comment.progress_required: true   # house
 # comment.progress_required: false  # recommended upstream default
 ```
+
+
+## Stale in_progress (no close) wakes
+
+If work is finished only in chat/status files, the close gate never runs. Due/stale-claim notify still wakes the seat. Prompt text (see `notify.DefaultPrompt`) teaches:
+
+```text
+bd comment <id> "what landed"
+bd close <id> --reason "short real reason"
+```
+
+Kinds:
+- `due` / `manual` / `defer` - short finish-line footer on every wake
+- `stale-claim` - full playbook (close / delta comment / reassign)
+- `progress` - missing progress trail while still open
+
+Enqueue stale-claim/progress from clocks or ops (`bd notify` outbox); drain delivers via herdr to any harness.
