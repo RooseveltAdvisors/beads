@@ -144,6 +144,11 @@ Examples:
 		// counts — and so the line a human reads and the line a rail carries
 		// are the same string.
 		report.Summary = report.summaryLine()
+		// Queue the fired beads for delivery. Failure is logged inside
+		// enqueueDueSweepNotifies and never fails the clock: timekeeping and
+		// delivery are separate jobs, and a misconfigured transport must not
+		// make an operator think nothing came due.
+		enqueueDueSweepNotifies(report)
 		if jsonOutput {
 			return outputJSON(report)
 		}

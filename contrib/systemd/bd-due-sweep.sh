@@ -17,6 +17,11 @@ TIMEOUT=${BD_DUE_SWEEP_TIMEOUT:-120}
 STATE=${BD_DUE_SWEEP_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/bd-due-sweep}
 # Optional hook, called as: "$PUBLISH" "<summary line>" "<path to report.json>"
 PUBLISH=${BD_DUE_SWEEP_PUBLISH:-}
+# Deliver queued notify rows in the same tick. Set BD_DUE_SWEEP_DRAIN=0 to let
+# a separate timer own delivery.
+DRAIN=${BD_DUE_SWEEP_DRAIN:-1}
+DRAIN_EXEC=${BD_DUE_SWEEP_DRAIN_EXEC:-}
+DRAIN_LIMIT=${BD_DUE_SWEEP_DRAIN_LIMIT:-50}
 
 if [ -z "$WORKSPACE" ]; then
     echo "bd-due-sweep: BD_DUE_SWEEP_WORKSPACE is unset" >&2
@@ -50,6 +55,19 @@ if [ -z "$summary" ]; then
     exit 1
 fi
 echo "bd-due-sweep: $summary"
+
+# Delivery runs in the sweep's own tick so there is one timer, not two. A seat
+# whose transport is down keeps its rows pending and is retried next tick, so a
+# drain failure is never fatal here.
+if [ "$DRAIN" != "0" ]; then
+    if [ -n "$DRAIN_EXEC" ]; then
+        (cd "$WORKSPACE" && "$BD" notify drain --all --limit "$DRAIN_LIMIT" --exec "$DRAIN_EXEC") || \
+            echo "bd-due-sweep: notify drain had failures (non-fatal)" >&2
+    else
+        (cd "$WORKSPACE" && "$BD" notify drain --all --limit "$DRAIN_LIMIT") || \
+            echo "bd-due-sweep: notify drain had failures (non-fatal)" >&2
+    fi
+fi
 
 if [ -n "$PUBLISH" ]; then
     "$PUBLISH" "$summary" "$REPORT_JSON" || \

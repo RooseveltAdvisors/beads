@@ -10,10 +10,15 @@ worked example of one — a `systemd --user` timer on a fixed cadence:
 ```
 bd-due-sweep.timer
   → bd-due-sweep.sh
-       → bd due sweep --json     # fire what is due, reschedule, report
+       → bd due sweep --json          # fire what is due, reschedule, queue
+       → bd notify drain --all        # deliver the queued rows
        → write last-report.json
-       → write last-sweep        # heartbeat, written last
+       → write last-sweep             # heartbeat, written last
 ```
+
+One timer, not two: firing and delivering happen in the same tick, so there is
+a single thing to watch and a single thing that can be late. A seat whose
+transport is down keeps its rows pending and is retried on the next tick.
 
 Nothing here is required to use due dates, and beads knows nothing about these
 files. Use them, adapt them, or drive `bd due sweep` from cron, a CI schedule,
@@ -49,6 +54,9 @@ Environment=BD_DUE_SWEEP_BD=%h/.local/bin/bd
 | `BD_DUE_SWEEP_TIMEOUT` | `120` | Seconds before the sweep is killed |
 | `BD_DUE_SWEEP_STATE` | `$XDG_STATE_HOME/bd-due-sweep` | Lock, heartbeat, last report |
 | `BD_DUE_SWEEP_PUBLISH` | *(none)* | Hook run as `"$PUBLISH" "<summary>" "<report.json>"` |
+| `BD_DUE_SWEEP_DRAIN` | `1` | Drain the notify outbox in the same tick; `0` to leave delivery to something else |
+| `BD_DUE_SWEEP_DRAIN_EXEC` | *(none)* | Transport command passed to `bd notify drain --exec`; unset prints rows |
+| `BD_DUE_SWEEP_DRAIN_LIMIT` | `50` | Maximum rows delivered per seat per tick |
 
 Sweeping several workspaces is one instance per workspace: copy the unit pair
 under a second name with its own `BD_DUE_SWEEP_WORKSPACE` and
