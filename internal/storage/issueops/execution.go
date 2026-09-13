@@ -288,7 +288,7 @@ func ExecuteClose(ctx context.Context, tx *sql.Tx, request publicops.CloseReques
 	if attempt.Actor == "" || attempt.IssueID == "" {
 		return publicops.CloseResult{}, nil, fmt.Errorf("%w: close requires actor and issue ID", storage.ErrValidation)
 	}
-	closed, err := CloseIssueCheckedInTx(ctx, tx, attempt.IssueID, attempt.Reason, attempt.Actor, attempt.Session, attempt.Force, attempt.ExpectedVersion)
+	closed, err := CloseIssueCheckedInTx(ctx, tx, attempt.IssueID, attempt.Reason, attempt.Actor, attempt.Session, attempt.Force, attempt.ForceNoComment, attempt.ExpectedVersion)
 	if err != nil {
 		return publicops.CloseResult{}, nil, err
 	}

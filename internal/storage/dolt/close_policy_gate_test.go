@@ -118,7 +118,7 @@ func TestEnforceClosePolicyInTxMatchesCheckedClose(t *testing.T) {
 				return err
 			}))
 			checked := classifyClosePolicy(inRolledBackTx(t, ctx, store, func(tx *sql.Tx) error {
-				_, err := issueops.CloseIssueCheckedInTx(ctx, tx, tc.id, "done", "tester", "", tc.force, nil)
+				_, err := issueops.CloseIssueCheckedInTx(ctx, tx, tc.id, "done", "tester", "", tc.force, false, nil)
 				return err
 			}))
 			if gate != tc.want {
@@ -172,7 +172,7 @@ func TestEnforceClosePolicyInTxRoutesDualResidentToDurableRow(t *testing.T) {
 		return err
 	}))
 	checked := classifyClosePolicy(inRolledBackTx(t, ctx, store, func(tx *sql.Tx) error {
-		_, err := issueops.CloseIssueCheckedInTx(ctx, tx, parent, "done", "tester", "", false, nil)
+		_, err := issueops.CloseIssueCheckedInTx(ctx, tx, parent, "done", "tester", "", false, false, nil)
 		return err
 	}))
 	if gate != verdictOpenChildren {

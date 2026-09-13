@@ -283,7 +283,7 @@ func (s *DoltStore) closeWispChecked(ctx context.Context, id string, actor strin
 	clearJournalScope := s.scopeEventsJournalTransaction(tx)
 	defer clearJournalScope()
 
-	res, err := issueops.CloseIssueCheckedInTx(ctx, tx, id, opts.Reason, actor, opts.Session, opts.Force, opts.ExpectedVersion)
+	res, err := issueops.CloseIssueCheckedInTx(ctx, tx, id, opts.Reason, actor, opts.Session, opts.Force, false, opts.ExpectedVersion)
 	if err != nil {
 		return storage.CloseIssueResult{}, err
 	}

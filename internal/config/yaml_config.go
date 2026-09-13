@@ -67,6 +67,9 @@ var YamlOnlyKeys = map[string]bool{
 	// necessarily reachable, so it lives in yaml alongside the create settings)
 	"due.required": true,
 
+	// Comment progress gate on close (see issueops.ValidateCommentProgressForClose)
+	"comment.progress_required": true,
+
 	// Prime memory-injection caps (read at session start, possibly before
 	// the database is reachable, so they must live in yaml)
 	"prime.max-memories":     true,

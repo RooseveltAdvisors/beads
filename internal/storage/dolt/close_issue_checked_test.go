@@ -93,7 +93,7 @@ func TestCloseIssueCheckedParentChildInsertCannotPhantomMerge(t *testing.T) {
 	}
 	defer txAdd.Rollback()
 
-	closeResult, err := issueops.CloseIssueCheckedInTx(ctx, txClose, parent, "done", "tester", "", false, nil)
+	closeResult, err := issueops.CloseIssueCheckedInTx(ctx, txClose, parent, "done", "tester", "", false, false, nil)
 	if err != nil {
 		t.Fatalf("checked close before concurrent edge: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestCloseIssueCheckedPinnedConnRefusalRestoresCoordinationSavepoint(t *test
 		t.Fatalf("start pinned-connection transaction: %v", err)
 	}
 
-	_, err = issueops.CloseIssueCheckedInTx(ctx, conn, parent, "done", "tester", "", false, nil)
+	_, err = issueops.CloseIssueCheckedInTx(ctx, conn, parent, "done", "tester", "", false, false, nil)
 	if !errors.Is(err, storage.ErrCloseOpenChildren) {
 		t.Fatalf("checked close error = %v, want ErrCloseOpenChildren", err)
 	}

@@ -1124,7 +1124,7 @@ func (r *issueSQLRepositoryImpl) Close(ctx context.Context, id string, params do
 }
 
 func (r *issueSQLRepositoryImpl) CloseChecked(ctx context.Context, id string, params domain.CloseRowParams, actor string, force bool) (domain.CloseRowResult, error) {
-	res, err := issueops.CloseIssueCheckedInTx(ctx, r.runner, id, params.Reason, actor, params.Session, force, nil)
+	res, err := issueops.CloseIssueCheckedInTx(ctx, r.runner, id, params.Reason, actor, params.Session, force, false, nil)
 	if err != nil {
 		return domain.CloseRowResult{}, fmt.Errorf("db: IssueSQLRepository.CloseChecked %s: %w", id, err)
 	}

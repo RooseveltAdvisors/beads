@@ -651,7 +651,7 @@ func (s *DoltStore) closeIssueChecked(ctx context.Context, id string, actor stri
 	// event are written (the atomic-refuse property).
 	var result storage.CloseIssueResult
 	if err := s.withRetryTx(ctx, func(tx *sql.Tx) error {
-		res, err := issueops.CloseIssueCheckedInTx(ctx, tx, id, opts.Reason, actor, opts.Session, opts.Force, opts.ExpectedVersion)
+		res, err := issueops.CloseIssueCheckedInTx(ctx, tx, id, opts.Reason, actor, opts.Session, opts.Force, false, opts.ExpectedVersion)
 		if err != nil {
 			return err
 		}

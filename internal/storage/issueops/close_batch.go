@@ -121,11 +121,12 @@ func ExecuteCloseBatch(ctx context.Context, tx *sql.Tx, request publicops.CloseB
 
 	for i, item := range request.Items {
 		closed, changedTables, err := ExecuteClose(ctx, tx, publicops.CloseRequest{
-			Actor:   request.Actor,
-			IssueID: item.IssueID,
-			Reason:  item.Reason,
-			Session: request.Session,
-			Force:   request.Force,
+			Actor:          request.Actor,
+			IssueID:        item.IssueID,
+			Reason:         item.Reason,
+			Session:        request.Session,
+			Force:          request.Force,
+			ForceNoComment: request.ForceNoComment,
 		})
 		if err != nil {
 			result.Outcomes[i] = publicops.CloseOutcome{IssueID: item.IssueID, Err: err}
