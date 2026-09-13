@@ -11,9 +11,9 @@
 #   BD_NOTIFY_SEAT_<NAME> shell command template for seat NAME (uppercased,
 #                         non-alnum -> _). Runs once per pending row with
 #                         BD_NOTIFY_* env from `bd notify drain --exec`.
-#                         Example:
-#                           BD_NOTIFY_SEAT_WISEMAN='herdr --session wiseman agent prompt w1:p1 "$BD_NOTIFY_PROMPT"'
-#                           BD_NOTIFY_SEAT_FIRSTMATE='fm_wake_append check "bd-notify:$BD_NOTIFY_ID" "check: bead $BD_NOTIFY_ID due"'
+#                         No seat is special-cased in this script: configure
+#                         each assignee the same way, or use
+#                         BD_NOTIFY_DEFAULT_SEAT_CMD for a uniform transport.
 #   BD_NOTIFY_DEFAULT_SEAT_CMD
 #                         fallback exec when a seat has no specific override
 #   BD_NOTIFY_LIMIT       max rows per seat per tick (default: 20)

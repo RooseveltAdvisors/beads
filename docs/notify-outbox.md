@@ -1,20 +1,14 @@
-# Beads notify outbox - delivery outside firstmate (2026-09-13)
+# Beads notify outbox - harness-agnostic seat delivery (2026-09-13)
 
 ## Thesis
 
-Beads owns **time** (due/repeat/sweep) and **delivery** (seat-addressed outbox).
-Firstmate, herdr, pi, and any LLM harness are optional **transports**, not the bus.
+Beads owns **time** (due/repeat/sweep) and **delivery ledger** (seat-addressed outbox).
+Assignee is a stable **seat identity**. Live agent instances (any harness) are
+resolved later by generic drain/discovery - not by special-casing names like
+firstmate or wiseman in beads core.
 
-## Problem with the prior split
-
-| Piece | Problem |
-|---|---|
-| `publish-wake-firstmate.sh` | Firstmate-shaped; couples every seat to FM |
-| FM durable wake queue | Default rail for all seats → FM overload as agent count grows |
-| herdr special-case for wiseman | Site glue, not beads |
-| overseer-bead-id | Special case instead of assignee seat |
-
-When FM wedges, everyone's due pings die even if beads and the timer are healthy.
+Firstmate is an orchestrator that may *host* harnesses; it is not a harness and
+not the notify bus. No assignee gets a privileged code path in beads.
 
 ## Design
 
@@ -22,21 +16,24 @@ When FM wedges, everyone's due pings die even if beads and the timer are healthy
 bd due sweep
   → fire + reschedule + by_assignee
   → enqueue .beads/notify/outbox.jsonl  {seq, seat, issue_id, kind, title}
+
 bd notify drain --seat <assignee> [--exec transport]
-  → pending rows for seat → transport → ack
+  → pending rows for that seat → optional transport → ack
 ```
 
 - **Seat** = `assignee` (empty → `unassigned`)
-- **Outbox** = workspace-local under `.beads/notify/` (append-only JSONL + ack cursors)
-- **Transports** = per-seat shell commands (`BD_NOTIFY_SEAT_WISEMAN=...`)
-- **Clock** remains systemd `bd-due-sweep.timer` (unchanged D1 amendment)
-- **Drain** is a separate short timer or After=sweep; drain lag ≠ clock lag
+- **Outbox** = workspace-local under `.beads/notify/`
+- **Transports** = generic (`--exec`, or `BD_NOTIFY_SEAT_<NAME>` / `BD_NOTIFY_DEFAULT_SEAT_CMD`)
+- **No special seats** in beads or contrib scripts
 
-## Non-goals (v1)
+## Removed anti-patterns
 
-- SQL table / dolt_ignored journal (file outbox is enough; promote if multi-writer needs it)
-- assignee.required enforcement (separate PR; backfill first)
-- Guaranteed exactly-once across hosts (per-workspace outbox)
+- `publish-wake-*.sh` fan-out by assignee (e.g. hard-coded herdr session)
+- Per-name env defaults for particular agents in fleet drop-ins
+- Overseer-only bead id files as a second routing plane
+
+Optional summary publishers may still append one sweep line to a local queue;
+that is not per-bead seat delivery.
 
 ## CLI
 
@@ -45,10 +42,7 @@ bd notify drain --seat <assignee> [--exec transport]
 - `bd notify ack --seat S --upto N`
 - `bd notify seats`
 
-## Amendment to D5
+## Next (not this change)
 
-D5 "route via fm-send / firstmate watcher" is demoted:
-
-- Firstmate drains `assignee=firstmate` (and optionally unassigned→hold) like any seat
-- Other seats do not traverse FM
-- Stack-monitor still watches sweep liveness + pending outbox depth
+Seat directory + live instance discovery (herdr agent list, any harness) so
+drain targets agent instances by assignee without static pane commands.
