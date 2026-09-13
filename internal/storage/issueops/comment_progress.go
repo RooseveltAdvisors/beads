@@ -65,8 +65,10 @@ func ValidateCommentProgressForClose(ctx context.Context, tx DBTX, issueID, reas
 		}
 		return nil
 	}
-	// Close reason is the final progress note.
-	if strings.TrimSpace(reason) != "" {
+	// An explicit close reason counts as the final progress note.
+	// The CLI default "Closed" (when no --reason was passed) does NOT count —
+	// that would make the gate a no-op on every plain bd close.
+	if reasonCountsAsProgress(reason) {
 		return nil
 	}
 
@@ -103,6 +105,18 @@ func ValidateCommentProgressForClose(ctx context.Context, tx DBTX, issueID, reas
 	}
 	return fmt.Errorf("%w: comment.progress_required: issue %s (assignee %q) has no progress comments — run `bd comment %s \"…\"` or pass --reason on close, or --force-no-comment --reason \"…\"",
 		storage.ErrValidation, issueID, issue.Assignee, issueID)
+}
+
+func reasonCountsAsProgress(reason string) bool {
+	r := strings.TrimSpace(reason)
+	if r == "" {
+		return false
+	}
+	switch strings.ToLower(r) {
+	case "closed", "done", "complete", "completed":
+		return false
+	}
+	return true
 }
 
 func hasProgressCommentSince(comments []*types.Comment, anchor *time.Time) bool {
