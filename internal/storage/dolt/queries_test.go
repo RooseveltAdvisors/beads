@@ -2,6 +2,7 @@ package dolt
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -1749,9 +1750,9 @@ func TestSearchIssues_ByTitle(t *testing.T) {
 	}
 }
 
-// TestSearchIssues_ByDescription verifies that DescriptionContains filter finds
-// issues by description text. Free-text search no longer scans descriptions
-// (hq-319 optimization) — use DescriptionContains for explicit description search.
+// TestSearchIssues_ByDescription verifies that free-text search matches text
+// that appears only in an issue's description, and that the DescriptionContains
+// filter still works for explicit single-field search.
 func TestSearchIssues_ByDescription(t *testing.T) {
 	store, cleanup := setupTestStore(t)
 	defer cleanup()
@@ -1771,13 +1772,16 @@ func TestSearchIssues_ByDescription(t *testing.T) {
 		t.Fatalf("failed to create issue: %v", err)
 	}
 
-	// Free-text query should NOT match description-only content (hq-319).
+	// Free-text query should match description-only content.
 	results, err := store.SearchIssues(ctx, "Special unique description", types.IssueFilter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(results) != 0 {
-		t.Fatalf("free-text search should not scan descriptions (hq-319), got %d results", len(results))
+	if len(results) != 1 {
+		t.Fatalf("free-text search should match descriptions, got %d results", len(results))
+	}
+	if results[0].ID != issue.ID {
+		t.Errorf("expected issue %s, got %s", issue.ID, results[0].ID)
 	}
 
 	// DescriptionContains filter should still find it.
@@ -1790,6 +1794,91 @@ func TestSearchIssues_ByDescription(t *testing.T) {
 	}
 	if results[0].ID != issue.ID {
 		t.Errorf("expected issue %s, got %s", issue.ID, results[0].ID)
+	}
+}
+
+// TestSearchIssues_FreeTextFieldCoverage pins the free-text search contract
+// across all three fields it spans. Broadening the predicate to descriptions
+// must ADD the description-only match without changing what title-only and
+// ID matches return, and must not pull in rows that match nothing.
+func TestSearchIssues_FreeTextFieldCoverage(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx, cancel := testContext(t)
+	defer cancel()
+
+	seed := []*types.Issue{
+		{
+			ID:          "sfc-title",
+			Title:       "Quaquaversal buffer overflow",
+			Description: "Nothing notable in this body.",
+			Status:      types.StatusOpen,
+			Priority:    1,
+			IssueType:   types.TypeBug,
+		},
+		{
+			ID:          "sfc-desc",
+			Title:       "Widget rendering is broken",
+			Description: "Root cause: the zygomorphic buffer overflows under load.",
+			Status:      types.StatusOpen,
+			Priority:    1,
+			IssueType:   types.TypeBug,
+		},
+		{
+			ID:          "sfc-unrelated",
+			Title:       "Tidy up the changelog",
+			Description: "Housekeeping only.",
+			Status:      types.StatusOpen,
+			Priority:    3,
+			IssueType:   types.TypeChore,
+		},
+	}
+	for _, issue := range seed {
+		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
+			t.Fatalf("failed to create %s: %v", issue.ID, err)
+		}
+	}
+
+	cases := []struct {
+		name  string
+		query string
+		want  []string
+	}{
+		// The regression this test exists for: the term appears only in
+		// sfc-desc's description, in no title and in no ID.
+		{name: "description only", query: "zygomorphic", want: []string{"sfc-desc"}},
+		// Unchanged behavior: a title-only term still returns exactly its
+		// title match and does not gain the other rows.
+		{name: "title only", query: "Quaquaversal", want: []string{"sfc-title"}},
+		// Unchanged behavior: ID-like queries still resolve by ID.
+		{name: "id exact", query: "sfc-unrelated", want: []string{"sfc-unrelated"}},
+		{name: "no match", query: "nonexistent-term", want: nil},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			results, err := store.SearchIssues(ctx, tc.query, types.IssueFilter{})
+			if err != nil {
+				t.Fatalf("SearchIssues(%q): %v", tc.query, err)
+			}
+			got := make([]string, len(results))
+			for i, r := range results {
+				got[i] = r.ID
+			}
+			sort.Strings(got)
+			want := append([]string(nil), tc.want...)
+			sort.Strings(want)
+			if len(got) != len(want) {
+				t.Fatalf("SearchIssues(%q) = %v, want %v", tc.query, got, want)
+			}
+			for i := range got {
+				if got[i] != want[i] {
+					t.Fatalf("SearchIssues(%q) = %v, want %v", tc.query, got, want)
+				}
+			}
+		})
 	}
 }
 
