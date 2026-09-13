@@ -75,8 +75,20 @@ stack a queue of sweeps on one database.
 ## Publishing the summary
 
 With no `BD_DUE_SWEEP_PUBLISH` set, the summary goes to stdout and the journal
-keeps it. Set the variable to any command and it is called with the summary as
-its single argument.
+keeps it. Set the variable to any command and it is called with:
+
+1. `$1` - the summary line (same string a human reads)
+2. `$2` - path to `last-report.json` (full `bd due sweep --json` payload)
+
+The JSON includes `due_ids` and **`by_assignee`**: a list of
+`{assignee, ids}` seats. Assignee is the routing key. Publishers fan out each
+seat to the matching wake rail (for example `assignee=wiseman` → herdr session
+`wiseman`; everything else → the firstmate durable wake queue). Seat grouping
+is computed inside `bd due sweep` so every publisher sees the same map and does
+not re-query the store.
+
+A firstmate-shaped publisher ships as `publish-wake-firstmate.sh` in this
+directory.
 
 `publish-wake-firstmate.sh` is a worked example for a firstmate home: it sources
 `fm-wake-lib.sh` and calls `fm_wake_append`. Publish through the owning helper
@@ -98,3 +110,49 @@ all three and corrupts the rail for every other producer.
 Run the sweep against the database directly. `bd due sweep` refuses
 proxied-server mode: the server already sweeps on its own reads, so a proxied
 client asking for one is asking the wrong process.
+
+## Notify outbox (beads-owned delivery)
+
+`bd due sweep` enqueues one row per fired bead into `.beads/notify/` under the
+bead's **assignee seat**. That ledger is beads delivery: it does not require
+firstmate, herdr, or any LLM harness.
+
+```sh
+bd notify pending                 # all seats
+bd notify pending --seat wiseman
+bd notify drain --seat wiseman    # print + ack
+bd notify drain --seat wiseman --exec 'echo "$BD_NOTIFY_ID $BD_NOTIFY_TITLE"'
+bd notify seats
+```
+
+### Seat transports
+
+Install the drain units and configure per-seat commands:
+
+```sh
+install -m 0755 bd-notify-drain.sh ~/.local/libexec/
+install -m 0644 bd-notify-drain.service bd-notify-drain.timer \
+                ~/.config/systemd/user/
+systemctl --user edit bd-notify-drain.service
+```
+
+Drop-in example:
+
+```ini
+[Service]
+Environment=BD_NOTIFY_WORKSPACE=/opt/ra/firstmate
+Environment=BD_NOTIFY_BD=%h/.local/bin/bd
+Environment=BD_NOTIFY_SEAT_WISEMAN=herdr --session wiseman agent prompt w1:p1 "$BD_NOTIFY_PROMPT"
+Environment=BD_NOTIFY_SEAT_FIRSTMATE=/opt/ra/firstmate/bin/fm-notify-seat.sh
+```
+
+`publish-wake-firstmate.sh` remains a optional firstmate-shaped publisher for
+the sweep summary line. Per-bead seat delivery should prefer `bd notify drain`.
+
+### Design rule
+
+- **Time** = timer + `bd due sweep`
+- **Routing** = `assignee` → outbox seat
+- **Delivery** = `bd notify` outbox + seat transports
+- Firstmate is one seat/transport, not the bus
+

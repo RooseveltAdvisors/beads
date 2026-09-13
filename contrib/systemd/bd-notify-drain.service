@@ -1,0 +1,12 @@
+[Unit]
+Description=Drain beads notify outbox to assignee seat transports
+Documentation=https://github.com/steveyegge/beads/blob/main/contrib/systemd/README.md
+After=bd-due-sweep.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/libexec/bd-notify-drain.sh
+Environment=BD_NOTIFY_WORKSPACE=%h
+# Override workspace + seat transports with a drop-in:
+#   systemctl --user edit bd-notify-drain.service
+TimeoutStartSec=120

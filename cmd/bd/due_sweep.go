@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -25,6 +27,14 @@ type scheduledSweeper interface {
 	RunScheduledSweeps(ctx context.Context) (issueops.ScheduledSweepResult, error)
 }
 
+// dueSweepSeat is one assignee bucket on a sweep report. The external clock
+// routes each seat's ids to that seat's wake rail (herdr session, inbox,
+// firstmate queue) without re-querying the store.
+type dueSweepSeat struct {
+	Assignee string   `json:"assignee"`
+	IDs      []string `json:"ids"`
+}
+
 // dueSweepReport is what one sweep did. It is the timer's payload: counts to
 // put in a summary line, and ids so a human reading the line can go look.
 type dueSweepReport struct {
@@ -43,6 +53,10 @@ type dueSweepReport struct {
 	DefersWoken    int      `json:"defers_woken"`
 	DeferIDs       []string `json:"defer_ids,omitempty"`
 	DeferWisps     int      `json:"defer_wisps"`
+	// ByAssignee groups due + escalated issue ids by assignee seat. Empty
+	// assignee becomes "unassigned". Publishers fan out per seat so the
+	// assignee field is the routing key, not a decoration.
+	ByAssignee []dueSweepSeat `json:"by_assignee,omitempty"`
 }
 
 // Summary is the one line an external clock publishes. It names both sweeps
@@ -124,17 +138,64 @@ Examples:
 			DeferIDs:       swept.Defers.Issues,
 			DeferWisps:     len(swept.Defers.Wisps),
 		}
+		// Seat routing is part of the sweep payload, not a publisher-side
+		// re-query. Assignees are looked up once here so every rail sees the
+		// same grouping.
+		report.ByAssignee = groupDueIDsByAssignee(rootCtx, store, append(append([]string{}, report.DueIDs...), report.EscalatedIDs...))
 		// The summary is a FIELD, not only a rendering, so an external clock
 		// can publish the line with one grep instead of reassembling it from
 		// counts — and so the line a human reads and the line a rail carries
 		// are the same string.
 		report.Summary = report.summaryLine()
+		// Beads-owned delivery: enqueue seat-addressed outbox rows so drains
+		// do not depend on firstmate or herdr. Failure here is logged inside
+		// enqueueDueSweepNotifies and never fails the clock.
+		enqueueDueSweepNotifies(report)
 		if jsonOutput {
 			return printJSON(report)
 		}
 		printDueSweepReport(report)
 		return nil
 	},
+}
+
+// groupDueIDsByAssignee builds the seat map a publisher fans out from.
+// Unknown ids land under "unassigned" rather than vanishing: a missing seat
+// is still a routing problem the clock must surface.
+func groupDueIDsByAssignee(ctx context.Context, s storage.DoltStorage, ids []string) []dueSweepSeat {
+	if len(ids) == 0 || s == nil {
+		return nil
+	}
+	seen := make(map[string]bool, len(ids))
+	unique := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		unique = append(unique, id)
+	}
+	buckets := map[string][]string{}
+	for _, id := range unique {
+		seat := "unassigned"
+		if issue, err := s.GetIssue(ctx, id); err == nil && issue != nil {
+			if a := strings.TrimSpace(issue.Assignee); a != "" {
+				seat = a
+			}
+		}
+		buckets[seat] = append(buckets[seat], id)
+	}
+	seats := make([]string, 0, len(buckets))
+	for seat := range buckets {
+		seats = append(seats, seat)
+	}
+	sort.Strings(seats)
+	out := make([]dueSweepSeat, 0, len(seats))
+	for _, seat := range seats {
+		out = append(out, dueSweepSeat{Assignee: seat, IDs: buckets[seat]})
+	}
+	return out
 }
 
 // findScheduledSweeper walks the decorator chain down to the store that can
@@ -169,6 +230,9 @@ func printDueSweepReport(r dueSweepReport) {
 	}
 	for _, id := range r.DeferIDs {
 		fmt.Printf("  woken %s\n", id)
+	}
+	for _, seat := range r.ByAssignee {
+		fmt.Printf("  seat  %s (%d)\n", seat.Assignee, len(seat.IDs))
 	}
 	if r.DueWisps > 0 || r.DeferWisps > 0 || r.EscalatedWisps > 0 {
 		fmt.Printf("  (%d due, %d escalated, %d woken in the wisp plane)\n",
