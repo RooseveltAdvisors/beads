@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/beads/internal/metrics"
 	"github.com/steveyegge/beads/internal/storage"
+	"github.com/steveyegge/beads/internal/storage/sqlbuild"
 	"github.com/steveyegge/beads/internal/types"
 	"github.com/steveyegge/beads/internal/utils"
 	"github.com/steveyegge/beads/internal/validation"
@@ -22,7 +23,9 @@ var searchCmd = &cobra.Command{
 
 ID-like queries (e.g., "bd-123", "hq-319") use fast exact/prefix matching
 over ID, title and external ref; they do not scan descriptions, so naming
-a bead returns that bead rather than every bead that cites it.
+a bead returns that bead rather than every bead that cites it. An ID-like
+query that matches nothing is retried as free text, so hyphenated terms
+("use-after-free") still find descriptions.
 Free-text queries search titles and descriptions. Use --desc-contains,
 --notes-contains, or --external-contains for targeted single-field search.
 Use --status open (etc.) to narrow; closed issues are included by default
@@ -256,6 +259,13 @@ Examples:
 		if err != nil {
 			return HandleError("%v", err)
 		}
+		if needsFreeTextRetry(query, len(issues)) {
+			filter.FreeTextQuery = true
+			issues, err = store.SearchIssues(ctx, query, filter)
+			if err != nil {
+				return HandleError("%v", err)
+			}
+		}
 
 		// Apply sorting
 		workapi.SortIssues(issues, sortBy, reverse)
@@ -357,6 +367,16 @@ func outputSearchResults(issues []*types.Issue, query string, longFormat bool) {
 				assigneeStr, labelsStr, issue.Title)
 		}
 	}
+}
+
+// needsFreeTextRetry reports whether an ID-like query that matched nothing
+// should be retried under the free-text predicate. LooksLikeIssueID accepts any
+// hyphenated space-free token, so ordinary search terms such as "use-after-free"
+// are classified as IDs and would otherwise never reach description text. The
+// retry is bounded to the empty-result case, so a query that names a real bead
+// is never diluted by beads that merely cite it.
+func needsFreeTextRetry(query string, found int) bool {
+	return found == 0 && sqlbuild.LooksLikeIssueID(query)
 }
 
 func init() {

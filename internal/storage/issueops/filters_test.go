@@ -519,6 +519,50 @@ func TestBuildIssueFilterClauses_IDFilters(t *testing.T) {
 	}
 }
 
+func TestBuildIssueFilterClauses_IDContains(t *testing.T) {
+	t.Parallel()
+
+	filter := types.IssueFilter{IDContains: "A3f8"}
+	clauses, args, err := BuildIssueFilterClauses("", filter, IssuesFilterTables)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(clauses) != 1 || clauses[0] != "id LIKE ?" {
+		t.Fatalf("expected a single `id LIKE ?` clause, got %v", clauses)
+	}
+	if len(args) != 1 || args[0] != "%a3f8%" {
+		t.Fatalf("expected one lowercased substring arg, got %v", args)
+	}
+}
+
+func TestBuildIssueFilterClauses_FreeTextQueryOverridesIDLike(t *testing.T) {
+	t.Parallel()
+
+	const query = "use-after-free"
+
+	idClauses, idArgs, err := BuildIssueFilterClauses(query, types.IssueFilter{}, IssuesFilterTables)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(idClauses) != 1 || strings.Contains(idClauses[0], "description") {
+		t.Fatalf("a hyphenated query takes the narrow ID-like branch, got %v", idClauses)
+	}
+	if len(idArgs) != 4 {
+		t.Errorf("expected 4 args for the ID-like branch, got %d: %v", len(idArgs), idArgs)
+	}
+
+	freeClauses, freeArgs, err := BuildIssueFilterClauses(query, types.IssueFilter{FreeTextQuery: true}, IssuesFilterTables)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(freeClauses) != 1 || !strings.Contains(freeClauses[0], "LOWER(description) LIKE ?") {
+		t.Fatalf("FreeTextQuery forces the description-covering predicate, got %v", freeClauses)
+	}
+	if len(freeArgs) != 3 {
+		t.Errorf("expected 3 args for the free-text branch, got %d: %v", len(freeArgs), freeArgs)
+	}
+}
+
 func TestBuildIssueFilterClauses_WispsTables(t *testing.T) {
 	t.Parallel()
 

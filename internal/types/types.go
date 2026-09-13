@@ -1912,6 +1912,7 @@ type IssueFilter struct {
 	Limit         int
 
 	// Pattern matching
+	FreeTextQuery       bool // Treat the query as free text even when it looks like an issue ID
 	TitleContains       string
 	DescriptionContains string
 	NotesContains       string

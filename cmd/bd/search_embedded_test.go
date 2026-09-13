@@ -78,6 +78,7 @@ func TestEmbeddedSearch(t *testing.T) {
 	taskB := bdCreate(t, bd, dir, "Beta bug", "--type", "bug", "--priority", "3", "--assignee", "bob", "--description", "Beta bug description", "--label", "backend")
 	taskC := bdCreate(t, bd, dir, "Gamma feature", "--type", "feature", "--priority", "2", "--label", "urgent", "--label", "frontend")
 	taskD := bdCreate(t, bd, dir, "Delta task no desc", "--type", "task")
+	hyphenTask := bdCreate(t, bd, dir, "Crash in worker pool", "--type", "bug", "--description", "the pool hits a use-after-free when the lease expires")
 	closedTask := bdCreate(t, bd, dir, "Closed epsilon", "--type", "task")
 	bdClose(t, bd, dir, closedTask.ID)
 
@@ -106,6 +107,22 @@ func TestEmbeddedSearch(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("expected to find %s in search for 'Beta'", taskB.ID)
+		}
+	})
+
+	t.Run("search_hyphenated_description_term", func(t *testing.T) {
+		// A hyphenated space-free term is classified ID-like, so the narrow ID
+		// predicate matches nothing; the bead is reachable only because an
+		// empty ID-like result is retried as free text.
+		results := bdSearchJSON(t, bd, dir, "use-after-free")
+		found := false
+		for _, r := range results {
+			if r["id"] == hyphenTask.ID {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected to find %s searching for a hyphenated description term, got %v", hyphenTask.ID, results)
 		}
 	})
 
