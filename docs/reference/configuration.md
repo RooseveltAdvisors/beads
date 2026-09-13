@@ -199,12 +199,13 @@ exactly as before, and turning the switch back off restores that:
 bd config set due.required false
 ```
 
-**Capture stays a one-liner.** When a capture surface is used without naming a
-deadline — `bd q` (which also takes `--due`), `bd todo add`, `bd gate create`,
-molecule instantiation, and the multi-bead plans (`--graph`, `--file`,
-`bd batch`) — it fills in a due date from the priority ladder and records it
-as `due_source: default`, so a synthesized deadline stays distinguishable from
-one you chose. `bd q` reports the one it picked:
+**Capture stays a one-liner.** While the rule is on, a capture surface used
+without naming a deadline — `bd q` (which also takes `--due`), `bd todo add`,
+`bd gate create`, molecule instantiation, and the multi-bead plans (`--graph`,
+`--file`, `bd batch`) — fills in a due date from the priority ladder and records
+it as `due_source: default`, so a synthesized deadline stays distinguishable
+from one you chose. The ladder is part of the invariant, so with the rule off
+these surfaces mint no due date at all. `bd q` reports the one it picked:
 
 | Priority | Due |
 |---|---|
@@ -219,8 +220,8 @@ one: `event` beads, wisps, protos, and beads a federation peer authored.
 `bd import` is exempt too, so restoring a snapshot — or backfilling due dates
 onto beads created before you turned the rule on — always works.
 
-**Clearing a due date** is the one edit that can undo the invariant, so it has
-to be deliberate:
+**Clearing a due date** is the one edit that can undo the invariant, so while
+the rule is on it has to be deliberate:
 
 ```bash
 bd update bd-a1b2 --due "" --force-no-due --reason "tracked upstream instead"
