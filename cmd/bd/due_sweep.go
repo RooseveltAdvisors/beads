@@ -151,6 +151,10 @@ Examples:
 		// do not depend on firstmate or herdr. Failure here is logged inside
 		// enqueueDueSweepNotifies and never fails the clock.
 		enqueueDueSweepNotifies(report)
+		// Same tick: quiet assigned in_progress without close → stale-claim wakes
+		// (educational bd close playbook). skip ids already due/escalated this pass.
+		skip := append(append([]string{}, report.DueIDs...), report.EscalatedIDs...)
+		enqueueStaleClaimNotifies(skip)
 		if jsonOutput {
 			return printJSON(report)
 		}

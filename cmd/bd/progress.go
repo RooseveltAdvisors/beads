@@ -123,7 +123,45 @@ func progressFresh(issue *types.Issue, comments []*types.Comment) bool {
 	return false
 }
 
+
+var progressStaleCmd = &cobra.Command{
+	Use:           "stale",
+	Short:         "List assigned in_progress beads quiet longer than comment.stale_claim_after",
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		CheckReadonly("progress stale")
+		after := issueops.StaleClaimAfter()
+		if after <= 0 {
+			if jsonOutput {
+				return outputJSON(map[string]any{"enabled": false, "stale": []any{}})
+			}
+			fmt.Fprintln(os.Stderr, "comment.stale_claim_after is off")
+			return nil
+		}
+		if store == nil {
+			return HandleErrorWithHint("database not initialized", diagHint())
+		}
+		stale, err := issueops.FindStaleClaims(rootCtx, store, after, time.Now().UTC())
+		if err != nil {
+			return HandleErrorRespectJSON("%v", err)
+		}
+		if jsonOutput {
+			return outputJSON(map[string]any{"enabled": true, "after": after.String(), "stale": stale})
+		}
+		if len(stale) == 0 {
+			fmt.Printf("ok: no stale claims (threshold %s)\n", after)
+			return nil
+		}
+		for _, s := range stale {
+			fmt.Printf("%s\t%s\t%s\t%s\t%s\n", s.ID, s.Assignee, s.QuietFor, s.Reason, s.Title)
+		}
+		return fmt.Errorf("%d stale claim(s) (threshold %s)", len(stale), after)
+	},
+}
+
 func init() {
 	progressCmd.AddCommand(progressCheckCmd)
+	progressCmd.AddCommand(progressStaleCmd)
 	rootCmd.AddCommand(progressCmd)
 }
