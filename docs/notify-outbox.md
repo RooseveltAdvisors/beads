@@ -57,3 +57,9 @@ drain targets agent instances by assignee without static pane commands.
 4. `herdr --session S agent prompt <pane> <text>`
 
 Supporting a new harness = herdr detecting it. Beads does not embed harness SDKs.
+
+## Deployment (ponytail)
+
+One systemd timer runs sweep then drain. No separate notify timer.
+Pending outbox rows retry on the next sweep when the agent is offline.
+
