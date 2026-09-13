@@ -25,6 +25,15 @@ func TestCommentProgressExempt_AssigneeScope(t *testing.T) {
 	}
 }
 
+func TestReasonCountsAsProgress(t *testing.T) {
+	if reasonCountsAsProgress("") || reasonCountsAsProgress("Closed") || reasonCountsAsProgress("done") {
+		t.Fatal("default/empty reasons must not satisfy the gate")
+	}
+	if !reasonCountsAsProgress("merged PR #18; tests green") {
+		t.Fatal("explicit reason should count")
+	}
+}
+
 func TestHasProgressCommentSince(t *testing.T) {
 	start := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
 	before := []*types.Comment{{CreatedAt: start.Add(-time.Hour), Text: "old"}}
