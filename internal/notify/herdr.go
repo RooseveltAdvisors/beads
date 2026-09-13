@@ -285,13 +285,65 @@ func (h HerdrDiscoverer) Prompt(inst Instance, text string) error {
 }
 
 // DefaultPrompt builds the standard beads notify prompt for a record.
+// Kind-specific footers teach finish-line commands so harnesses that only
+// chat or write status files still learn: done means bd close with a real reason.
 func DefaultPrompt(rec Record) string {
 	title := rec.Title
 	if title == "" {
 		title = rec.IssueID
 	}
-	return fmt.Sprintf(
-		"BEADS NOTIFY (%s). Bead %s just fired for seat %s: %s\n\nDo the work yourself. Stamp progress. Go idle. Do not ask the captain.",
+	var b strings.Builder
+	fmt.Fprintf(&b,
+		"BEADS NOTIFY (%s). Bead %s just fired for seat %s: %s\n\n",
 		rec.Kind, rec.IssueID, rec.Seat, title,
 	)
+	b.WriteString(promptPlaybook(rec.Kind, rec.IssueID))
+	b.WriteString("\nDo the work yourself. Stamp progress on the bead. Go idle. Do not ask the captain.")
+	return b.String()
+}
+
+// promptPlaybook is the educational body agents see on every wake.
+// Stale-claim / progress kinds get the strongest "you must close via bd" copy.
+func promptPlaybook(kind Kind, issueID string) string {
+	id := strings.TrimSpace(issueID)
+	if id == "" {
+		id = "<id>"
+	}
+	switch kind {
+	case KindStaleClaim:
+		return fmt.Sprintf(`This bead is still open/in_progress under your seat - finishing in chat or a status file is NOT done in beads.
+
+Finish-line (pick one):
+  1) If the work is actually finished:
+       bd comment %s "what landed (PR/link/result)"
+       bd close %s --reason "short real reason (not the word Closed)"
+  2) If still working: leave a delta comment, then continue the task:
+       bd comment %s "blocked on X / next is Y"
+  3) If you should not own it: bd update %s --assignee <seat> (or unassign) and comment why.
+
+House rule: comment.progress_required - bare bd close fails on assigned work; default reason "Closed" does not count. Escape only if needed: bd close %s --force-no-comment --reason "why".
+`, id, id, id, id, id)
+	case KindProgress:
+		return fmt.Sprintf(`Progress trail missing on an assigned bead (comment.progress_required).
+
+Do this before any close:
+  bd comment %s "current state / what changed"
+When finished:
+  bd close %s --reason "what landed"
+Do not only update chat or state/*.status - the bead thread is the handoff.
+`, id, id)
+	case KindEscalate:
+		return fmt.Sprintf(`Escalation wake. Inspect the bead, act, and end in beads:
+  bd show %s
+  bd comment %s "what you found / did"
+  bd close %s --reason "..."   # only if the work is truly finished
+`, id, id, id)
+	default:
+		// due / defer / manual - still teach the finish line without drowning the body.
+		return fmt.Sprintf(`When the work is finished, close it in beads (harness-agnostic):
+  bd comment %s "what landed"    # optional if --reason is explicit
+  bd close %s --reason "short real reason"
+Assigned work cannot bare-close (comment.progress_required). Chat-only done is not done.
+`, id, id)
+	}
 }

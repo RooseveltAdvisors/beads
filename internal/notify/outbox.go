@@ -33,10 +33,15 @@ const (
 type Kind string
 
 const (
-	KindDue       Kind = "due"
-	KindEscalate  Kind = "escalate"
-	KindDefer     Kind = "defer"
-	KindManual    Kind = "manual"
+	KindDue        Kind = "due"
+	KindEscalate   Kind = "escalate"
+	KindDefer      Kind = "defer"
+	KindManual     Kind = "manual"
+	// KindStaleClaim is assigned in_progress (or open claimed) work that has
+	// gone quiet without a close. Wakes must teach finish-line bd commands.
+	KindStaleClaim Kind = "stale-claim"
+	// KindProgress is missing comment.progress trail while still open.
+	KindProgress   Kind = "progress"
 )
 
 // UnassignedSeat is the routing key when a bead has no assignee.
