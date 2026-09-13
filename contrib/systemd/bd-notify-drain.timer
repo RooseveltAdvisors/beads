@@ -1,0 +1,14 @@
+[Unit]
+Description=Periodically drain beads notify outbox
+Documentation=https://github.com/steveyegge/beads/blob/main/contrib/systemd/README.md
+
+[Timer]
+# Short cadence: sweep is the clock; drain is delivery lag bound.
+OnBootSec=1min
+OnUnitActiveSec=1min
+Persistent=true
+RandomizedDelaySec=10
+Unit=bd-notify-drain.service
+
+[Install]
+WantedBy=timers.target
