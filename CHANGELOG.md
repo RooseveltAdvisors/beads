@@ -283,11 +283,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   caller knew to reach for `--desc-contains`. Free-text queries now match
   the description too. ID-like queries (`bd search bd-5q4x7`) still match on
   ID, title and external ref only, so naming a bead does not bury it under
-  the beads that merely cite it in their bodies; when such a query matches
-  nothing, `bd search` retries it as free text, so hyphenated terms like
-  `use-after-free` — which the ID heuristic cannot tell from a bead ID —
-  still reach description text. `--desc-contains`, `--notes-contains` and
-  `--external-contains` remain the single-field filters.
+  the beads that merely cite it in their bodies.
+
+  KNOWN LIMITATION: the ID heuristic reads ANY hyphenated, space-free term as
+  an ID, so `bd search use-after-free` (likewise `race-condition`,
+  `rate-limit`) is an ID query and does not scan descriptions. Such a query is
+  retried as free text only when it returns no rows at all, so one bead
+  carrying the term in its title suppresses every description-only match. Use
+  `--desc-contains` when a hyphenated term needs description coverage;
+  `--notes-contains` and `--external-contains` remain the other single-field
+  filters.
 
 - **`bd prime` says when it could NOT read the memory plane**
   ([#5877](https://github.com/gastownhall/beads/issues/5877)). A broken or

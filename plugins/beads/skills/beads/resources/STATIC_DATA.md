@@ -50,7 +50,8 @@ When using bd for static data (terminology, glossaries, reference information):
 
 **Searching by content:**
 - Free-text `bd search "text"` matches title, description, and ID
-- `bd search bd-abc123` is an ID lookup: ID, title, and external ref, not descriptions
-- `bd list --desc-contains "text"` filters on description text (also `--notes-contains`, `--external-contains`); the same flags work on `bd search`
+- Any hyphenated, space-free query is an ID lookup — real IDs (`bd-abc123`) and ordinary terms (`use-after-free`, `race-condition`, `rate-limit`) alike. It matches ID, title, and external ref, never descriptions
+- An ID-like query is retried as free text only when it returns nothing at all, so one title hit hides every description-only match for a term like `use-after-free`
+- `bd list --desc-contains "text"` filters on description text (also `--notes-contains`, `--external-contains`); the same flags work on `bd search` and are the reliable way to reach descriptions with a hyphenated term
 - For fields with no flag, use `bd sql`
 - Example: `bd search "authentication"` or `bd sql "SELECT id, title FROM issues WHERE design LIKE '%authentication%'"`

@@ -21,13 +21,21 @@ var searchCmd = &cobra.Command{
 	Short:   "Search issues by text query",
 	Long: `Search issues across title, description, and ID (all statuses, including closed).
 
-ID-like queries (e.g., "bd-123", "hq-319") use fast exact/prefix matching
-over ID, title and external ref; they do not scan descriptions, so naming
-a bead returns that bead rather than every bead that cites it. An ID-like
-query that matches nothing is retried as free text, so hyphenated terms
-("use-after-free") still find descriptions.
-Free-text queries search titles and descriptions. Use --desc-contains,
---notes-contains, or --external-contains for targeted single-field search.
+Free-text queries search titles and descriptions.
+
+A hyphenated, space-free query is treated as ID-like. That covers real IDs
+("bd-123", "hq-319") and ordinary terms alike ("use-after-free",
+"race-condition", "rate-limit"). ID-like queries match ID, title and external
+ref only and never scan descriptions, so naming a bead returns that bead
+rather than every bead that cites it.
+
+An ID-like query is retried as free text ONLY when it returns no rows at all
+— including when active filters (--status, --assignee, --label,
+--created-after) excluded the named bead. One title or external-ref hit
+suppresses the retry, so a description-only match for "use-after-free" is
+missed whenever any other bead carries that term in its title. Reach for
+--desc-contains to search descriptions unconditionally; --notes-contains and
+--external-contains are the other single-field filters.
 Use --status open (etc.) to narrow; closed issues are included by default
 so "was this already filed/fixed?" cannot silently answer no. Matches
 beyond --limit are dropped status-blind, so when hunting live work in a
