@@ -48,10 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a heartbeat stamped after each sweep completes so an independent host can
   tell a silent clock from a quiet one.
 
-- **Every new bead needs a due date.** `due.required` is on by default, and the
-  rule is enforced at the storage boundary, so `bd create`, the HTTP and MCP
-  servers, and the issueops API all refuse work with no deadline; `bd config
-  set due.required false` turns it off once per workspace. Capture surfaces used
+- **A workspace can require a due date on every new bead.** `due.required` is
+  off by default and opt-in per workspace — `bd config set due.required true`
+  turns it on, and `bd config set due.required false` turns it back off. With it
+  on, the rule is enforced at the storage boundary, so `bd create`, the HTTP and
+  MCP servers, and the issueops API all refuse work with no deadline. Capture surfaces used
   without naming a deadline (`bd q`, which also takes `--due`, `bd todo add`,
   `bd gate create`, molecule instantiation, `--graph`/`--file`/`bd batch`
   plans) fill one in from a priority ladder (P0 +1d, P1 +3d, P2 +7d, P3 +14d,

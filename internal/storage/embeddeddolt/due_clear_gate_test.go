@@ -14,7 +14,8 @@ import (
 )
 
 // TestDueClearGate_DoltEngine exercises the storage-side gate on clearing a
-// due date, on the embedded-Dolt reference backend: while due.required is on,
+// due date, on the embedded-Dolt reference backend: while due.required is on
+// (the test opts in, since the key is off by default),
 // a generic update that sets due_at to nil is refused as ErrValidation unless
 // it carries issueops.OpDueClearReason, and the accepted clear records that
 // reason on the update event. This is the gate every transport reaches — the

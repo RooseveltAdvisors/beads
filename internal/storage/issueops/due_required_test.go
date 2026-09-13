@@ -35,25 +35,25 @@ func dueLessTask() *types.Issue {
 	return &types.Issue{ID: "bd-due1", Title: "no deadline", IssueType: types.TypeTask, Status: types.StatusOpen}
 }
 
-// The invariant is ON in a workspace that has never configured it: a fresh
-// config refuses a due-less task, and only an explicit `due.required: false`
-// lets one through.
-func TestDueRequiredDefaultsOn(t *testing.T) {
+// The invariant is OFF in a workspace that has never configured it: a fresh
+// config accepts a due-less task, and only an explicit `due.required: true`
+// starts refusing one.
+func TestDueRequiredDefaultsOff(t *testing.T) {
 	t.Chdir(t.TempDir())
 	config.ResetForTesting()
 	if err := config.Initialize(); err != nil {
 		t.Fatalf("config.Initialize: %v", err)
 	}
 	t.Cleanup(config.ResetForTesting)
-	if !DueRequiredEnabled() {
-		t.Fatal("due.required must default to true")
+	if DueRequiredEnabled() {
+		t.Fatal("due.required must default to false")
 	}
-	if err := ValidateDueRequired(dueLessTask()); err == nil {
-		t.Fatal("a fresh workspace must refuse a due-less task")
-	}
-	config.Set(DueRequiredKey, false)
 	if err := ValidateDueRequired(dueLessTask()); err != nil {
-		t.Fatalf("invariant off must accept a due-less task, got %v", err)
+		t.Fatalf("a fresh workspace must accept a due-less task, got %v", err)
+	}
+	config.Set(DueRequiredKey, true)
+	if err := ValidateDueRequired(dueLessTask()); err == nil {
+		t.Fatal("invariant on must refuse a due-less task")
 	}
 }
 

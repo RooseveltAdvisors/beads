@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `create` gains a `due` parameter (the bd CLI formats: `+3d`, `tomorrow`,
   `next monday`, ISO). When omitted and the workspace requires due dates
-  (`due.required`, on by default), a priority ladder assigns one — P0 +1d,
+  (`due.required`, off by default and opt-in per workspace), a priority ladder
+  assigns one — P0 +1d,
   P1 +3d, P2 +7d, P3 +14d, P4 +30d — passed through `bd create --due-source
   default` so it is recorded as synthesized, not chosen, and echoed back on the
   returned issue's `due_at`. Event issues stay undated.

@@ -12,8 +12,9 @@ import (
 // DueRequiredKey is the workspace switch that turns a due date from an option
 // into a create-time invariant.
 //
-// It defaults ON, so every create surface demands a deadline unless a workspace
-// turns it off once, in config.yaml.
+// It defaults OFF, so the invariant is opt-in: a workspace turns it on once, in
+// config.yaml (`bd config set due.required true`), and from then on every create
+// surface demands a deadline.
 const DueRequiredKey = "due.required"
 
 // DueRequiredEnabled reports whether this workspace requires a due date on new

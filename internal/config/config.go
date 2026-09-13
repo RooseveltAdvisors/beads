@@ -290,10 +290,15 @@ func Initialize() error {
 	// Create command defaults
 	v.SetDefault("create.require-description", false)
 
-	// Mandatory due dates. ON by default: `bd create` and every other create
-	// surface demand a due date for work types (issueops.ValidateDueRequired).
-	// A workspace that does not want the invariant turns it off in config.yaml.
-	v.SetDefault("due.required", true)
+	// Mandatory due dates. OFF by default: the invariant is opt-in per
+	// workspace, because a workspace that has never asked for it (including
+	// every fixture and first-run checkout) must still be able to create work
+	// without a deadline. A workspace that wants `bd create` and every other
+	// create surface to demand a due date for work types
+	// (issueops.ValidateDueRequired) turns it on once, in config.yaml:
+	//
+	//	bd config set due.required true
+	v.SetDefault("due.required", false)
 
 	// Comment progress on close. House default ON; upstream contrib should
 	// ship false so adopters opt in. Scope is assignee-set only (issueops).

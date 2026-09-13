@@ -9075,8 +9075,9 @@ components:
           maxLength: 1000
           description: >-
             Why a `patch.due_at` of `null` is clearing the due date. While the
-            workspace requires due dates (`due.required`, on by default),
-            clearing one is the single edit that can undo the invariant, so
+            workspace requires due dates (`due.required`, off by default and
+            opt-in per workspace), clearing one is the single edit that can
+            undo the invariant, so
             the workspace refuses the clear as a `400` unless a non-blank
             reason accompanies it; the reason is then recorded on the update
             event, where `bd history --events` shows it. It has no effect on
@@ -10386,8 +10387,9 @@ components:
           maxLength: 1000
           description: >-
             Why a `patch.due_at` of `null` is clearing the due date. While the
-            workspace requires due dates (`due.required`, on by default),
-            clearing one is the single edit that can undo the invariant, so
+            workspace requires due dates (`due.required`, off by default and
+            opt-in per workspace), clearing one is the single edit that can
+            undo the invariant, so
             the workspace refuses the clear as a `400` unless a non-blank
             reason accompanies it; the reason is then recorded on the update
             event, where `bd history --events` shows it. It has no effect on

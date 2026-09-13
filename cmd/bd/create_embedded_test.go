@@ -18,10 +18,10 @@ import (
 	"github.com/steveyegge/beads/internal/types"
 )
 
-// withTestDue gives a create its due date when the caller did not choose one:
-// due.required is on by default, so a fixture that is not ABOUT the deadline
-// still has to satisfy it. A caller that passes --due or --repeat (whose
-// first occurrence dates the bead) is left exactly as written.
+// withTestDue gives a create its due date when the caller did not choose one,
+// so a fixture that is not ABOUT the deadline still satisfies the invariant in
+// a workspace that has opted into `due.required`. A caller that passes --due or
+// --repeat (whose first occurrence dates the bead) is left exactly as written.
 func withTestDue(args []string) []string {
 	for _, arg := range args {
 		if arg == "--due" || strings.HasPrefix(arg, "--due=") ||
