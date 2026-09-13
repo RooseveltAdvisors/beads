@@ -26,6 +26,14 @@ func NewReadyClaimer(store *DoltStore) (issueops.ReadyClaimer, error) {
 
 type readyClaimer struct{ store *DoltStore }
 
+// WakeExpiredDefersAdvisory preserves the backend wake contract for decorators.
+// House due/repeat: runs full scheduled sweeps (defer + due), not defer-only.
+func (s *DoltStore) WakeExpiredDefersAdvisory(ctx context.Context) {
+	s.runScheduledSweeps(ctx)
+}
+
+var _ storage.ExpiredDeferWaker = (*DoltStore)(nil)
+
 // ClaimNext runs selection, the compare-and-set and hydration in one
 // transaction, under the claim-family verify-after-write (bd-zccb9) that
 // ClaimReadyIssue runs: this reaches the same writes, so under a degraded
