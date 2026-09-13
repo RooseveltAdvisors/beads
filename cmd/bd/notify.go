@@ -429,8 +429,12 @@ func enqueueStaleClaimNotifies(skipIDs []string) {
 		skip[rec.IssueID] = true
 	}
 	cooldownSince := now.Add(-after)
+	const maxPerSweep = 10 // ponytail: teach without flooding every seat in one tick
 	var n int
 	for _, sc := range stale {
+		if n >= maxPerSweep {
+			break
+		}
 		if skip[sc.ID] {
 			continue
 		}
