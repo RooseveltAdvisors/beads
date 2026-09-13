@@ -136,18 +136,20 @@ install -m 0644 bd-notify-drain.service bd-notify-drain.timer \
 systemctl --user edit bd-notify-drain.service
 ```
 
-Drop-in example:
+Drop-in example (no seat is special - same shape for every assignee):
 
 ```ini
 [Service]
-Environment=BD_NOTIFY_WORKSPACE=/opt/ra/firstmate
+Environment=BD_NOTIFY_WORKSPACE=/path/to/workspace
 Environment=BD_NOTIFY_BD=%h/.local/bin/bd
-Environment=BD_NOTIFY_SEAT_WISEMAN=herdr --session wiseman agent prompt w1:p1 "$BD_NOTIFY_PROMPT"
-Environment=BD_NOTIFY_SEAT_FIRSTMATE=/opt/ra/firstmate/bin/fm-notify-seat.sh
+# Optional uniform transport for every seat until discover/herdr resolve lands:
+# Environment=BD_NOTIFY_DEFAULT_SEAT_CMD=...
+# Or per-seat: Environment=BD_NOTIFY_SEAT_<ASSIGNEE>=...
 ```
 
-`publish-wake-firstmate.sh` remains a optional firstmate-shaped publisher for
-the sweep summary line. Per-bead seat delivery should prefer `bd notify drain`.
+`publish-wake-firstmate.sh` is only an optional summary-line publisher for a
+firstmate wake queue. It must not fan out per assignee. Per-bead delivery is
+`bd notify` only.
 
 ### Design rule
 
