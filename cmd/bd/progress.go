@@ -25,9 +25,11 @@ close --reason, or --force-no-comment --reason.
 }
 
 var progressCheckCmd = &cobra.Command{
-	Use:   "check [id...]",
-	Short: "List assigned issues missing a fresh progress comment",
-	Args:  cobra.MinimumNArgs(1),
+	Use:           "check [id...]",
+	Short:         "List assigned issues missing a fresh progress comment",
+	Args:          cobra.MinimumNArgs(1),
+	SilenceUsage:  true,
+	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		CheckReadonly("progress check")
 		if !issueops.CommentProgressRequired() {
