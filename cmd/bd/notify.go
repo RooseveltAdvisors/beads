@@ -14,23 +14,26 @@ import (
 )
 
 // notifyCmd is the beads-owned delivery surface. Time (due sweep) enqueues;
-// this command drains seat outboxes without firstmate or herdr in the core path.
+// drain resolves assignee seats to live herdr agent instances (any harness).
 var notifyCmd = &cobra.Command{
 	Use:   "notify",
 	Short: "Seat-addressed notify outbox (beads-owned delivery)",
 	Long: `The notify outbox is how beads delivers due/repeat fires to assignee seats.
 
 bd due sweep enqueues one row per fired bead under its assignee seat
-(.beads/notify/). bd notify drain pulls pending rows for a seat and either
-prints them or runs a transport command. Firstmate and herdr are optional
-transports - not the bus.
+(.beads/notify/). bd notify drain resolves that seat to a live herdr agent
+instance (pi, claude, codex, … — whatever herdr detects) and prompts it.
+
+No seat is special-cased. Harness support comes from herdr detection, not
+from beads knowing each runtime.
 
 Examples:
   bd notify pending
-  bd notify pending --seat wiseman --json
+  bd notify resolve --seat wiseman
   bd notify drain --seat wiseman
-  bd notify drain --seat wiseman --exec 'herdr --session wiseman agent prompt w1:p1 "$BD_NOTIFY_PROMPT"'
-  bd notify ack --seat wiseman --upto 12
+  bd notify drain --all
+  bd notify drain --seat wiseman --print
+  bd notify drain --seat wiseman --exec 'echo "$BD_NOTIFY_ID"'
   bd notify seats`,
 }
 
@@ -87,82 +90,194 @@ var notifySeatsCmd = &cobra.Command{
 	},
 }
 
-var notifyDrainCmd = &cobra.Command{
-	Use:   "drain",
-	Short: "Pull pending rows for a seat and print or exec a transport",
-	Long: `Drain pending notify rows for one seat.
-
-Without --exec, prints each row (or JSON with --json) and acks them unless
---no-ack is set.
-
-With --exec CMD, runs CMD once per row with environment:
-  BD_NOTIFY_SEQ BD_NOTIFY_SEAT BD_NOTIFY_ID BD_NOTIFY_KIND BD_NOTIFY_TITLE
-  BD_NOTIFY_PROMPT  a ready-to-send one-line prompt for agent transports
-  BD_NOTIFY_JSON    the full record as JSON
-
-The command's exit status must be 0 to count as delivered. Failed rows are
-left pending. Successful rows are acked up to the highest contiguous success
-unless --no-ack.`,
-	Args: cobra.NoArgs,
+var notifyResolveCmd = &cobra.Command{
+	Use:   "resolve",
+	Short: "Show which live herdr agent instance a seat maps to",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		seat, _ := cmd.Flags().GetString("seat")
 		if strings.TrimSpace(seat) == "" {
-			return HandleError("notify drain requires --seat")
+			return HandleError("notify resolve requires --seat")
 		}
+		d := notify.HerdrDiscoverer{}
+		instances, err := d.ListAllInstances()
+		if err != nil {
+			return HandleError("herdr discover: %v", err)
+		}
+		inst, ok := notify.ResolveSeat(seat, instances)
+		if jsonOutput {
+			if !ok {
+				return printJSON(map[string]any{"seat": seat, "matched": false, "instances_scanned": len(instances)})
+			}
+			return printJSON(map[string]any{"seat": seat, "matched": true, "instance": inst, "instances_scanned": len(instances)})
+		}
+		if !ok {
+			fmt.Printf("%s seat %s: no live herdr instance (%d scanned)\n", ui.RenderWarn("!"), seat, len(instances))
+			return nil
+		}
+		fmt.Printf("%s seat %s → %s %s (%s) harness=%s status=%s score=%d [%s]\n",
+			ui.RenderAccent("*"), seat, inst.Session, inst.PaneID, inst.Title, inst.Harness, inst.Status, inst.Score, inst.MatchReason)
+		return nil
+	},
+}
+
+var notifyDrainCmd = &cobra.Command{
+	Use:   "drain",
+	Short: "Deliver pending rows for a seat via herdr (or --exec)",
+	Long: `Drain pending notify rows for one seat (or --all seats with pending work).
+
+Default transport is herdr:
+  1. Discover live agents across running herdr sessions
+  2. Resolve assignee seat → best matching instance (session name, title token, cwd)
+  3. herdr agent prompt <pane> with a beads notify prompt
+  4. Ack on success
+
+Harness-agnostic: herdr already knows pi/claude/codex/… in each pane.
+
+Flags:
+  --print   print rows only (no herdr, still acks unless --no-ack)
+  --exec    override transport with a shell command (BD_NOTIFY_* env)
+  --no-ack  leave rows pending after delivery attempt
+  --all     drain every seat that has pending rows`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		seat, _ := cmd.Flags().GetString("seat")
+		all, _ := cmd.Flags().GetBool("all")
 		limit, _ := cmd.Flags().GetInt("limit")
 		execCmd, _ := cmd.Flags().GetString("exec")
+		printOnly, _ := cmd.Flags().GetBool("print")
 		noAck, _ := cmd.Flags().GetBool("no-ack")
+
+		if !all && strings.TrimSpace(seat) == "" {
+			return HandleError("notify drain requires --seat or --all")
+		}
 
 		o, err := openNotifyOutbox()
 		if err != nil {
 			return err
 		}
-		pending, err := o.Pending(seat)
-		if err != nil {
-			return HandleError("%v", err)
-		}
-		if limit > 0 && len(pending) > limit {
-			pending = pending[:limit]
-		}
-		if len(pending) == 0 {
-			if jsonOutput {
-				return printJSON([]notify.Record{})
+
+		var seats []string
+		if all {
+			seats, err = o.Seats()
+			if err != nil {
+				return HandleError("%v", err)
 			}
-			fmt.Printf("%s seat %s: nothing pending\n", ui.RenderAccent("*"), seat)
-			return nil
+		} else {
+			seats = []string{seat}
 		}
 
-		var delivered []notify.Record
-		var lastOK int64
-		for _, rec := range pending {
-			if execCmd != "" {
-				if err := runNotifyExec(execCmd, rec); err != nil {
-					fmt.Fprintf(os.Stderr, "notify drain: seq %d %s: %v\n", rec.Seq, rec.IssueID, err)
-					break // stop so ack stays contiguous
+		// Discover once per drain invocation when using herdr.
+		var (
+			instances []notify.Instance
+			discErr   error
+			discover  notify.HerdrDiscoverer
+		)
+		needHerdr := execCmd == "" && !printOnly
+		if needHerdr {
+			instances, discErr = discover.ListAllInstances()
+			if discErr != nil {
+				return HandleError("herdr discover: %v", discErr)
+			}
+		}
+
+		type seatResult struct {
+			Seat      string           `json:"seat"`
+			Delivered int              `json:"delivered"`
+			AckedThru int64            `json:"acked_through,omitempty"`
+			Instance  *notify.Instance `json:"instance,omitempty"`
+			Error     string           `json:"error,omitempty"`
+		}
+		var results []seatResult
+
+		for _, s := range seats {
+			pending, err := o.Pending(s)
+			if err != nil {
+				return HandleError("%v", err)
+			}
+			if limit > 0 && len(pending) > limit {
+				pending = pending[:limit]
+			}
+			if len(pending) == 0 {
+				continue
+			}
+
+			res := seatResult{Seat: s}
+			var inst notify.Instance
+			var hasInst bool
+			if needHerdr {
+				inst, hasInst = notify.ResolveSeat(s, instances)
+				if !hasInst {
+					res.Error = "no live herdr instance for seat"
+					results = append(results, res)
+					if !jsonOutput {
+						fmt.Printf("%s seat %s: %s (%d pending left)\n", ui.RenderWarn("!"), s, res.Error, len(pending))
+					}
+					continue
 				}
-			} else if jsonOutput {
-				// collect for batch print below
-			} else {
-				fmt.Printf("  %d  %s  %s  %s\n", rec.Seq, rec.Kind, rec.IssueID, rec.Title)
+				res.Instance = &inst
 			}
-			delivered = append(delivered, rec)
-			lastOK = rec.Seq
+
+			var lastOK int64
+			var delivered int
+			for _, rec := range pending {
+				switch {
+				case execCmd != "":
+					if err := runNotifyExec(execCmd, rec); err != nil {
+						res.Error = err.Error()
+						if !jsonOutput {
+							fmt.Fprintf(os.Stderr, "notify drain: seq %d %s: %v\n", rec.Seq, rec.IssueID, err)
+						}
+						goto finishSeat
+					}
+				case printOnly:
+					if !jsonOutput {
+						fmt.Printf("  %d  %s  %s  %s\n", rec.Seq, rec.Kind, rec.IssueID, rec.Title)
+					}
+				default:
+					prompt := notify.DefaultPrompt(rec)
+					// Enrich prompt with bead body when possible (best-effort).
+					if body := beadNotifyBody(rec.IssueID); body != "" {
+						prompt = prompt + "\n\n" + body
+					}
+					if err := discover.Prompt(inst, prompt); err != nil {
+						res.Error = err.Error()
+						if !jsonOutput {
+							fmt.Fprintf(os.Stderr, "notify drain: seq %d herdr %s %s: %v\n", rec.Seq, inst.Session, inst.PaneID, err)
+						}
+						goto finishSeat
+					}
+					if !jsonOutput {
+						fmt.Printf("  %d  → %s %s (%s) %s\n", rec.Seq, inst.Session, inst.PaneID, inst.Harness, rec.IssueID)
+					}
+				}
+				delivered++
+				lastOK = rec.Seq
+			}
+		finishSeat:
+			res.Delivered = delivered
+			if !noAck && lastOK > 0 {
+				if err := o.AckSeat(s, lastOK); err != nil {
+					return HandleError("ack: %v", err)
+				}
+				res.AckedThru = lastOK
+			}
+			results = append(results, res)
+			if !jsonOutput {
+				if res.Error != "" && delivered == 0 {
+					// already printed
+				} else {
+					fmt.Printf("%s seat %s: delivered %d (acked through %d)\n",
+						ui.RenderAccent("*"), s, delivered, lastOK)
+				}
+			}
 		}
 
-		if execCmd == "" && jsonOutput {
-			if err := printJSON(delivered); err != nil {
-				return err
-			}
+		if jsonOutput {
+			return printJSON(results)
 		}
-
-		if !noAck && lastOK > 0 {
-			if err := o.AckSeat(seat, lastOK); err != nil {
-				return HandleError("ack: %v", err)
-			}
-		}
-		if !jsonOutput {
-			fmt.Printf("%s seat %s: delivered %d (acked through %d)\n",
-				ui.RenderAccent("*"), seat, len(delivered), lastOK)
+		if len(results) == 0 {
+			fmt.Printf("%s nothing pending\n", ui.RenderAccent("*"))
 		}
 		return nil
 	},
@@ -204,8 +319,7 @@ func openNotifyOutbox() (*notify.Outbox, error) {
 
 func runNotifyExec(command string, rec notify.Record) error {
 	payload, _ := json.Marshal(rec)
-	prompt := fmt.Sprintf("BEADS NOTIFY (%s). Bead %s fired for seat %s: %s",
-		rec.Kind, rec.IssueID, rec.Seat, rec.Title)
+	prompt := notify.DefaultPrompt(rec)
 	cmd := exec.Command("sh", "-c", command)
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("BD_NOTIFY_SEQ=%d", rec.Seq),
@@ -221,6 +335,18 @@ func runNotifyExec(command string, rec notify.Record) error {
 	return cmd.Run()
 }
 
+// beadNotifyBody best-effort loads description for richer prompts.
+func beadNotifyBody(id string) string {
+	if store == nil || id == "" {
+		return ""
+	}
+	issue, err := store.GetIssue(rootCtx, id)
+	if err != nil || issue == nil {
+		return ""
+	}
+	return strings.TrimSpace(issue.Description)
+}
+
 // enqueueDueSweepNotifies writes seat-addressed outbox rows for a sweep report.
 // Best-effort: a notify failure must not fail the sweep clock.
 func enqueueDueSweepNotifies(report dueSweepReport) {
@@ -233,7 +359,6 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 		fmt.Fprintf(os.Stderr, "notify: open outbox: %v\n", err)
 		return
 	}
-	// Prefer by_assignee; fall back to flat due_ids as unassigned.
 	seats := report.ByAssignee
 	if len(seats) == 0 && len(report.DueIDs) > 0 {
 		seats = []dueSweepSeat{{Assignee: notify.UnassignedSeat, IDs: report.DueIDs}}
@@ -249,7 +374,13 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 			if escalated[id] {
 				kind = notify.KindEscalate
 			}
-			if _, err := o.Enqueue(seat.Assignee, id, kind, ""); err != nil {
+			title := ""
+			if store != nil {
+				if issue, err := store.GetIssue(rootCtx, id); err == nil && issue != nil {
+					title = issue.Title
+				}
+			}
+			if _, err := o.Enqueue(seat.Assignee, id, kind, title); err != nil {
 				fmt.Fprintf(os.Stderr, "notify: enqueue %s: %v\n", id, err)
 				continue
 			}
@@ -263,14 +394,18 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 
 func init() {
 	notifyPendingCmd.Flags().String("seat", "", "filter by assignee seat")
-	notifyDrainCmd.Flags().String("seat", "", "assignee seat to drain (required)")
-	notifyDrainCmd.Flags().Int("limit", 0, "max rows to drain (0 = all pending)")
-	notifyDrainCmd.Flags().String("exec", "", "shell command to run per row (see env BD_NOTIFY_*)")
+	notifyResolveCmd.Flags().String("seat", "", "assignee seat (required)")
+	notifyDrainCmd.Flags().String("seat", "", "assignee seat to drain")
+	notifyDrainCmd.Flags().Bool("all", false, "drain every seat with pending rows")
+	notifyDrainCmd.Flags().Int("limit", 0, "max rows per seat (0 = all pending)")
+	notifyDrainCmd.Flags().String("exec", "", "override transport shell command (BD_NOTIFY_* env)")
+	notifyDrainCmd.Flags().Bool("print", false, "print rows only (no herdr prompt)")
 	notifyDrainCmd.Flags().Bool("no-ack", false, "do not mark rows delivered")
 	notifyAckCmd.Flags().String("seat", "", "assignee seat (required)")
 	notifyAckCmd.Flags().Int64("upto", 0, "ack through this seq (required)")
 
 	notifyCmd.AddCommand(notifyPendingCmd)
+	notifyCmd.AddCommand(notifyResolveCmd)
 	notifyCmd.AddCommand(notifyDrainCmd)
 	notifyCmd.AddCommand(notifyAckCmd)
 	notifyCmd.AddCommand(notifySeatsCmd)

@@ -136,16 +136,19 @@ install -m 0644 bd-notify-drain.service bd-notify-drain.timer \
 systemctl --user edit bd-notify-drain.service
 ```
 
-Drop-in example (no seat is special - same shape for every assignee):
+Drop-in example:
 
 ```ini
 [Service]
 Environment=BD_NOTIFY_WORKSPACE=/path/to/workspace
 Environment=BD_NOTIFY_BD=%h/.local/bin/bd
-# Optional uniform transport for every seat until discover/herdr resolve lands:
-# Environment=BD_NOTIFY_DEFAULT_SEAT_CMD=...
-# Or per-seat: Environment=BD_NOTIFY_SEAT_<ASSIGNEE>=...
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# HERDR_BIN optional; bd notify drain discovers herdr on PATH
 ```
+
+`bd notify drain --all` resolves each assignee seat to a live herdr agent
+instance (session name / title token / cwd) and prompts it. Any harness herdr
+detects is supported automatically.
 
 `publish-wake-firstmate.sh` is only an optional summary-line publisher for a
 firstmate wake queue. It must not fan out per assignee. Per-bead delivery is

@@ -46,3 +46,14 @@ that is not per-bead seat delivery.
 
 Seat directory + live instance discovery (herdr agent list, any harness) so
 drain targets agent instances by assignee without static pane commands.
+
+## Herdr discovery (v1)
+
+`bd notify drain` default transport:
+
+1. `herdr session list --json` → running sessions
+2. `herdr --session S agent list` → agents (any harness)
+3. Score assignee seat against session name, title tokens, cwd segments
+4. `herdr --session S agent prompt <pane> <text>`
+
+Supporting a new harness = herdr detecting it. Beads does not embed harness SDKs.
