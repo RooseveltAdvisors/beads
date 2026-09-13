@@ -168,7 +168,7 @@ func BuildIssueFilterClauses(query string, filter types.IssueFilter, tables Filt
 	}
 	if filter.IDContains != "" {
 		whereClauses = append(whereClauses, "id LIKE ?")
-		args = append(args, "%"+strings.ToLower(filter.IDContains)+"%")
+		args = append(args, "%"+filter.IDContains+"%")
 	}
 	if filter.SpecIDPrefix != "" {
 		whereClauses = append(whereClauses, "spec_id LIKE ?")

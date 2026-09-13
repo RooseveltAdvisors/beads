@@ -71,6 +71,7 @@ func TestProxiedServerSearch(t *testing.T) {
 	taskB := bdProxiedCreate(t, bd, p.dir, "Beta bug", "--type", "bug", "--priority", "3", "--assignee", "bob", "--description", "Beta bug description", "--label", "backend")
 	taskC := bdProxiedCreate(t, bd, p.dir, "Gamma feature", "--type", "feature", "--priority", "2", "--label", "urgent", "--label", "frontend")
 	taskD := bdProxiedCreate(t, bd, p.dir, "Delta task no desc", "--type", "task")
+	hyphenTask := bdProxiedCreate(t, bd, p.dir, "Crash in worker pool", "--type", "bug", "--description", "the pool hits a use-after-free when the lease expires")
 	closedTask := bdProxiedCreate(t, bd, p.dir, "Closed epsilon", "--type", "task")
 	bdProxiedClose(t, bd, p.dir, closedTask.ID)
 
@@ -83,6 +84,23 @@ func TestProxiedServerSearch(t *testing.T) {
 	t.Run("query_flag", func(t *testing.T) {
 		if !searchResultIDs(bdProxiedSearchJSON(t, bd, p.dir, "--query", "Beta"))[taskB.ID] {
 			t.Errorf("expected to find %s in search for 'Beta'", taskB.ID)
+		}
+	})
+
+	t.Run("hyphenated_description_term_json", func(t *testing.T) {
+		// "use-after-free" is classified ID-like, so this bead is reachable
+		// only through the empty-result free-text retry — here on the --json
+		// path, which runs SearchIssuesWithCounts.
+		if !searchResultIDs(bdProxiedSearchJSON(t, bd, p.dir, "use-after-free"))[hyphenTask.ID] {
+			t.Errorf("expected to find %s searching for a hyphenated description term", hyphenTask.ID)
+		}
+	})
+
+	t.Run("hyphenated_description_term_text", func(t *testing.T) {
+		// Same retry on the text-output path, which runs SearchIssues.
+		out := bdProxiedSearch(t, bd, p.dir, "use-after-free")
+		if !strings.Contains(out, hyphenTask.ID) {
+			t.Errorf("expected text output to contain %s, got:\n%s", hyphenTask.ID, out)
 		}
 	})
 

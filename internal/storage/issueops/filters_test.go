@@ -530,8 +530,8 @@ func TestBuildIssueFilterClauses_IDContains(t *testing.T) {
 	if len(clauses) != 1 || clauses[0] != "id LIKE ?" {
 		t.Fatalf("expected a single `id LIKE ?` clause, got %v", clauses)
 	}
-	if len(args) != 1 || args[0] != "%a3f8%" {
-		t.Fatalf("expected one lowercased substring arg, got %v", args)
+	if len(args) != 1 || args[0] != "%A3f8%" {
+		t.Fatalf("expected the operand bound raw — `id LIKE ?` is case-sensitive on both backends, so folding it drops mixed-case IDs — got %v", args)
 	}
 }
 
