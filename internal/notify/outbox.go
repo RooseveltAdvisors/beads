@@ -293,3 +293,32 @@ func (o *Outbox) saveAcksLocked(acks map[string]int64) error {
 	}
 	return os.Rename(tmp, path)
 }
+
+// HasRecent reports whether issueID already has a row of kind at or after since.
+// Used so the stale-claim clock does not re-wake every sweep tick.
+func (o *Outbox) HasRecent(issueID string, kind Kind, since time.Time) (bool, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	all, err := o.readAllLocked()
+	if err != nil {
+		return false, err
+	}
+	issueID = strings.TrimSpace(issueID)
+	for _, rec := range all {
+		if rec.IssueID != issueID || rec.Kind != kind {
+			continue
+		}
+		ts, err := time.Parse(time.RFC3339, rec.CreatedAt)
+		if err != nil {
+			ts, err = time.Parse(time.RFC3339Nano, rec.CreatedAt)
+			if err != nil {
+				continue
+			}
+		}
+		if !ts.Before(since) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+

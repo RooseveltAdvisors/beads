@@ -69,6 +69,7 @@ var YamlOnlyKeys = map[string]bool{
 
 	// Comment progress gate on close (see issueops.ValidateCommentProgressForClose)
 	"comment.progress_required": true,
+	"comment.stale_claim_after":  true,
 
 	// Prime memory-injection caps (read at session start, possibly before
 	// the database is reachable, so they must live in yaml)

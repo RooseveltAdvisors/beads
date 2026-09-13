@@ -299,6 +299,9 @@ func Initialize() error {
 	// ship false so adopters opt in. Scope is assignee-set only (issueops).
 	v.SetDefault("comment.progress_required", true)
 
+	// Quiet assigned in_progress without close → stale-claim notify (0 = off).
+	v.SetDefault("comment.stale_claim_after", "12h")
+
 	// Validation configuration defaults (bd-t7jq)
 	// Values: "warn" | "error" | "none"
 	// - "none": no validation (default, backwards compatible)

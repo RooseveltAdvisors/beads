@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One timer body: fire dues, then deliver seat notifies. That is the whole clock.
 #
-#   bd due sweep     → advances due_at, enqueues .beads/notify/
+#   bd due sweep     → advances due_at, enqueues due + stale-claim .beads/notify/
 #   bd notify drain  → herdr-resolve assignee → prompt (retries next tick if offline)
 #
 # No second timer. No firstmate publish hook required for seat delivery.

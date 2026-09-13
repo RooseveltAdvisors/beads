@@ -6,10 +6,12 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/beads/internal/beads"
 	"github.com/steveyegge/beads/internal/notify"
+	"github.com/steveyegge/beads/internal/storage/issueops"
 	"github.com/steveyegge/beads/internal/ui"
 )
 
@@ -389,6 +391,71 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 	}
 	if n > 0 && !jsonOutput {
 		fmt.Printf("  notify enqueued %d\n", n)
+	}
+}
+
+
+// enqueueStaleClaimNotifies finds assigned in_progress work quiet longer than
+// comment.stale_claim_after and enqueues KindStaleClaim (educational playbook).
+// Best-effort; never fails the due clock. Skips ids already due-fired this tick
+// and ids with a recent stale-claim row (cooldown = same threshold).
+func enqueueStaleClaimNotifies(skipIDs []string) {
+	after := issueops.StaleClaimAfter()
+	if after <= 0 || store == nil {
+		return
+	}
+	dir := beads.FindBeadsDir()
+	if dir == "" {
+		return
+	}
+	o, err := notify.Open(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "notify: open outbox (stale-claim): %v\n", err)
+		return
+	}
+	now := time.Now().UTC()
+	stale, err := issueops.FindStaleClaims(rootCtx, store, after, now)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "notify: stale-claim scan: %v\n", err)
+		return
+	}
+	skip := map[string]bool{}
+	for _, id := range skipIDs {
+		skip[strings.TrimSpace(id)] = true
+	}
+	// Also skip anything already pending (any kind) for this issue.
+	pending, _ := o.Pending("")
+	for _, rec := range pending {
+		skip[rec.IssueID] = true
+	}
+	cooldownSince := now.Add(-after)
+	var n int
+	for _, sc := range stale {
+		if skip[sc.ID] {
+			continue
+		}
+		recent, err := o.HasRecent(sc.ID, notify.KindStaleClaim, cooldownSince)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "notify: stale-claim recent %s: %v\n", sc.ID, err)
+			continue
+		}
+		if recent {
+			continue
+		}
+		title := sc.Title
+		if title == "" {
+			title = sc.Reason
+		} else {
+			title = title + " [" + sc.QuietFor + " quiet]"
+		}
+		if _, err := o.Enqueue(sc.Assignee, sc.ID, notify.KindStaleClaim, title); err != nil {
+			fmt.Fprintf(os.Stderr, "notify: enqueue stale-claim %s: %v\n", sc.ID, err)
+			continue
+		}
+		n++
+	}
+	if n > 0 && !jsonOutput {
+		fmt.Printf("  stale-claim enqueued %d\n", n)
 	}
 }
 

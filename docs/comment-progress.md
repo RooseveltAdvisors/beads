@@ -50,3 +50,17 @@ Kinds:
 - `progress` - missing progress trail while still open
 
 Enqueue stale-claim/progress from clocks or ops (`bd notify` outbox); drain delivers via herdr to any harness.
+
+## Stale-claim clock
+
+Same timer as due sweep (`bd due sweep` → notify drain):
+
+1. Scan assignee-set `in_progress` quieter than `comment.stale_claim_after` (house default `12h`)
+2. Quiet anchor = latest of `started_at` and last `bd comment` time
+3. Enqueue `kind: stale-claim` (skips ids due-fired this tick, pending rows, and recent stale-claim within the threshold)
+4. Drain delivers the full finish-line playbook (`bd comment` / `bd close --reason`)
+
+```bash
+bd config set comment.stale_claim_after 12h   # or 0 / off to disable
+bd progress stale --json                     # advisory list
+```
