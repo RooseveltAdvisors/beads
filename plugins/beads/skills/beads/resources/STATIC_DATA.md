@@ -49,7 +49,8 @@ When using bd for static data (terminology, glossaries, reference information):
 - This is why dual format (bd + markdown) is recommended for reference data
 
 **Searching by content:**
-- `bd search` matches ID, title, and description text
-- `bd list` filters by ID, title, status, labels — it does not search descriptions
-- For notes or other fields, use a targeted flag or `bd sql`
-- Example: `bd search "authentication"` or `bd sql "SELECT id, title FROM issues WHERE notes LIKE '%authentication%'"`
+- Free-text `bd search "text"` matches title, description, and ID
+- `bd search bd-abc123` is an ID lookup: ID, title, and external ref, not descriptions
+- `bd list --desc-contains "text"` filters on description text (also `--notes-contains`, `--external-contains`); the same flags work on `bd search`
+- For fields with no flag, use `bd sql`
+- Example: `bd search "authentication"` or `bd sql "SELECT id, title FROM issues WHERE design LIKE '%authentication%'"`

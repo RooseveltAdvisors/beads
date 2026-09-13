@@ -71,10 +71,11 @@ func TestBuildIssueFilterClauses_QueryAsIssueID(t *testing.T) {
 	if len(clauses) != 1 {
 		t.Fatalf("expected 1 clause, got %d", len(clauses))
 	}
-	// ID-like query produces 5 args: exact match, prefix, title LIKE,
-	// description LIKE, external_ref LIKE
-	if len(args) != 5 {
-		t.Errorf("expected 5 args for ID-like query, got %d: %v", len(args), args)
+	// ID-like query produces 4 args: exact match, prefix, title LIKE,
+	// external_ref LIKE. Descriptions are deliberately absent: an ID lookup
+	// must return the named bead, not every bead that cites it in its body.
+	if len(args) != 4 {
+		t.Errorf("expected 4 args for ID-like query, got %d: %v", len(args), args)
 	}
 }
 

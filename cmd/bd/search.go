@@ -20,8 +20,10 @@ var searchCmd = &cobra.Command{
 	Short:   "Search issues by text query",
 	Long: `Search issues across title, description, and ID (all statuses, including closed).
 
-ID-like queries (e.g., "bd-123", "hq-319") use fast exact/prefix matching.
-Text queries search titles and descriptions. Use --desc-contains,
+ID-like queries (e.g., "bd-123", "hq-319") use fast exact/prefix matching
+over ID, title and external ref; they do not scan descriptions, so naming
+a bead returns that bead rather than every bead that cites it.
+Free-text queries search titles and descriptions. Use --desc-contains,
 --notes-contains, or --external-contains for targeted single-field search.
 Use --status open (etc.) to narrow; closed issues are included by default
 so "was this already filed/fixed?" cannot silently answer no. Matches

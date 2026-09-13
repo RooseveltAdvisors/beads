@@ -280,10 +280,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   matched titles (plus the ID), so a bead whose title was terse and whose
   description carried the keyword was invisible to `bd search "<keyword>"`
   — the "was this already filed?" check silently answered no unless the
-  caller knew to reach for `--desc-contains`. Both the ID-like and the
-  plain-text branches of the search predicate now include the description.
-  `--desc-contains`, `--notes-contains` and `--external-contains` remain the
-  single-field filters.
+  caller knew to reach for `--desc-contains`. Free-text queries now match
+  the description too. ID-like queries (`bd search bd-5q4x7`) still match on
+  ID, title and external ref only, so naming a bead does not bury it under
+  the beads that merely cite it in their bodies. `--desc-contains`,
+  `--notes-contains` and `--external-contains` remain the single-field
+  filters.
 
 - **`bd prime` says when it could NOT read the memory plane**
   ([#5877](https://github.com/gastownhall/beads/issues/5877)). A broken or

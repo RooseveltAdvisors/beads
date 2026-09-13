@@ -1882,6 +1882,92 @@ func TestSearchIssues_FreeTextFieldCoverage(t *testing.T) {
 	}
 }
 
+// TestSearchIssues_IDQueryNotDilutedByCitations pins the ID-lookup half of the
+// search contract. Naming a bead must return THAT bead — a hub bead cited by ID
+// in other beads' descriptions would otherwise match every citing bead too, and
+// since the LIMIT is applied in SQL under ORDER BY priority ASC, a hub at a
+// lower priority than its citers is evicted from its own result.
+func TestSearchIssues_IDQueryNotDilutedByCitations(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx, cancel := testContext(t)
+	defer cancel()
+
+	const hubID = "hub-5q4x7"
+
+	hub := &types.Issue{
+		ID:          hubID,
+		Title:       "Coordination hub",
+		Description: "Tracks the rollout.",
+		Status:      types.StatusOpen,
+		Priority:    2,
+		IssueType:   types.TypeEpic,
+	}
+	if err := store.CreateIssue(ctx, hub, "tester"); err != nil {
+		t.Fatalf("failed to create hub: %v", err)
+	}
+
+	// Citers outrank the hub, so under ORDER BY priority ASC they fill the
+	// window first if the ID predicate lets them in at all.
+	const citers = 5
+	for i := 0; i < citers; i++ {
+		citer := &types.Issue{
+			ID:          fmt.Sprintf("cite-%d", i),
+			Title:       fmt.Sprintf("Downstream work %d", i),
+			Description: "Blocked by " + hubID + " until the rollout lands.",
+			Status:      types.StatusOpen,
+			Priority:    0,
+			IssueType:   types.TypeTask,
+		}
+		if err := store.CreateIssue(ctx, citer, "tester"); err != nil {
+			t.Fatalf("failed to create citer %d: %v", i, err)
+		}
+	}
+
+	results, err := store.SearchIssues(ctx, hubID, types.IssueFilter{})
+	if err != nil {
+		t.Fatalf("SearchIssues(%q): %v", hubID, err)
+	}
+	if len(results) != 1 || results[0].ID != hubID {
+		got := make([]string, len(results))
+		for i, r := range results {
+			got[i] = r.ID
+		}
+		t.Fatalf("SearchIssues(%q) = %v, want [%s]", hubID, got, hubID)
+	}
+
+	// Same query under a limit smaller than the citation count: the named bead
+	// must still survive the cut.
+	limited, err := store.SearchIssues(ctx, hubID, types.IssueFilter{Limit: citers - 2})
+	if err != nil {
+		t.Fatalf("SearchIssues(%q) with limit: %v", hubID, err)
+	}
+	found := false
+	for _, r := range limited {
+		if r.ID == hubID {
+			found = true
+		}
+	}
+	if !found {
+		got := make([]string, len(limited))
+		for i, r := range limited {
+			got[i] = r.ID
+		}
+		t.Fatalf("SearchIssues(%q) with limit = %v, want it to contain %s", hubID, got, hubID)
+	}
+
+	// The description-only free-text match is unaffected by the narrow ID
+	// branch: searching the citation prose still finds the citing beads.
+	prose, err := store.SearchIssues(ctx, "until the rollout lands", types.IssueFilter{})
+	if err != nil {
+		t.Fatalf("SearchIssues(prose): %v", err)
+	}
+	if len(prose) != citers {
+		t.Fatalf("free-text description search returned %d issues, want %d", len(prose), citers)
+	}
+}
+
 // TestSearchIssues_ByExternalRef verifies two things:
 //  1. A free-text query like "BE-1521" (which looksLikeIssueID returns true for)
 //     matches an issue whose external_ref contains that string.
