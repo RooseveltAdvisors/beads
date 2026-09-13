@@ -276,6 +276,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Free-text `bd search` now matches description text.** A text query only
+  matched titles (plus the ID), so a bead whose title was terse and whose
+  description carried the keyword was invisible to `bd search "<keyword>"`
+  — the "was this already filed?" check silently answered no unless the
+  caller knew to reach for `--desc-contains`. Both the ID-like and the
+  plain-text branches of the search predicate now include the description.
+  `--desc-contains`, `--notes-contains` and `--external-contains` remain the
+  single-field filters.
+
 - **`bd prime` says when it could NOT read the memory plane**
   ([#5877](https://github.com/gastownhall/beads/issues/5877)). A broken or
   unreachable store made prime omit the memory section entirely, so a session
