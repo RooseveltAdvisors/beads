@@ -71,7 +71,9 @@ func TestBuildIssueFilterClauses_QueryAsIssueID(t *testing.T) {
 	if len(clauses) != 1 {
 		t.Fatalf("expected 1 clause, got %d", len(clauses))
 	}
-	// ID-like query produces 4 args: exact match, prefix, title LIKE, external_ref LIKE
+	// ID-like query produces 4 args: exact match, prefix, title LIKE,
+	// external_ref LIKE. Descriptions are deliberately absent: an ID lookup
+	// must return the named bead, not every bead that cites it in its body.
 	if len(args) != 4 {
 		t.Errorf("expected 4 args for ID-like query, got %d: %v", len(args), args)
 	}
@@ -87,9 +89,9 @@ func TestBuildIssueFilterClauses_QueryAsText(t *testing.T) {
 	if len(clauses) != 1 {
 		t.Fatalf("expected 1 clause, got %d", len(clauses))
 	}
-	// Text query produces 2 args: title LIKE, id LIKE
-	if len(args) != 2 {
-		t.Errorf("expected 2 args for text query, got %d: %v", len(args), args)
+	// Text query produces 3 args: title LIKE, description LIKE, id LIKE
+	if len(args) != 3 {
+		t.Errorf("expected 3 args for text query, got %d: %v", len(args), args)
 	}
 }
 
@@ -517,6 +519,50 @@ func TestBuildIssueFilterClauses_IDFilters(t *testing.T) {
 	}
 }
 
+func TestBuildIssueFilterClauses_IDContains(t *testing.T) {
+	t.Parallel()
+
+	filter := types.IssueFilter{IDContains: "A3f8"}
+	clauses, args, err := BuildIssueFilterClauses("", filter, IssuesFilterTables)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(clauses) != 1 || clauses[0] != "id LIKE ?" {
+		t.Fatalf("expected a single `id LIKE ?` clause, got %v", clauses)
+	}
+	if len(args) != 1 || args[0] != "%A3f8%" {
+		t.Fatalf("expected the operand bound raw — `id LIKE ?` is case-sensitive on both backends, so folding it drops mixed-case IDs — got %v", args)
+	}
+}
+
+func TestBuildIssueFilterClauses_FreeTextQueryOverridesIDLike(t *testing.T) {
+	t.Parallel()
+
+	const query = "use-after-free"
+
+	idClauses, idArgs, err := BuildIssueFilterClauses(query, types.IssueFilter{}, IssuesFilterTables)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(idClauses) != 1 || strings.Contains(idClauses[0], "description") {
+		t.Fatalf("a hyphenated query takes the narrow ID-like branch, got %v", idClauses)
+	}
+	if len(idArgs) != 4 {
+		t.Errorf("expected 4 args for the ID-like branch, got %d: %v", len(idArgs), idArgs)
+	}
+
+	freeClauses, freeArgs, err := BuildIssueFilterClauses(query, types.IssueFilter{FreeTextQuery: true}, IssuesFilterTables)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(freeClauses) != 1 || !strings.Contains(freeClauses[0], "LOWER(description) LIKE ?") {
+		t.Fatalf("FreeTextQuery forces the description-covering predicate, got %v", freeClauses)
+	}
+	if len(freeArgs) != 3 {
+		t.Errorf("expected 3 args for the free-text branch, got %d: %v", len(freeArgs), freeArgs)
+	}
+}
+
 func TestBuildIssueFilterClauses_WispsTables(t *testing.T) {
 	t.Parallel()
 
@@ -561,9 +607,9 @@ func TestBuildIssueFilterClauses_CombinedFilters(t *testing.T) {
 	if len(clauses) != 6 {
 		t.Errorf("expected 6 clauses for combined filter, got %d: %v", len(clauses), clauses)
 	}
-	// query text(2) + status(1) + priority(1) + label(1) + created_after(1) = 6
-	if len(args) != 6 {
-		t.Errorf("expected 6 args, got %d", len(args))
+	// query text(3) + status(1) + priority(1) + label(1) + created_after(1) = 7
+	if len(args) != 7 {
+		t.Errorf("expected 7 args, got %d", len(args))
 	}
 }
 

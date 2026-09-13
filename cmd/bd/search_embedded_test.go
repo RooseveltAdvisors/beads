@@ -78,6 +78,7 @@ func TestEmbeddedSearch(t *testing.T) {
 	taskB := bdCreate(t, bd, dir, "Beta bug", "--type", "bug", "--priority", "3", "--assignee", "bob", "--description", "Beta bug description", "--label", "backend")
 	taskC := bdCreate(t, bd, dir, "Gamma feature", "--type", "feature", "--priority", "2", "--label", "urgent", "--label", "frontend")
 	taskD := bdCreate(t, bd, dir, "Delta task no desc", "--type", "task")
+	hyphenTask := bdCreate(t, bd, dir, "Crash in worker pool", "--type", "bug", "--description", "the pool hits a use-after-free when the lease expires")
 	closedTask := bdCreate(t, bd, dir, "Closed epsilon", "--type", "task")
 	bdClose(t, bd, dir, closedTask.ID)
 
@@ -106,6 +107,22 @@ func TestEmbeddedSearch(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("expected to find %s in search for 'Beta'", taskB.ID)
+		}
+	})
+
+	t.Run("search_hyphenated_description_term", func(t *testing.T) {
+		// A hyphenated space-free term is classified ID-like, so the narrow ID
+		// predicate matches nothing; the bead is reachable only because an
+		// empty ID-like result is retried as free text.
+		results := bdSearchJSON(t, bd, dir, "use-after-free")
+		found := false
+		for _, r := range results {
+			if r["id"] == hyphenTask.ID {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected to find %s searching for a hyphenated description term, got %v", hyphenTask.ID, results)
 		}
 	})
 
@@ -480,5 +497,49 @@ func TestEmbeddedSearchConcurrent(t *testing.T) {
 		if r.err != nil && !strings.Contains(r.err.Error(), "one writer at a time") {
 			t.Errorf("worker %d failed: %v", r.worker, r.err)
 		}
+	}
+}
+
+// TestEmbeddedSearchHyphenatedTermKnownLimitation documents a KNOWN LIMITATION,
+// not desired behaviour. LooksLikeIssueID classifies any hyphenated, space-free
+// token as an issue ID, so "use-after-free" takes the ID-like predicate (ID,
+// title, external ref) and never scans descriptions. The empty-result free-text
+// retry rescues such a term only while NOTHING matches at all; a single title
+// hit suppresses the retry and the description-only bead stays invisible.
+//
+// TestEmbeddedSearch/search_hyphenated_description_term covers the zero-hit path
+// where the retry does fire. This case covers the hole beside it, so the
+// limitation is tested and visible rather than silent.
+//
+// EXPECTED TO FAIL LOUDLY when LooksLikeIssueID is fixed to stop misreading
+// ordinary hyphenated terms as issue IDs. At that point delete this test and
+// assert that both beads come back.
+func TestEmbeddedSearchHyphenatedTermKnownLimitation(t *testing.T) {
+	if os.Getenv("BEADS_TEST_EMBEDDED_DOLT") != "1" {
+		t.Skip("set BEADS_TEST_EMBEDDED_DOLT=1 to run embedded dolt integration tests")
+	}
+	t.Parallel()
+
+	bd := buildEmbeddedBD(t)
+	dir, _, _ := bdInit(t, bd, "--prefix", "sh")
+
+	titleHit := bdCreate(t, bd, dir, "Fix use-after-free in the parser", "--type", "bug")
+	descOnly := bdCreate(t, bd, dir, "Crash in worker pool", "--type", "bug",
+		"--description", "the pool hits a use-after-free when the lease expires")
+
+	results := bdSearchJSON(t, bd, dir, "use-after-free")
+
+	ids := map[string]bool{}
+	for _, r := range results {
+		if id, ok := r["id"].(string); ok {
+			ids[id] = true
+		}
+	}
+	if !ids[titleHit.ID] {
+		t.Errorf("expected the title match %s for %q, got %v", titleHit.ID, "use-after-free", results)
+	}
+	if ids[descOnly.ID] {
+		t.Fatalf("%s now matches on description text: LooksLikeIssueID no longer misreads %q as an issue ID. "+
+			"Delete this known-limitation test and assert full description coverage instead.", descOnly.ID, "use-after-free")
 	}
 }

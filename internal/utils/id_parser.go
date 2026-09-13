@@ -133,8 +133,13 @@ func ResolvePartialID(ctx context.Context, store PartialIDResolverStore, input s
 	// SearchIssueIDs path instead of SearchIssues. Avoids hydrating all
 	// 45+ issue columns (including big TEXT fields like description, design,
 	// notes, metadata, payload) only to discard them.
-	filter := types.IssueFilter{}
-	ids, err := store.SearchIssueIDs(ctx, searchPart, filter)
+	//
+	// IDContains, not a free-text query: the loop below keeps an id only when
+	// searchPart is a substring of it, so the title/description arms of the
+	// free-text predicate can only add rows this loop discards — at the cost
+	// of LOWER()-ing and scanning every TEXT body on the store.
+	filter := types.IssueFilter{IDContains: searchPart}
+	ids, err := store.SearchIssueIDs(ctx, "", filter)
 	if err != nil {
 		return "", fmt.Errorf("failed to search issues: %w", err)
 	}
@@ -182,8 +187,8 @@ func ResolvePartialID(ctx context.Context, store PartialIDResolverStore, input s
 	// always resolvable by partial ID.
 	if len(matches) == 0 {
 		ephTrue := true
-		wispFilter := types.IssueFilter{Ephemeral: &ephTrue}
-		if wispIDs, wispErr := store.SearchIssueIDs(ctx, searchPart, wispFilter); wispErr == nil {
+		wispFilter := types.IssueFilter{Ephemeral: &ephTrue, IDContains: searchPart}
+		if wispIDs, wispErr := store.SearchIssueIDs(ctx, "", wispFilter); wispErr == nil {
 			for _, wID := range wispIDs {
 				if wID == input {
 					return wID, nil

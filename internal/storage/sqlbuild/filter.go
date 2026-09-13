@@ -67,13 +67,13 @@ func BuildIssueFilterClauses(query string, filter types.IssueFilter, tables Filt
 
 	if query != "" {
 		lowerQuery := strings.ToLower(query)
-		if LooksLikeIssueID(query) {
+		if LooksLikeIssueID(query) && !filter.FreeTextQuery {
 			whereClauses = append(whereClauses, "(id = ? OR id LIKE ? OR LOWER(title) LIKE ? OR LOWER(external_ref) LIKE ?)")
 			args = append(args, lowerQuery, lowerQuery+"%", "%"+lowerQuery+"%", "%"+lowerQuery+"%")
 		} else {
-			whereClauses = append(whereClauses, "(LOWER(title) LIKE ? OR id LIKE ?)")
+			whereClauses = append(whereClauses, "(LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR id LIKE ?)")
 			pattern := "%" + lowerQuery + "%"
-			args = append(args, pattern, pattern)
+			args = append(args, pattern, pattern, pattern)
 		}
 	}
 
@@ -165,6 +165,10 @@ func BuildIssueFilterClauses(query string, filter types.IssueFilter, tables Filt
 	if filter.IDPrefix != "" {
 		whereClauses = append(whereClauses, "id LIKE ?")
 		args = append(args, filter.IDPrefix+"%")
+	}
+	if filter.IDContains != "" {
+		whereClauses = append(whereClauses, "id LIKE ?")
+		args = append(args, "%"+filter.IDContains+"%")
 	}
 	if filter.SpecIDPrefix != "" {
 		whereClauses = append(whereClauses, "spec_id LIKE ?")

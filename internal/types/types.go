@@ -1907,10 +1907,12 @@ type IssueFilter struct {
 	TitleSearch   string
 	IDs           []string // Filter by specific issue IDs
 	IDPrefix      string   // Filter by ID prefix (e.g., "bd-" to match "bd-abc123")
+	IDContains    string   // Filter by ID substring, for partial-ID resolution across prefixes
 	SpecIDPrefix  string   // Filter by spec_id prefix
 	Limit         int
 
 	// Pattern matching
+	FreeTextQuery       bool // Treat the query as free text even when it looks like an issue ID
 	TitleContains       string
 	DescriptionContains string
 	NotesContains       string
