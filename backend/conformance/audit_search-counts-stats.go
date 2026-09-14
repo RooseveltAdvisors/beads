@@ -552,9 +552,10 @@ func testAuditSearchSortByIDCompleteSet(t *testing.T, f Factory) {
 }
 
 // Both text-query branches reach external_ref via LOWER(external_ref) LIKE, and
-// the ID branch matches id exactly via id = lowerQuery. "jira-12" names no
-// prefix this store uses, so it is free text and lands on external_ref there;
-// "test-9" names a prefix the store does use and takes the ID branch.
+// the ID branch matches id exactly via id = query bound raw, so the clause and
+// the case-sensitive store probe that classified the query agree. "jira-12"
+// names no prefix this store uses, so it is free text and lands on external_ref
+// there; "test-9" names a prefix the store does use and takes the ID branch.
 func testAuditSearchTextIDBranchExternalRef(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()

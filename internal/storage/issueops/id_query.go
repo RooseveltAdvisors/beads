@@ -100,7 +100,7 @@ func storeUsesIDPrefix(ctx context.Context, tx DBTX, prefix string, tables Filte
 	}
 }
 
-// escapeLikeLiteral neutralises the LIKE wildcards in a literal operand for a
+// escapeLikeLiteral neutralizes the LIKE wildcards in a literal operand for a
 // clause that declares ESCAPE '|'.
 func escapeLikeLiteral(s string) string {
 	var b strings.Builder
