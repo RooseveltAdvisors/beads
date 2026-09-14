@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/steveyegge/beads/internal/storage/domain"
@@ -154,7 +155,7 @@ func (s *testSuite) unionLegsCarryTheWindow() {
 		{"issues", issuesFilterTables, "i"},
 		{"wisps", wispsFilterTables, "w"},
 	} {
-		sub, args, err := r.buildUnionSubquery("", filter, leg.tables, leg.tag, legWindowSQL(outerOrderBy, window))
+		sub, args, err := r.buildUnionSubquery(context.Background(), "", filter, leg.tables, leg.tag, legWindowSQL(outerOrderBy, window))
 		s.Require().NoError(err)
 
 		rows, err := s.db.QueryContext(s.Ctx(), sub, args...)

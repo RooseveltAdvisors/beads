@@ -22,10 +22,11 @@ The search command finds issues where your query appears in **any** of:
 - Issue title
 - Issue description
 - Issue ID (supports partial matching)
+- Issue external ref
 
 Unlike `bd list`, which requires you to specify which field to search, `bd search` automatically searches all text fields, making it faster and more intuitive for exploratory searches.
 
-**Caveat — hyphenated terms.** Free-text queries search titles and descriptions, but a hyphenated, space-free term (e.g. `use-after-free`, `race-condition`) is treated as an ID-like query and searches titles, IDs and external refs only. It is retried as free text only when it matches nothing at all, so a single title hit hides every description-only match. Use `bd list --desc-contains "<term>"` for an unconditional description search.
+**ID queries vs free text.** A query is treated as an ID only when it names a bead: it has the shape of an issue ID (1-8 character prefix, one hyphen, then a hyphen-free identifier) AND its prefix is one this database actually uses. An ID query matches ID, title and external ref — not descriptions — so naming a bead returns that bead rather than every bead citing it. Ordinary hyphenated terms (`use-after-free`, `race-condition`, `rate-limit`) are free text and do search descriptions. An ID whose prefix this database does not use is indistinguishable from prose and is searched as free text, which still matches it by its ID text.
 
 ## Filters
 

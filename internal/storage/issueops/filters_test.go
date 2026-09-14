@@ -10,18 +10,27 @@ import (
 	"github.com/steveyegge/beads/internal/types"
 )
 
-func TestLooksLikeIssueID(t *testing.T) {
+// TestIssueIDShape covers the SHAPE half of ID classification. Shape alone
+// never routes a query down the ID predicate — ResolveIDQuery also requires the
+// prefix to exist in the target store — so ID-shaped ordinary words such as
+// "race-condition" are true here and still searched as free text.
+func TestIssueIDShape(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name  string
-		query string
-		want  bool
+		name       string
+		query      string
+		wantPrefix string
+		want       bool
 	}{
-		{name: "standard issue ID", query: "bd-abc123", want: true},
-		{name: "dotted child ID", query: "bd-abc123.1", want: true},
-		{name: "wisp ID", query: "bd-wisp-xyz", want: true},
-		{name: "numeric suffix only", query: "proj-42", want: true},
+		{name: "standard issue ID", query: "bd-abc123", wantPrefix: "bd", want: true},
+		{name: "dotted child ID", query: "bd-abc123.1", wantPrefix: "bd", want: true},
+		{name: "numeric suffix only", query: "proj-42", wantPrefix: "proj", want: true},
+		{name: "single char prefix", query: "a-1", wantPrefix: "a", want: true},
+		{name: "uppercase letters fold", query: "BD-ABC123", wantPrefix: "bd", want: true},
+		{name: "ID-shaped ordinary word", query: "race-condition", wantPrefix: "race", want: true},
+		{name: "wisp ID has a hyphenated tail", query: "bd-wisp-xyz", want: false},
+		{name: "multiple dashes", query: "a-b-c", want: false},
 		{name: "plain word", query: "hello", want: false},
 		{name: "has spaces", query: "bd abc", want: false},
 		{name: "empty string", query: "", want: false},
@@ -29,18 +38,17 @@ func TestLooksLikeIssueID(t *testing.T) {
 		{name: "leading dash", query: "-abc", want: false},
 		{name: "trailing dash", query: "abc-", want: false},
 		{name: "special characters", query: "bd-abc@123", want: false},
-		{name: "uppercase letters", query: "BD-ABC123", want: true},
-		{name: "single char prefix", query: "a-1", want: true},
-		{name: "multiple dashes", query: "a-b-c", want: true},
 		{name: "unicode characters", query: "bd-café", want: false},
+		{name: "prefix over eight characters", query: "toolongprefix-1", want: false},
+		{name: "over the length bound", query: strings.Repeat("a", 8) + "-" + strings.Repeat("b", 60), want: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := LooksLikeIssueID(tt.query)
-			if got != tt.want {
-				t.Errorf("LooksLikeIssueID(%q) = %v, want %v", tt.query, got, tt.want)
+			prefix, got := IssueIDShape(tt.query)
+			if got != tt.want || prefix != tt.wantPrefix {
+				t.Errorf("IssueIDShape(%q) = (%q, %v), want (%q, %v)", tt.query, prefix, got, tt.wantPrefix, tt.want)
 			}
 		})
 	}
@@ -64,7 +72,7 @@ func TestBuildIssueFilterClauses_EmptyFilter(t *testing.T) {
 func TestBuildIssueFilterClauses_QueryAsIssueID(t *testing.T) {
 	t.Parallel()
 
-	clauses, args, err := BuildIssueFilterClauses("bd-abc123", types.IssueFilter{}, IssuesFilterTables)
+	clauses, args, err := BuildIssueFilterClauses("bd-abc123", types.IssueFilter{IDQuery: true}, IssuesFilterTables)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -89,9 +97,9 @@ func TestBuildIssueFilterClauses_QueryAsText(t *testing.T) {
 	if len(clauses) != 1 {
 		t.Fatalf("expected 1 clause, got %d", len(clauses))
 	}
-	// Text query produces 3 args: title LIKE, description LIKE, id LIKE
-	if len(args) != 3 {
-		t.Errorf("expected 3 args for text query, got %d: %v", len(args), args)
+	// Text query produces 4 args: title LIKE, description LIKE, id LIKE, external_ref LIKE
+	if len(args) != 4 {
+		t.Errorf("expected 4 args for text query, got %d: %v", len(args), args)
 	}
 }
 
@@ -535,31 +543,36 @@ func TestBuildIssueFilterClauses_IDContains(t *testing.T) {
 	}
 }
 
-func TestBuildIssueFilterClauses_FreeTextQueryOverridesIDLike(t *testing.T) {
+// TestBuildIssueFilterClauses_FreeTextIsTheDefault pins the polarity of the
+// classification. BuildIssueFilterClauses cannot see the store, so it never
+// classifies: an ID-shaped ordinary term takes the description-covering
+// free-text predicate unless a caller that DID check the store — ResolveIDQuery
+// — has set IDQuery. An unset filter is free text, which is the safe side.
+func TestBuildIssueFilterClauses_FreeTextIsTheDefault(t *testing.T) {
 	t.Parallel()
 
 	const query = "use-after-free"
 
-	idClauses, idArgs, err := BuildIssueFilterClauses(query, types.IssueFilter{}, IssuesFilterTables)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(idClauses) != 1 || strings.Contains(idClauses[0], "description") {
-		t.Fatalf("a hyphenated query takes the narrow ID-like branch, got %v", idClauses)
-	}
-	if len(idArgs) != 4 {
-		t.Errorf("expected 4 args for the ID-like branch, got %d: %v", len(idArgs), idArgs)
-	}
-
-	freeClauses, freeArgs, err := BuildIssueFilterClauses(query, types.IssueFilter{FreeTextQuery: true}, IssuesFilterTables)
+	freeClauses, freeArgs, err := BuildIssueFilterClauses(query, types.IssueFilter{}, IssuesFilterTables)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(freeClauses) != 1 || !strings.Contains(freeClauses[0], "LOWER(description) LIKE ?") {
-		t.Fatalf("FreeTextQuery forces the description-covering predicate, got %v", freeClauses)
+		t.Fatalf("an unclassified query takes the description-covering predicate, got %v", freeClauses)
 	}
-	if len(freeArgs) != 3 {
-		t.Errorf("expected 3 args for the free-text branch, got %d: %v", len(freeArgs), freeArgs)
+	if len(freeArgs) != 4 {
+		t.Errorf("expected 4 args for the free-text branch, got %d: %v", len(freeArgs), freeArgs)
+	}
+
+	idClauses, idArgs, err := BuildIssueFilterClauses(query, types.IssueFilter{IDQuery: true}, IssuesFilterTables)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(idClauses) != 1 || strings.Contains(idClauses[0], "description") {
+		t.Fatalf("IDQuery selects the narrow ID predicate, got %v", idClauses)
+	}
+	if len(idArgs) != 4 {
+		t.Errorf("expected 4 args for the ID branch, got %d: %v", len(idArgs), idArgs)
 	}
 }
 
@@ -607,9 +620,9 @@ func TestBuildIssueFilterClauses_CombinedFilters(t *testing.T) {
 	if len(clauses) != 6 {
 		t.Errorf("expected 6 clauses for combined filter, got %d: %v", len(clauses), clauses)
 	}
-	// query text(3) + status(1) + priority(1) + label(1) + created_after(1) = 7
-	if len(args) != 7 {
-		t.Errorf("expected 7 args, got %d", len(args))
+	// query text(4) + status(1) + priority(1) + label(1) + created_after(1) = 8
+	if len(args) != 8 {
+		t.Errorf("expected 8 args, got %d", len(args))
 	}
 }
 

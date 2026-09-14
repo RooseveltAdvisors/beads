@@ -23,7 +23,9 @@ func BuildIssueFilterClauses(query string, filter types.IssueFilter, tables Filt
 	return sqlbuild.BuildIssueFilterClauses(query, filter, tables)
 }
 
-// LooksLikeIssueID returns true if the query string looks like a beads issue ID.
-func LooksLikeIssueID(query string) bool {
-	return sqlbuild.LooksLikeIssueID(query)
+// IssueIDShape reports whether query has the shape of a beads issue ID and
+// returns its prefix. Shape is only half the classification — ResolveIDQuery
+// pairs it with the target store's prefix set.
+func IssueIDShape(query string) (string, bool) {
+	return sqlbuild.IssueIDShape(query)
 }

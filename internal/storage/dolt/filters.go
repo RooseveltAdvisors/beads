@@ -18,7 +18,7 @@ func buildIssueFilterClauses(query string, filter types.IssueFilter, tables filt
 	return issueops.BuildIssueFilterClauses(query, filter, tables)
 }
 
-// looksLikeIssueID delegates to the shared issueops implementation.
-func looksLikeIssueID(query string) bool {
-	return issueops.LooksLikeIssueID(query)
+// issueIDShape delegates to the shared issueops implementation.
+func issueIDShape(query string) (string, bool) {
+	return issueops.IssueIDShape(query)
 }

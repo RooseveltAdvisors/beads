@@ -67,13 +67,20 @@ func BuildIssueFilterClauses(query string, filter types.IssueFilter, tables Filt
 
 	if query != "" {
 		lowerQuery := strings.ToLower(query)
-		if LooksLikeIssueID(query) && !filter.FreeTextQuery {
+		if filter.IDQuery {
+			// The query NAMES a bead: match it, not every bead that cites it.
+			// Descriptions are deliberately out of this branch — including them
+			// buries the named bead under its citers, past the SQL LIMIT.
 			whereClauses = append(whereClauses, "(id = ? OR id LIKE ? OR LOWER(title) LIKE ? OR LOWER(external_ref) LIKE ?)")
 			args = append(args, lowerQuery, lowerQuery+"%", "%"+lowerQuery+"%", "%"+lowerQuery+"%")
 		} else {
-			whereClauses = append(whereClauses, "(LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR id LIKE ?)")
+			// Free text spans every text column an issue is findable by, so
+			// nothing is reachable ONLY by being misread as an ID. External refs
+			// ("JIRA-1234") are ID-SHAPED but are never issue-id prefixes, so
+			// this branch is the only one that can ever match them.
+			whereClauses = append(whereClauses, "(LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR id LIKE ? OR LOWER(external_ref) LIKE ?)")
 			pattern := "%" + lowerQuery + "%"
-			args = append(args, pattern, pattern, pattern)
+			args = append(args, pattern, pattern, pattern, pattern)
 		}
 	}
 
@@ -397,19 +404,46 @@ func globToLikePattern(pattern string) string {
 	return b.String()
 }
 
-// LooksLikeIssueID returns true if the query string looks like a beads issue ID.
-func LooksLikeIssueID(query string) bool {
-	idx := strings.Index(query, "-")
-	if idx <= 0 || idx >= len(query)-1 {
-		return false
+// maxIssueIDLength bounds the query length IssueIDShape will consider. A real
+// issue ID is a short prefix plus a hash; anything longer is prose.
+const maxIssueIDLength = 64
+
+// maxIssueIDPrefixLength bounds the prefix half, matching the 1-8 character
+// prefix beads generates and validates elsewhere (utils.looksLikePrefixedID).
+const maxIssueIDPrefixLength = 8
+
+// IssueIDShape reports whether query has the SHAPE of a beads issue ID and, if
+// so, returns its lowercased prefix — the part before the single separating
+// hyphen.
+//
+// SHAPE IS NOT CLASSIFICATION. "race-condition" and "rate-limit" have the shape
+// of an issue ID and are ordinary search terms; only a prefix that actually
+// exists in the target store makes a query an ID. This function is the cheap,
+// pure half of that test; issueops.ResolveIDQuery is the half that asks the
+// store, and it is the only thing that may set IssueFilter.IDQuery.
+//
+// The shape is: 1-8 lowercase alphanumeric prefix, one hyphen, then a non-empty
+// identifier tail of alphanumerics and dots (dots carry hierarchical child IDs
+// such as bd-a3f8e9.1.2). The tail is HYPHEN-FREE, so a multi-hyphen token is
+// prose no matter what the store holds.
+func IssueIDShape(query string) (string, bool) {
+	if query == "" || len(query) > maxIssueIDLength {
+		return "", false
 	}
-	if strings.Contains(query, " ") {
-		return false
+	lower := strings.ToLower(query)
+	prefix, tail, found := strings.Cut(lower, "-")
+	if !found || prefix == "" || tail == "" || len(prefix) > maxIssueIDPrefixLength {
+		return "", false
 	}
-	for _, c := range query {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-' || c == '.') {
-			return false
+	for _, c := range prefix {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z')) {
+			return "", false
 		}
 	}
-	return true
+	for _, c := range tail {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || c == '.') {
+			return "", false
+		}
+	}
+	return prefix, true
 }

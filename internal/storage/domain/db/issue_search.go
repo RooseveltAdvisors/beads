@@ -75,11 +75,11 @@ func (r *issueSQLRepositoryImpl) searchUnion(ctx context.Context, query string, 
 	window := searchWindowForFilter(filter)
 	legWindow := legWindowSQL(outerOrderBy, window)
 
-	iSub, iArgs, err := r.buildUnionSubquery(query, filter, issuesFilterTables, "i", legWindow)
+	iSub, iArgs, err := r.buildUnionSubquery(ctx, query, filter, issuesFilterTables, "i", legWindow)
 	if err != nil {
 		return domain.SearchPage{}, fmt.Errorf("search union (issues): %w", err)
 	}
-	wSub, wArgs, err := r.buildUnionSubquery(query, filter, wispsFilterTables, "w", legWindow)
+	wSub, wArgs, err := r.buildUnionSubquery(ctx, query, filter, wispsFilterTables, "w", legWindow)
 	if err != nil {
 		return domain.SearchPage{}, fmt.Errorf("search union (wisps): %w", err)
 	}
@@ -135,8 +135,8 @@ func (r *issueSQLRepositoryImpl) searchUnion(ctx context.Context, query string, 
 // It is empty when the sort has no SQL ORDER BY, and that is not a missed case:
 // a LIMIT on an UNORDERED leg is the bug this exists to remove, one level
 // further down and harder to see.
-func (r *issueSQLRepositoryImpl) buildUnionSubquery(query string, filter types.IssueFilter, tables filterTables, srcTag, legWindow string) (string, []any, error) {
-	plan := buildLabelDrivenSearch(filter, tables)
+func (r *issueSQLRepositoryImpl) buildUnionSubquery(ctx context.Context, query string, filter types.IssueFilter, tables filterTables, srcTag, legWindow string) (string, []any, error) {
+	plan := buildLabelDrivenSearch(r.resolveIDQuery(ctx, query, filter, tables), tables)
 	whereClauses, args, err := buildIssueFilterClauses(query, plan.Filter, tables)
 	if err != nil {
 		return "", nil, err
@@ -228,7 +228,7 @@ func (r *issueSQLRepositoryImpl) fetchIssuesByIDs(ctx context.Context, ids []str
 }
 
 func (r *issueSQLRepositoryImpl) searchTable(ctx context.Context, query string, filter types.IssueFilter, tables filterTables) (domain.SearchPage, error) {
-	plan := buildLabelDrivenSearch(filter, tables)
+	plan := buildLabelDrivenSearch(r.resolveIDQuery(ctx, query, filter, tables), tables)
 	whereClauses, args, err := buildIssueFilterClauses(query, plan.Filter, tables)
 	if err != nil {
 		return domain.SearchPage{}, err
@@ -474,6 +474,13 @@ func buildLabelDrivenSearch(filter types.IssueFilter, tables filterTables) sqlbu
 
 func buildIssueFilterClauses(query string, filter types.IssueFilter, tables filterTables) ([]string, []any, error) {
 	return sqlbuild.BuildIssueFilterClauses(query, filter, tables)
+}
+
+// resolveIDQuery classifies the text query against THIS repository's corpus —
+// the same single, shared classifier the issueops stack runs, so the two stacks
+// cannot disagree about whether a token is an issue ID or prose.
+func (r *issueSQLRepositoryImpl) resolveIDQuery(ctx context.Context, query string, filter types.IssueFilter, tables filterTables) types.IssueFilter {
+	return issueops.ResolveIDQuery(ctx, r.runner, query, filter, tables)
 }
 
 type idSrcPage struct {

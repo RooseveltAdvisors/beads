@@ -63,11 +63,11 @@ func (r *issueSQLRepositoryImpl) searchUnionWithCounts(ctx context.Context, quer
 	window := searchWindowForFilter(filter)
 	legWindow := legWindowSQL(outerOrderBy, window)
 
-	iSub, iArgs, err := r.buildUnionSubquery(query, filter, issuesFilterTables, "i", legWindow)
+	iSub, iArgs, err := r.buildUnionSubquery(ctx, query, filter, issuesFilterTables, "i", legWindow)
 	if err != nil {
 		return domain.SearchCountsPage{}, fmt.Errorf("search union with counts (issues): %w", err)
 	}
-	wSub, wArgs, err := r.buildUnionSubquery(query, filter, wispsFilterTables, "w", legWindow)
+	wSub, wArgs, err := r.buildUnionSubquery(ctx, query, filter, wispsFilterTables, "w", legWindow)
 	if err != nil {
 		return domain.SearchCountsPage{}, fmt.Errorf("search union with counts (wisps): %w", err)
 	}
@@ -157,6 +157,7 @@ func (r *issueSQLRepositoryImpl) fetchCountsByIDs(ctx context.Context, ids []str
 }
 
 func (r *issueSQLRepositoryImpl) runFilterSearchQuery(ctx context.Context, query string, filter types.IssueFilter, tables filterTables, includeWispReverseDeps bool) ([]*types.IssueWithCounts, error) {
+	filter = r.resolveIDQuery(ctx, query, filter, tables)
 	whereClauses, args, err := buildIssueFilterClauses(query, filter, tables)
 	if err != nil {
 		return nil, err

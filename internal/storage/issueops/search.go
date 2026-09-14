@@ -348,7 +348,7 @@ func searchTableInTxT[T any](ctx context.Context, tx DBTX, query string, filter 
 		return searchTablePatternBT(ctx, tx, query, filter, tables, proj)
 	}
 
-	plan := sqlbuild.BuildLabelDrivenSearch(filter, tables)
+	plan := sqlbuild.BuildLabelDrivenSearch(ResolveIDQuery(ctx, tx, query, filter, tables), tables)
 	whereClauses, args, err := BuildIssueFilterClauses(query, plan.Filter, tables)
 	if err != nil {
 		return nil, err

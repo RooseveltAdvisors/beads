@@ -104,6 +104,7 @@ func hydrationFor(filter types.IssueFilter) sqlbuild.CountsHydration {
 }
 
 func runFilterSearchQueryInTx(ctx context.Context, tx *sql.Tx, query string, filter types.IssueFilter, tables FilterTables, includeWispReverseDeps bool) ([]*types.IssueWithCounts, error) {
+	filter = ResolveIDQuery(ctx, tx, query, filter, tables)
 	whereClauses, args, err := BuildIssueFilterClauses(query, filter, tables)
 	if err != nil {
 		return nil, err

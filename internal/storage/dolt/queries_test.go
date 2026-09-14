@@ -1851,7 +1851,8 @@ func TestSearchIssues_FreeTextFieldCoverage(t *testing.T) {
 		// Unchanged behavior: a title-only term still returns exactly its
 		// title match and does not gain the other rows.
 		{name: "title only", query: "Quaquaversal", want: []string{"sfc-title"}},
-		// Unchanged behavior: ID-like queries still resolve by ID.
+		// Unchanged behavior: a query naming a prefix this store uses still
+		// resolves by ID.
 		{name: "id exact", query: "sfc-unrelated", want: []string{"sfc-unrelated"}},
 		{name: "no match", query: "nonexistent-term", want: nil},
 	}
@@ -1992,7 +1993,8 @@ func TestSearchIssues_ByExternalRef(t *testing.T) {
 		t.Fatalf("failed to create issue: %v", err)
 	}
 
-	// Free-text ID-like query should match via external_ref LIKE.
+	// An ID-shaped token whose prefix this store does not use is free text,
+	// and free text spans external_ref.
 	results, err := store.SearchIssues(ctx, "BE-1521", types.IssueFilter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

@@ -1947,7 +1947,13 @@ type IssueFilter struct {
 	Limit         int
 
 	// Pattern matching
-	FreeTextQuery       bool // Treat the query as free text even when it looks like an issue ID
+	// IDQuery routes the text query down the ID predicate (exact id, id
+	// prefix, title, external ref) instead of the free-text predicate (title,
+	// description, id substring). Free text is the DEFAULT: only a caller that
+	// has checked the query's prefix against the target store may set this —
+	// see issueops.ResolveIDQuery. Setting it from a shape test alone is the
+	// bug that made "use-after-free" search IDs and never descriptions.
+	IDQuery             bool
 	TitleContains       string
 	DescriptionContains string
 	NotesContains       string

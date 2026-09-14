@@ -88,16 +88,16 @@ func TestProxiedServerSearch(t *testing.T) {
 	})
 
 	t.Run("hyphenated_description_term_json", func(t *testing.T) {
-		// "use-after-free" is classified ID-like, so this bead is reachable
-		// only through the empty-result free-text retry — here on the --json
-		// path, which runs SearchIssuesWithCounts.
+		// "use-after-free" names no prefix this store uses, so it is free text
+		// and reaches descriptions — here on the --json path, which runs
+		// SearchIssuesWithCounts.
 		if !searchResultIDs(bdProxiedSearchJSON(t, bd, p.dir, "use-after-free"))[hyphenTask.ID] {
 			t.Errorf("expected to find %s searching for a hyphenated description term", hyphenTask.ID)
 		}
 	})
 
 	t.Run("hyphenated_description_term_text", func(t *testing.T) {
-		// Same retry on the text-output path, which runs SearchIssues.
+		// Same classification on the text-output path, which runs SearchIssues.
 		out := bdProxiedSearch(t, bd, p.dir, "use-after-free")
 		if !strings.Contains(out, hyphenTask.ID) {
 			t.Errorf("expected text output to contain %s, got:\n%s", hyphenTask.ID, out)

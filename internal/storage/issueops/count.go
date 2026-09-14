@@ -164,6 +164,7 @@ func countGroupForTablesInTx(ctx context.Context, tx DBTX, filter types.IssueFil
 
 // countTableInTx runs SELECT COUNT(*) FROM <table> WHERE <query+filter>.
 func countTableInTx(ctx context.Context, tx DBTX, query string, filter types.IssueFilter, tables FilterTables) (int, error) {
+	filter = ResolveIDQuery(ctx, tx, query, filter, tables)
 	clauses, args, err := BuildIssueFilterClauses(query, filter, tables)
 	if err != nil {
 		return 0, err

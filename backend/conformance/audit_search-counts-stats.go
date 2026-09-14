@@ -551,8 +551,10 @@ func testAuditSearchSortByIDCompleteSet(t *testing.T, f Factory) {
 	}
 }
 
-// The text-query ID branch (LooksLikeIssueID) matches external_ref substrings via
-// LOWER(external_ref) LIKE, and matches id exactly via id = lowerQuery.
+// Both text-query branches reach external_ref via LOWER(external_ref) LIKE, and
+// the ID branch matches id exactly via id = lowerQuery. "jira-12" names no
+// prefix this store uses, so it is free text and lands on external_ref there;
+// "test-9" names a prefix the store does use and takes the ID branch.
 func testAuditSearchTextIDBranchExternalRef(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
