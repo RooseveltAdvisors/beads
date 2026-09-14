@@ -50,8 +50,8 @@ When using bd for static data (terminology, glossaries, reference information):
 
 **Searching by content:**
 - Free-text `bd search "text"` matches title, description, ID, and external ref
-- A query is an ID lookup only when it NAMES A BEAD: ID shape (a prefix, the last hyphen, a hyphen-free identifier) AND a prefix this database actually uses — hyphenated and underscored prefixes such as `claude-config-` and `bd_001-` included. An ID lookup matches ID, title, and external ref, never descriptions, so naming a bead returns that bead and not every bead citing it
-- Ordinary hyphenated terms (`use-after-free`, `race-condition`, `rate-limit`) are free text and DO search descriptions
+- A query is an ID lookup only when it NAMES A BEAD: ID shape (a prefix, the last hyphen, a hyphen-free identifier) AND a prefix this database actually uses — hyphenated and underscored prefixes such as `claude-config-` and `bd_001-` included. ID matching is case-insensitive (`MyProject-a3f8e9` = `myproject-a3f8e9`). An ID lookup matches ID, title, and external ref, never descriptions, so naming a bead returns that bead and not every bead citing it
+- Hyphenated terms (`use-after-free`, `race-condition`, `rate-limit`) are free text and DO search descriptions — UNLESS the term's first segment is this database's own prefix, in which case it is an ID lookup and does NOT scan descriptions (`bd-cli` in a `bd-` database); use `bd list --desc-contains` for those
 - An ID whose prefix this database does not use is searched as free text; the id column is part of the free-text predicate, so it is still found by its ID text, alongside anything citing it
 - `bd list --desc-contains "text"` is the unconditional single-field description search (also `--notes-contains`, `--external-contains`)
 - The same flags exist on `bd search`, but there they are AND-ed with the query: they narrow its matches

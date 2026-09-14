@@ -670,6 +670,20 @@ which dumps the entire release history.)
   are ID queries in the workspaces that use those prefixes, and prose in the
   ones that do not.
 
+  The corollary, since it surprises: a hyphenated term whose FIRST SEGMENT is
+  the local prefix is an ID query and does not scan descriptions. `bd search
+  bd-cli` in a `bd-`prefixed database will not find a bead that only mentions
+  "bd-cli" in its body; `bd list --desc-contains bd-cli` will.
+
+- **`bd search` now matches IDs case-insensitively.** A text query's ID
+  comparison folds both sides (`LOWER(id)`), on the ID branch and the free-text
+  branch alike. An issue prefix keeps the case it was configured with — `bd
+  init` derives it from the directory name — so a workspace in `~/code/MyProject`
+  mints `MyProject-a3f8e9`, and searching that bead by its own exact ID
+  previously returned nothing at all, silently. `bd search MyProject-a3f8e9` and
+  `bd search myproject-a3f8e9` now both return it. The `--id-prefix` filter is
+  unchanged and remains case-SENSITIVE.
+
   This replaces, rather than extends, the empty-result free-text retry that
   shipped with the change above: that retry fired only when a query matched
   nothing at all, so a single title hit still hid every description-only

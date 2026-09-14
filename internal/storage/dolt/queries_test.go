@@ -2075,6 +2075,48 @@ func TestSearchIssues_UnknownHyphenatedPrefixSearchesDescriptions(t *testing.T) 
 	}
 }
 
+// TestSearchIssues_MixedCasePrefixIDLookup pins case-insensitive ID matching in
+// the text-query path. `bd init` derives the issue prefix from the directory
+// name and does not case-fold it, so a workspace in ~/code/MyProject mints
+// MyProject-a3f8e9. Both spellings must find the bead: the exact one through the
+// ID branch (whose prefix the store confirms) and the lowercase one through the
+// free-text branch (whose prefix it does not), and a lookup by a bead's own ID
+// must never come back empty.
+func TestSearchIssues_MixedCasePrefixIDLookup(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx, cancel := testContext(t)
+	defer cancel()
+
+	const beadID = "MyProject-a3f8e9"
+
+	bead := &types.Issue{
+		ID:        beadID,
+		Title:     "Coordination hub",
+		Status:    types.StatusOpen,
+		Priority:  2,
+		IssueType: types.TypeEpic,
+	}
+	if err := store.CreateIssue(ctx, bead, "tester"); err != nil {
+		t.Fatalf("failed to create bead: %v", err)
+	}
+
+	for _, query := range []string{beadID, strings.ToLower(beadID)} {
+		results, err := store.SearchIssues(ctx, query, types.IssueFilter{})
+		if err != nil {
+			t.Fatalf("SearchIssues(%q): %v", query, err)
+		}
+		if len(results) != 1 || results[0].ID != beadID {
+			got := make([]string, len(results))
+			for i, r := range results {
+				got[i] = r.ID
+			}
+			t.Errorf("SearchIssues(%q) = %v, want [%s]", query, got, beadID)
+		}
+	}
+}
+
 // TestSearchIssues_ByExternalRef verifies two things:
 //  1. A free-text query like "BE-1521" (which looksLikeIssueID returns true for)
 //     matches an issue whose external_ref contains that string.

@@ -27,9 +27,15 @@ issue ID (a prefix, then the last hyphen, then an identifier with no further
 hyphen) AND that prefix is one this database actually uses. The database is the
 gate, not the spelling: hyphenated, underscored, long and uppercase prefixes
 ("claude-config-a3f8e9", "bd_001-a3f8e9") are all ID queries where those
-prefixes exist. Ordinary terms that merely look ID-shaped ("use-after-free",
-"race-condition", "rate-limit") name no prefix any database uses, so they are
-free text and do search descriptions.
+prefixes exist. ID matching is case-insensitive, so "MyProject-a3f8e9" and
+"myproject-a3f8e9" find the same bead.
+
+Terms that merely look ID-shaped ("use-after-free", "race-condition",
+"rate-limit") name no prefix any database uses, so they are free text and do
+search descriptions — UNLESS the term's first segment happens to be this
+database's own prefix. In a "bd"-prefixed database, "bd-cli" is an ID query and
+therefore does NOT scan descriptions, even though it was meant as prose. Reach
+for bd list --desc-contains when a term collides with the local prefix.
 
 An ID query matches ID, title and external ref, and deliberately not
 descriptions, so naming a bead returns that bead rather than every bead that
