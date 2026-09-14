@@ -670,19 +670,19 @@ which dumps the entire release history.)
   are ID queries in the workspaces that use those prefixes, and prose in the
   ones that do not.
 
-  The corollary, since it surprises: a hyphenated term whose FIRST SEGMENT is
-  the local prefix is an ID query and does not scan descriptions. `bd search
-  bd-cli` in a `bd-`prefixed database will not find a bead that only mentions
-  "bd-cli" in its body; `bd list --desc-contains bd-cli` will.
+  The corollary, since it surprises: a term is an ID query whenever EVERYTHING
+  BEFORE ITS LAST HYPHEN is a prefix the database uses — not merely its first
+  segment. `bd search bd-cli` in a `bd-`prefixed database will not find a bead
+  that only mentions "bd-cli" in its body, and neither will `bd search
+  beads-vscode-plugin` in a `beads-vscode-`prefixed one; `bd list
+  --desc-contains` will.
 
-- **`bd search` now matches IDs case-insensitively.** A text query's ID
-  comparison folds both sides (`LOWER(id)`), on the ID branch and the free-text
-  branch alike. An issue prefix keeps the case it was configured with — `bd
-  init` derives it from the directory name — so a workspace in `~/code/MyProject`
-  mints `MyProject-a3f8e9`, and searching that bead by its own exact ID
-  previously returned nothing at all, silently. `bd search MyProject-a3f8e9` and
-  `bd search myproject-a3f8e9` now both return it. The `--id-prefix` filter is
-  unchanged and remains case-SENSITIVE.
+  Matching is case-SENSITIVE end to end. The store probe that classifies the
+  query and the id comparison that answers it are both raw, so they always
+  agree: in a database minted from `~/code/MyProject`, `bd search
+  MyProject-a3f8e9` is an ID query and returns that bead alone, while `bd search
+  myproject-a3f8e9` is prose and may return every bead citing the ID instead.
+  The `--id-prefix` filter is likewise unchanged and case-SENSITIVE.
 
   This replaces, rather than extends, the empty-result free-text retry that
   shipped with the change above: that retry fired only when a query matched
@@ -698,11 +698,14 @@ which dumps the entire release history.)
   Free text now also spans `external_ref`, which was previously reachable only
   as a side effect of the ID misclassification.
 
-  BEHAVIOUR CHANGE, INTENDED: an ID whose prefix the database does not use —
-  including a multi-hyphen ID such as a `bd-wisp-…` wisp ID — is
-  indistinguishable from prose and is searched as free text. The id column is
-  part of the free-text predicate, so such an ID is still found by its ID text,
-  alongside any bead that cites it.
+  BEHAVIOUR CHANGE, INTENDED: an ID whose prefix the database does not use — a
+  foreign ID, or one spelled in the wrong case — is indistinguishable from prose
+  and is searched as free text. The id column is part of the free-text
+  predicate, so such an ID is still found by its ID text when the case matches,
+  alongside any bead that cites it. A multi-hyphen ID is NOT automatically prose:
+  a wisp, proto or molecule ID such as `bd-wisp-0laki` splits at its last hyphen
+  into the prefix `bd-wisp`, which the database does use, so it stays an ID
+  query and is NOT returned alongside the beads that cite it.
 
 - **Server-mode issue mutations no longer revert concurrent writers' committed
   rows** ([#5740](https://github.com/gastownhall/beads/pull/5740)). The

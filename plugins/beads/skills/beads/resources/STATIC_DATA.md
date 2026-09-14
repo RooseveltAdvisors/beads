@@ -50,9 +50,10 @@ When using bd for static data (terminology, glossaries, reference information):
 
 **Searching by content:**
 - Free-text `bd search "text"` matches title, description, ID, and external ref
-- A query is an ID lookup only when it NAMES A BEAD: ID shape (a prefix, the last hyphen, a hyphen-free identifier) AND a prefix this database actually uses — hyphenated and underscored prefixes such as `claude-config-` and `bd_001-` included. ID matching is case-insensitive (`MyProject-a3f8e9` = `myproject-a3f8e9`). An ID lookup matches ID, title, and external ref, never descriptions, so naming a bead returns that bead and not every bead citing it
-- Hyphenated terms (`use-after-free`, `race-condition`, `rate-limit`) are free text and DO search descriptions — UNLESS the term's first segment is this database's own prefix, in which case it is an ID lookup and does NOT scan descriptions (`bd-cli` in a `bd-` database); use `bd list --desc-contains` for those
-- An ID whose prefix this database does not use is searched as free text; the id column is part of the free-text predicate, so it is still found by its ID text, alongside anything citing it
+- A query is an ID lookup only when it NAMES A BEAD: ID shape (a prefix, the last hyphen, a hyphen-free identifier) AND a prefix this database actually uses — hyphenated and underscored prefixes such as `claude-config-` and `bd_001-` included. Matching is case-SENSITIVE: only `MyProject-a3f8e9` is an ID lookup in a `MyProject` database, `myproject-a3f8e9` is prose. An ID lookup matches ID, title, and external ref, never descriptions, so naming a bead returns that bead and not every bead citing it
+- Hyphenated terms (`use-after-free`, `race-condition`, `rate-limit`) are free text and DO search descriptions — UNLESS everything before the term's LAST hyphen is a prefix this database uses, in which case it is an ID lookup and does NOT scan descriptions (`bd-cli` in a `bd-` database, `beads-vscode-plugin` in a `beads-vscode-` one); use `bd list --desc-contains` for those
+- Wisp, proto and molecule IDs (`bd-wisp-0laki`) are ID lookups too — `bd-wisp` is a prefix the database uses
+- An ID whose prefix this database does not use — a foreign ID, or one spelled in the wrong case — is searched as free text; the id column is part of the free-text predicate, so it is still found by its ID text when the case matches, alongside anything citing it
 - `bd list --desc-contains "text"` is the unconditional single-field description search (also `--notes-contains`, `--external-contains`)
 - The same flags exist on `bd search`, but there they are AND-ed with the query: they narrow its matches
 - For fields with no flag, use `bd sql`

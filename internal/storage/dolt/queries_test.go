@@ -1,7 +1,9 @@
 package dolt
 
 import (
+	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -2075,45 +2077,86 @@ func TestSearchIssues_UnknownHyphenatedPrefixSearchesDescriptions(t *testing.T) 
 	}
 }
 
-// TestSearchIssues_MixedCasePrefixIDLookup pins case-insensitive ID matching in
-// the text-query path. `bd init` derives the issue prefix from the directory
-// name and does not case-fold it, so a workspace in ~/code/MyProject mints
-// MyProject-a3f8e9. Both spellings must find the bead: the exact one through the
-// ID branch (whose prefix the store confirms) and the lowercase one through the
-// free-text branch (whose prefix it does not), and a lookup by a bead's own ID
-// must never come back empty.
-func TestSearchIssues_MixedCasePrefixIDLookup(t *testing.T) {
+// TestSearchIssues_MixedCasePrefixCaseSensitivity pins that the ID/prose GATE
+// and the id MATCH CLAUSE agree on case, by asserting the full result SET for
+// each spelling of one ID.
+//
+// `bd init` derives the issue prefix from the directory name without
+// case-folding it, so a workspace in ~/code/MyProject mints MyProject-a3f8e9.
+// The store probe that classifies the query is case-sensitive, so only the
+// exact-cased spelling is an ID query — and the clause it selects must be
+// case-sensitive too. Folding the clause instead makes the two spellings take
+// different branches: the wrong-cased one falls to free text, whose predicate
+// covers descriptions, and the named bead comes back buried under every
+// higher-priority bead that merely cites it. A store holding only the named
+// bead cannot detect that; the citers are what make the two branches distinguishable.
+func TestSearchIssues_MixedCasePrefixCaseSensitivity(t *testing.T) {
 	store, cleanup := setupTestStore(t)
 	defer cleanup()
 
 	ctx, cancel := testContext(t)
 	defer cancel()
 
-	const beadID = "MyProject-a3f8e9"
+	const hubID = "MyProject-a3f8e9"
 
-	bead := &types.Issue{
-		ID:        beadID,
+	hub := &types.Issue{
+		ID:        hubID,
 		Title:     "Coordination hub",
 		Status:    types.StatusOpen,
 		Priority:  2,
 		IssueType: types.TypeEpic,
 	}
-	if err := store.CreateIssue(ctx, bead, "tester"); err != nil {
-		t.Fatalf("failed to create bead: %v", err)
+	if err := store.CreateIssue(ctx, hub, "tester"); err != nil {
+		t.Fatalf("failed to create hub: %v", err)
 	}
 
-	for _, query := range []string{beadID, strings.ToLower(beadID)} {
-		results, err := store.SearchIssues(ctx, query, types.IssueFilter{})
-		if err != nil {
-			t.Fatalf("SearchIssues(%q): %v", query, err)
+	// Citers outrank the hub, so under ORDER BY priority ASC they fill the
+	// window first wherever the predicate lets them in.
+	const citers = 5
+	citerIDs := make([]string, 0, citers)
+	for i := 0; i < citers; i++ {
+		citer := &types.Issue{
+			ID:          fmt.Sprintf("MyProject-cite%d", i),
+			Title:       fmt.Sprintf("Downstream work %d", i),
+			Description: "Blocked by " + hubID + " until the rollout lands.",
+			Status:      types.StatusOpen,
+			Priority:    0,
+			IssueType:   types.TypeTask,
 		}
-		if len(results) != 1 || results[0].ID != beadID {
-			got := make([]string, len(results))
-			for i, r := range results {
-				got[i] = r.ID
-			}
-			t.Errorf("SearchIssues(%q) = %v, want [%s]", query, got, beadID)
+		if err := store.CreateIssue(ctx, citer, "tester"); err != nil {
+			t.Fatalf("failed to create citer %d: %v", i, err)
 		}
+		citerIDs = append(citerIDs, citer.ID)
+	}
+
+	// The exact-cased spelling is an ID query: the named bead, undiluted.
+	assertSearchIDSet(ctx, t, store, hubID, []string{hubID})
+
+	// Any other spelling is prose, and prose reaches descriptions — so it
+	// returns the citers and NOT the hub, whose id the case-sensitive
+	// free-text id predicate does not match either.
+	assertSearchIDSet(ctx, t, store, strings.ToLower(hubID), citerIDs)
+}
+
+// assertSearchIDSet fails unless SearchIssues(query) returns exactly want,
+// order-independent.
+func assertSearchIDSet(ctx context.Context, t *testing.T, store *DoltStore, query string, want []string) {
+	t.Helper()
+
+	results, err := store.SearchIssues(ctx, query, types.IssueFilter{})
+	if err != nil {
+		t.Fatalf("SearchIssues(%q): %v", query, err)
+	}
+	got := make([]string, len(results))
+	for i, r := range results {
+		got[i] = r.ID
+	}
+	sortedGot := append([]string(nil), got...)
+	sortedWant := append([]string(nil), want...)
+	sort.Strings(sortedGot)
+	sort.Strings(sortedWant)
+	if !reflect.DeepEqual(sortedGot, sortedWant) {
+		t.Errorf("SearchIssues(%q) = %v, want exactly %v", query, got, want)
 	}
 }
 

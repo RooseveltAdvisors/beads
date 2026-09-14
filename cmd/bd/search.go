@@ -27,23 +27,31 @@ issue ID (a prefix, then the last hyphen, then an identifier with no further
 hyphen) AND that prefix is one this database actually uses. The database is the
 gate, not the spelling: hyphenated, underscored, long and uppercase prefixes
 ("claude-config-a3f8e9", "bd_001-a3f8e9") are all ID queries where those
-prefixes exist. ID matching is case-insensitive, so "MyProject-a3f8e9" and
-"myproject-a3f8e9" find the same bead.
+prefixes exist. Matching is case-SENSITIVE throughout: only the exact-cased
+spelling is read as an ID, so in a "MyProject" database "MyProject-a3f8e9" is an
+ID query while "myproject-a3f8e9" is prose and may come back alongside every
+bead that cites that ID.
 
 Terms that merely look ID-shaped ("use-after-free", "race-condition",
 "rate-limit") name no prefix any database uses, so they are free text and do
-search descriptions — UNLESS the term's first segment happens to be this
-database's own prefix. In a "bd"-prefixed database, "bd-cli" is an ID query and
-therefore does NOT scan descriptions, even though it was meant as prose. Reach
-for bd list --desc-contains when a term collides with the local prefix.
+search descriptions — UNLESS everything before the term's LAST hyphen is a
+prefix this database uses. In a "bd"-prefixed database "bd-cli" is an ID query
+and therefore does NOT scan descriptions, even though it was meant as prose; in
+a "beads-vscode"-prefixed one so is "beads-vscode-plugin". Reach for
+bd list --desc-contains when a term collides with the local prefix.
 
 An ID query matches ID, title and external ref, and deliberately not
 descriptions, so naming a bead returns that bead rather than every bead that
 cites it in its body.
 
-An ID whose prefix this database does not use is indistinguishable from prose
-and is searched as free text; the id column is part of the free-text predicate,
-so it is still found by its ID text — alongside anything that cites it.
+An ID whose prefix this database does not use — a foreign ID, or one spelled in
+the wrong case — is indistinguishable from prose and is searched as free text;
+the id column is part of the free-text predicate, so it is still found by its ID
+text when the case matches, alongside anything that cites it.
+
+A wisp, proto or molecule ID ("bd-wisp-0laki") is NOT prose: everything before
+its last hyphen ("bd-wisp") is a prefix the database uses, so it is an ID query
+like any other.
 
 --desc-contains, --notes-contains and --external-contains are AND-ed with the
 query here, so they NARROW its matches, and this command always requires a

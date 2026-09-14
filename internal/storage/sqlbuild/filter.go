@@ -72,30 +72,30 @@ func BuildIssueFilterClauses(query string, filter types.IssueFilter, tables Filt
 			// Descriptions are deliberately out of this branch — including them
 			// buries the named bead under its citers, past the SQL LIMIT.
 			//
-			// EVERY OPERAND HERE IS CASE-FOLDED ON BOTH SIDES, id included. `=`
-			// and LIKE are case-sensitive on both backends (Dolt's binary table
-			// collation, SQLite's PRAGMA case_sensitive_like), and an issue
-			// prefix keeps whatever case it was configured with — `bd init`
-			// derives it from the directory name, so a workspace in
-			// ~/code/MyProject mints MyProject-a3f8e9. Binding a lowercased
-			// operand against a raw id made a bead's OWN exact ID return
-			// nothing. Folding both sides is the free-text branch's own
-			// convention, and it leaves filter.IDPrefix — the clause the
-			// cross-backend conformance audit pins as case-SENSITIVE —
-			// untouched.
-			whereClauses = append(whereClauses, "(LOWER(id) = ? OR LOWER(id) LIKE ? OR LOWER(title) LIKE ? OR LOWER(external_ref) LIKE ?)")
-			args = append(args, lowerQuery, lowerQuery+"%", "%"+lowerQuery+"%", "%"+lowerQuery+"%")
+			// THE id COMPARISONS ARE RAW ON BOTH SIDES, so this clause answers
+			// the same question issueops.storeUsesIDPrefix asked to get here.
+			// That probe binds the prefix raw, and `=`/LIKE are case-sensitive
+			// on both backends (Dolt's binary table collation, SQLite's PRAGMA
+			// case_sensitive_like), so only the exact-cased spelling reaches
+			// this branch at all. Folding id here would make the gate and the
+			// clause disagree: the other spelling would fall to free text and
+			// come back diluted with every bead that merely cites the id, which
+			// is the failure this branch exists to prevent. title and
+			// external_ref stay folded — they are prose columns, not the
+			// classified token.
+			whereClauses = append(whereClauses, "(id = ? OR id LIKE ? OR LOWER(title) LIKE ? OR LOWER(external_ref) LIKE ?)")
+			args = append(args, query, query+"%", "%"+lowerQuery+"%", "%"+lowerQuery+"%")
 		} else {
 			// Free text spans every text column an issue is findable by, so
 			// nothing is reachable ONLY by being misread as an ID. External refs
 			// ("JIRA-1234") are ID-SHAPED but are never issue-id prefixes, so
-			// this branch is the only one that can ever match them. id is folded
-			// here for the same reason as the branch above: this is the predicate
-			// an ID under an unknown prefix falls back to, and it can only make
-			// good on "still found by its ID text" if the fold is on both sides.
-			whereClauses = append(whereClauses, "(LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR LOWER(id) LIKE ? OR LOWER(external_ref) LIKE ?)")
+			// this branch is the only one that can ever match them. id is
+			// compared raw here for the same reason as the branch above: it is
+			// the same column under the same case-sensitive collation, and the
+			// two branches must not disagree about what matches an id.
+			whereClauses = append(whereClauses, "(LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR id LIKE ? OR LOWER(external_ref) LIKE ?)")
 			pattern := "%" + lowerQuery + "%"
-			args = append(args, pattern, pattern, pattern, pattern)
+			args = append(args, pattern, pattern, "%"+query+"%", pattern)
 		}
 	}
 
