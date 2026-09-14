@@ -16,6 +16,11 @@ func SearchIssuesWithCountsInTx(ctx context.Context, tx *sql.Tx, query string, f
 		return nil, fmt.Errorf("search issues with counts: wisp dependency probe: %w", err)
 	}
 
+	filter, err = ResolveIDQuery(ctx, tx, query, filter, searchPlanes(filter)...)
+	if err != nil {
+		return nil, fmt.Errorf("search issues with counts: %w", err)
+	}
+
 	if filter.Ephemeral != nil && *filter.Ephemeral {
 		empty, probeErr := wispsTableEmptyOrMissingInTx(ctx, tx)
 		if probeErr != nil {
@@ -104,7 +109,6 @@ func hydrationFor(filter types.IssueFilter) sqlbuild.CountsHydration {
 }
 
 func runFilterSearchQueryInTx(ctx context.Context, tx *sql.Tx, query string, filter types.IssueFilter, tables FilterTables, includeWispReverseDeps bool) ([]*types.IssueWithCounts, error) {
-	filter = ResolveIDQuery(ctx, tx, query, filter, tables)
 	whereClauses, args, err := BuildIssueFilterClauses(query, filter, tables)
 	if err != nil {
 		return nil, err

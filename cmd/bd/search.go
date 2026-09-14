@@ -23,10 +23,13 @@ var searchCmd = &cobra.Command{
 Free-text queries search titles, descriptions, IDs and external refs.
 
 A query is treated as an ID only when it NAMES A BEAD: it has the shape of an
-issue ID (a 1-8 character prefix, one hyphen, then an identifier with no
-further hyphen) AND its prefix is one this database actually uses. Ordinary
-terms that merely look ID-shaped ("use-after-free", "race-condition",
-"rate-limit") are free text and do search descriptions.
+issue ID (a prefix, then the last hyphen, then an identifier with no further
+hyphen) AND that prefix is one this database actually uses. The database is the
+gate, not the spelling: hyphenated, underscored, long and uppercase prefixes
+("claude-config-a3f8e9", "bd_001-a3f8e9") are all ID queries where those
+prefixes exist. Ordinary terms that merely look ID-shaped ("use-after-free",
+"race-condition", "rate-limit") name no prefix any database uses, so they are
+free text and do search descriptions.
 
 An ID query matches ID, title and external ref, and deliberately not
 descriptions, so naming a bead returns that bead rather than every bead that

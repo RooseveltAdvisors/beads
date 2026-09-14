@@ -37,6 +37,11 @@ func missingOptionalWispTable(err error) bool {
 }
 
 func (r *issueSQLRepositoryImpl) searchAcrossIssuesAndWisps(ctx context.Context, query string, filter types.IssueFilter) (domain.SearchPage, error) {
+	filter, err := r.resolveIDQuery(ctx, query, filter)
+	if err != nil {
+		return domain.SearchPage{}, fmt.Errorf("search issues: %w", err)
+	}
+
 	if filter.Ephemeral != nil && *filter.Ephemeral {
 		page, err := r.searchTable(ctx, query, filter, wispsFilterTables)
 		if err != nil && !missingOptionalWispTable(err) {
@@ -75,11 +80,11 @@ func (r *issueSQLRepositoryImpl) searchUnion(ctx context.Context, query string, 
 	window := searchWindowForFilter(filter)
 	legWindow := legWindowSQL(outerOrderBy, window)
 
-	iSub, iArgs, err := r.buildUnionSubquery(ctx, query, filter, issuesFilterTables, "i", legWindow)
+	iSub, iArgs, err := r.buildUnionSubquery(query, filter, issuesFilterTables, "i", legWindow)
 	if err != nil {
 		return domain.SearchPage{}, fmt.Errorf("search union (issues): %w", err)
 	}
-	wSub, wArgs, err := r.buildUnionSubquery(ctx, query, filter, wispsFilterTables, "w", legWindow)
+	wSub, wArgs, err := r.buildUnionSubquery(query, filter, wispsFilterTables, "w", legWindow)
 	if err != nil {
 		return domain.SearchPage{}, fmt.Errorf("search union (wisps): %w", err)
 	}
@@ -135,8 +140,8 @@ func (r *issueSQLRepositoryImpl) searchUnion(ctx context.Context, query string, 
 // It is empty when the sort has no SQL ORDER BY, and that is not a missed case:
 // a LIMIT on an UNORDERED leg is the bug this exists to remove, one level
 // further down and harder to see.
-func (r *issueSQLRepositoryImpl) buildUnionSubquery(ctx context.Context, query string, filter types.IssueFilter, tables filterTables, srcTag, legWindow string) (string, []any, error) {
-	plan := buildLabelDrivenSearch(r.resolveIDQuery(ctx, query, filter, tables), tables)
+func (r *issueSQLRepositoryImpl) buildUnionSubquery(query string, filter types.IssueFilter, tables filterTables, srcTag, legWindow string) (string, []any, error) {
+	plan := buildLabelDrivenSearch(filter, tables)
 	whereClauses, args, err := buildIssueFilterClauses(query, plan.Filter, tables)
 	if err != nil {
 		return "", nil, err
@@ -228,7 +233,7 @@ func (r *issueSQLRepositoryImpl) fetchIssuesByIDs(ctx context.Context, ids []str
 }
 
 func (r *issueSQLRepositoryImpl) searchTable(ctx context.Context, query string, filter types.IssueFilter, tables filterTables) (domain.SearchPage, error) {
-	plan := buildLabelDrivenSearch(r.resolveIDQuery(ctx, query, filter, tables), tables)
+	plan := buildLabelDrivenSearch(filter, tables)
 	whereClauses, args, err := buildIssueFilterClauses(query, plan.Filter, tables)
 	if err != nil {
 		return domain.SearchPage{}, err
@@ -479,8 +484,17 @@ func buildIssueFilterClauses(query string, filter types.IssueFilter, tables filt
 // resolveIDQuery classifies the text query against THIS repository's corpus —
 // the same single, shared classifier the issueops stack runs, so the two stacks
 // cannot disagree about whether a token is an issue ID or prose.
-func (r *issueSQLRepositoryImpl) resolveIDQuery(ctx context.Context, query string, filter types.IssueFilter, tables filterTables) types.IssueFilter {
-	return issueops.ResolveIDQuery(ctx, r.runner, query, filter, tables)
+//
+// It runs ONCE per search, at the entry point, against every plane the search
+// may read, and the verdict is then carried into both union legs. Classifying
+// inside a leg would let the issues leg and the wisps leg answer differently
+// for one query and merge ID semantics with prose semantics.
+func (r *issueSQLRepositoryImpl) resolveIDQuery(ctx context.Context, query string, filter types.IssueFilter) (types.IssueFilter, error) {
+	planes := []filterTables{issuesFilterTables, wispsFilterTables}
+	if filter.SkipWisps {
+		planes = planes[:1]
+	}
+	return issueops.ResolveIDQuery(ctx, r.runner, query, filter, planes...)
 }
 
 type idSrcPage struct {

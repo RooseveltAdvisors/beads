@@ -12,28 +12,28 @@ func TestIssueIDShape(t *testing.T) {
 		wantPrefix string
 		want       bool
 	}{
-		// Issue-ID shape: 1-8 char lowercase prefix, one hyphen, alnum/dot tail.
+		// Issue-ID shape: a prefix, the LAST hyphen, an alnum/dot tail.
 		{"bd-123", "bd", true},
 		{"hq-319", "hq", true},
 		{"bd-a3f", "bd", true},
 		{"test-1", "test", true},
 		{"bd-123.1", "bd", true},   // child ID
 		{"bd-123.1.2", "bd", true}, // grandchild ID
-		{"BD-ABC123", "bd", true},  // case-folded
+		{"BD-ABC123", "BD", true},  // case preserved for a case-sensitive LIKE
 		{"rate-limit", "rate", true},
+		{"bd-wisp-abc", "bd-wisp", true},         // last hyphen separates
+		{"beads-vscode-1", "beads-vscode", true}, // hyphenated prefix
+		{"toolongprefix-1", "toolongprefix", true},
+		{"bug_fix-1", "bug_fix", true}, // underscore prefix
 
 		// Not ID-shaped
-		{"bd-wisp-abc", "", false},        // hyphen in the tail
-		{"beads-vscode-1", "", false},     // hyphen in the tail
 		{"authentication bug", "", false}, // has space
 		{"login", "", false},              // no hyphen
 		{"", "", false},                   // empty
 		{"-abc", "", false},               // starts with hyphen
 		{"abc-", "", false},               // ends with hyphen (tail empty)
 		{"fix: something", "", false},     // colon
-		{"bug_fix", "", false},            // underscore
 		{"feature/branch", "", false},     // slash
-		{"toolongprefix-1", "", false},    // prefix over 8 characters
 	}
 
 	for _, tt := range tests {

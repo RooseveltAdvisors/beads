@@ -405,43 +405,50 @@ func globToLikePattern(pattern string) string {
 }
 
 // maxIssueIDLength bounds the query length IssueIDShape will consider. A real
-// issue ID is a short prefix plus a hash; anything longer is prose.
+// issue ID is a prefix plus a short hash; anything longer is prose.
 const maxIssueIDLength = 64
 
-// maxIssueIDPrefixLength bounds the prefix half, matching the 1-8 character
-// prefix beads generates and validates elsewhere (utils.looksLikePrefixedID).
-const maxIssueIDPrefixLength = 8
-
 // IssueIDShape reports whether query has the SHAPE of a beads issue ID and, if
-// so, returns its lowercased prefix — the part before the single separating
-// hyphen.
+// so, returns the candidate prefix — everything before the LAST hyphen,
+// verbatim.
 //
-// SHAPE IS NOT CLASSIFICATION. "race-condition" and "rate-limit" have the shape
-// of an issue ID and are ordinary search terms; only a prefix that actually
-// exists in the target store makes a query an ID. This function is the cheap,
-// pure half of that test; issueops.ResolveIDQuery is the half that asks the
-// store, and it is the only thing that may set IssueFilter.IDQuery.
+// SHAPE IS NOT CLASSIFICATION, AND THE SHAPE DOES NOT GUESS THE PREFIX. A
+// workspace's issue prefix is whatever it configured: `bd init` defaults it to
+// the directory name, normalization emits underscore forms such as `bd_001`,
+// and `bd doctor` accepts up to 20 characters of [a-zA-Z][a-zA-Z0-9_-]* — so
+// `claude-config-a3f8e9`, `bd_001-a3f8e9` and `bead-me-up-a3f8e9` are all real
+// IDs. Pinning the prefix to a character class or a length here would decide
+// ID-vs-prose by guesswork and leave the store probe unreachable for every
+// workspace outside the guess. Only the tail is pinned, and only enough to
+// place the split: the store decides the rest.
 //
-// The shape is: 1-8 lowercase alphanumeric prefix, one hyphen, then a non-empty
-// identifier tail of alphanumerics and dots (dots carry hierarchical child IDs
-// such as bd-a3f8e9.1.2). The tail is HYPHEN-FREE, so a multi-hyphen token is
-// prose no matter what the store holds.
+// The shape is therefore: a non-empty prefix of [A-Za-z0-9_-], the last hyphen,
+// then a non-empty identifier tail of alphanumerics and dots (dots carry
+// hierarchical child IDs such as bd-a3f8e9.1.2). The tail is HYPHEN-FREE, which
+// is what makes the last hyphen the separator. "race-condition" and
+// "use-after-free" pass this shape and are still prose — issueops.ResolveIDQuery
+// asks the store whether any bead carries a "race" or "use-after" prefix, and
+// it is the only thing that may set IssueFilter.IDQuery.
+//
+// The prefix is returned VERBATIM, never case-folded: LIKE is case-sensitive on
+// both backends, so a lowercased prefix would guarantee a probe miss for every
+// uppercase prefix.
 func IssueIDShape(query string) (string, bool) {
 	if query == "" || len(query) > maxIssueIDLength {
 		return "", false
 	}
-	lower := strings.ToLower(query)
-	prefix, tail, found := strings.Cut(lower, "-")
-	if !found || prefix == "" || tail == "" || len(prefix) > maxIssueIDPrefixLength {
+	idx := strings.LastIndex(query, "-")
+	if idx <= 0 || idx == len(query)-1 {
 		return "", false
 	}
+	prefix, tail := query[:idx], query[idx+1:]
 	for _, c := range prefix {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z')) {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c == '-') {
 			return "", false
 		}
 	}
 	for _, c := range tail {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || c == '.') {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.') {
 			return "", false
 		}
 	}

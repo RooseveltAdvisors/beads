@@ -660,10 +660,36 @@ which dumps the entire release history.)
   space-free, so ordinary terms — `use-after-free`, `race-condition`,
   `rate-limit` — took the ID predicate and never reached descriptions. A query
   is now an ID only when it NAMES A BEAD: it has the shape of an issue ID (a
-  1-8 character prefix, one hyphen, then a hyphen-free identifier) AND its
-  prefix is one the target database actually uses, checked against the stored
-  issues at query time. Everything else is free text and does search
-  descriptions.
+  prefix, then the last hyphen, then a hyphen-free identifier) AND that prefix
+  is one the target database actually uses, checked against the stored issues
+  at query time. Everything else is free text and does search descriptions.
+
+  The database is the gate, not the spelling of the prefix. `bd init` defaults
+  the issue prefix to the directory name, so hyphenated, underscored, long and
+  uppercase prefixes are ordinary — `claude-config-a3f8e9` and `bd_001-a3f8e9`
+  are ID queries in the workspaces that use those prefixes, and prose in the
+  ones that do not.
+
+  This replaces, rather than extends, the empty-result free-text retry that
+  shipped with the change above: that retry fired only when a query matched
+  nothing at all, so a single title hit still hid every description-only
+  match. It is gone, and nothing stands in its place — the classification is
+  the whole mechanism.
+
+  The classification is settled ONCE per search and carried into every leg, so
+  the issues plane and the wisps plane can never answer differently for one
+  query. A probe that fails for any reason other than "no such prefix" now
+  fails the search instead of silently downgrading an ID lookup to prose.
+
+  Free text now also spans `external_ref`, which was previously reachable only
+  as a side effect of the ID misclassification.
+
+  BEHAVIOUR CHANGE, INTENDED: an ID whose prefix the database does not use —
+  including a multi-hyphen ID such as a `bd-wisp-…` wisp ID — is
+  indistinguishable from prose and is searched as free text. The id column is
+  part of the free-text predicate, so such an ID is still found by its ID text,
+  alongside any bead that cites it.
+
 - **Server-mode issue mutations no longer revert concurrent writers' committed
   rows** ([#5740](https://github.com/gastownhall/beads/pull/5740)). The
   issue-mutation path ran `DOLT_ADD`/`DOLT_COMMIT` inside its still-open SQL
@@ -782,21 +808,6 @@ which dumps the entire release history.)
   wisp is now a `bd purge` candidate**, so the first purge after upgrade may
   clear considerably more than usual. NoHistory beads (wisps plane, no
   `wisp_type`) stay durable-tier, unchanged.
-
-  This replaces, rather than extends, the empty-result free-text retry that
-  shipped with the change above: that retry fired only when a query matched
-  nothing at all, so a single title hit still hid every description-only
-  match. It is gone, and nothing stands in its place — the classification is
-  the whole mechanism.
-
-  Free text now also spans `external_ref`, which was previously reachable only
-  as a side effect of the ID misclassification.
-
-  BEHAVIOUR CHANGE, INTENDED: an ID whose prefix the database does not use —
-  including a multi-hyphen ID such as a `bd-wisp-…` wisp ID — is
-  indistinguishable from prose and is searched as free text. The id column is
-  part of the free-text predicate, so such an ID is still found by its ID text,
-  alongside any bead that cites it.
 
 - **`bd prime` says when it could NOT read the memory plane**
   ([#5877](https://github.com/gastownhall/beads/issues/5877)). A broken or

@@ -1969,6 +1969,112 @@ func TestSearchIssues_IDQueryNotDilutedByCitations(t *testing.T) {
 	}
 }
 
+// TestSearchIssues_HyphenatedPrefixIsStillAnIDQuery pins the same contract for
+// a workspace whose issue prefix contains a hyphen — which is the common case,
+// since `bd init` defaults the prefix to the directory name. The prefix is
+// everything before the LAST hyphen, so the store probe sees "claude-config"
+// and the lookup takes the undiluted ID predicate; deriving it from the FIRST
+// hyphen instead yields "claude" with a hyphenated tail, which no store can
+// ever confirm, and the named bead is buried under its higher-priority citers.
+func TestSearchIssues_HyphenatedPrefixIsStillAnIDQuery(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx, cancel := testContext(t)
+	defer cancel()
+
+	const hubID = "claude-config-5q4x7"
+
+	hub := &types.Issue{
+		ID:          hubID,
+		Title:       "Coordination hub",
+		Description: "Tracks the rollout.",
+		Status:      types.StatusOpen,
+		Priority:    2,
+		IssueType:   types.TypeEpic,
+	}
+	if err := store.CreateIssue(ctx, hub, "tester"); err != nil {
+		t.Fatalf("failed to create hub: %v", err)
+	}
+
+	const citers = 5
+	for i := 0; i < citers; i++ {
+		citer := &types.Issue{
+			ID:          fmt.Sprintf("claude-config-cite%d", i),
+			Title:       fmt.Sprintf("Downstream work %d", i),
+			Description: "Blocked by " + hubID + " until the rollout lands.",
+			Status:      types.StatusOpen,
+			Priority:    0,
+			IssueType:   types.TypeTask,
+		}
+		if err := store.CreateIssue(ctx, citer, "tester"); err != nil {
+			t.Fatalf("failed to create citer %d: %v", i, err)
+		}
+	}
+
+	results, err := store.SearchIssues(ctx, hubID, types.IssueFilter{})
+	if err != nil {
+		t.Fatalf("SearchIssues(%q): %v", hubID, err)
+	}
+	if len(results) != 1 || results[0].ID != hubID {
+		got := make([]string, len(results))
+		for i, r := range results {
+			got[i] = r.ID
+		}
+		t.Fatalf("SearchIssues(%q) = %v, want [%s]", hubID, got, hubID)
+	}
+}
+
+// TestSearchIssues_UnknownHyphenatedPrefixSearchesDescriptions is the other
+// half: a token this store has no prefix for is prose, whatever its shape, and
+// prose reaches descriptions. "use-after" is not a prefix any bead here carries,
+// so the probe declines and "use-after-free" searches bodies.
+func TestSearchIssues_UnknownHyphenatedPrefixSearchesDescriptions(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx, cancel := testContext(t)
+	defer cancel()
+
+	descOnly := &types.Issue{
+		ID:          "uhp-desc1",
+		Title:       "Audit the allocator",
+		Description: "Guard against a use-after-free in the pool reclaim path.",
+		Status:      types.StatusOpen,
+		Priority:    2,
+		IssueType:   types.TypeTask,
+	}
+	if err := store.CreateIssue(ctx, descOnly, "tester"); err != nil {
+		t.Fatalf("failed to create description-only bead: %v", err)
+	}
+	titleHit := &types.Issue{
+		ID:        "uhp-title1",
+		Title:     "Fix the use-after-free crash",
+		Status:    types.StatusOpen,
+		Priority:  1,
+		IssueType: types.TypeBug,
+	}
+	if err := store.CreateIssue(ctx, titleHit, "tester"); err != nil {
+		t.Fatalf("failed to create title-match bead: %v", err)
+	}
+
+	results, err := store.SearchIssues(ctx, "use-after-free", types.IssueFilter{})
+	if err != nil {
+		t.Fatalf("SearchIssues(use-after-free): %v", err)
+	}
+	found := map[string]bool{}
+	for _, r := range results {
+		found[r.ID] = true
+	}
+	if !found[descOnly.ID] || !found[titleHit.ID] {
+		got := make([]string, len(results))
+		for i, r := range results {
+			got[i] = r.ID
+		}
+		t.Fatalf("SearchIssues(use-after-free) = %v, want both %s and %s", got, descOnly.ID, titleHit.ID)
+	}
+}
+
 // TestSearchIssues_ByExternalRef verifies two things:
 //  1. A free-text query like "BE-1521" (which looksLikeIssueID returns true for)
 //     matches an issue whose external_ref contains that string.

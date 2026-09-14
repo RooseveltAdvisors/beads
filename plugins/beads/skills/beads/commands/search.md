@@ -26,7 +26,7 @@ The search command finds issues where your query appears in **any** of:
 
 Unlike `bd list`, which requires you to specify which field to search, `bd search` automatically searches all text fields, making it faster and more intuitive for exploratory searches.
 
-**ID queries vs free text.** A query is treated as an ID only when it names a bead: it has the shape of an issue ID (1-8 character prefix, one hyphen, then a hyphen-free identifier) AND its prefix is one this database actually uses. An ID query matches ID, title and external ref — not descriptions — so naming a bead returns that bead rather than every bead citing it. Ordinary hyphenated terms (`use-after-free`, `race-condition`, `rate-limit`) are free text and do search descriptions. An ID whose prefix this database does not use is indistinguishable from prose and is searched as free text, which still matches it by its ID text.
+**ID queries vs free text.** A query is treated as an ID only when it names a bead: it has the shape of an issue ID (a prefix, then the last hyphen, then a hyphen-free identifier) AND that prefix is one this database actually uses. The database is the gate, not the spelling — hyphenated, underscored, long and uppercase prefixes (`claude-config-a3f8e9`, `bd_001-a3f8e9`) are ID queries wherever those prefixes exist. An ID query matches ID, title and external ref — not descriptions — so naming a bead returns that bead rather than every bead citing it. Ordinary hyphenated terms (`use-after-free`, `race-condition`, `rate-limit`) are free text and do search descriptions. An ID whose prefix this database does not use is indistinguishable from prose and is searched as free text, which still matches it by its ID text.
 
 ## Filters
 

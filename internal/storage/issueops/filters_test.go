@@ -14,6 +14,11 @@ import (
 // never routes a query down the ID predicate — ResolveIDQuery also requires the
 // prefix to exist in the target store — so ID-shaped ordinary words such as
 // "race-condition" are true here and still searched as free text.
+//
+// The prefix is everything before the LAST hyphen, returned verbatim, because
+// real beads prefixes are hyphenated ("bead-me-up"), underscored ("bd_001"),
+// longer than eight characters ("claude-config") and sometimes uppercase.
+// Rejecting those here would put them out of the store probe's reach entirely.
 func TestIssueIDShape(t *testing.T) {
 	t.Parallel()
 
@@ -27,19 +32,24 @@ func TestIssueIDShape(t *testing.T) {
 		{name: "dotted child ID", query: "bd-abc123.1", wantPrefix: "bd", want: true},
 		{name: "numeric suffix only", query: "proj-42", wantPrefix: "proj", want: true},
 		{name: "single char prefix", query: "a-1", wantPrefix: "a", want: true},
-		{name: "uppercase letters fold", query: "BD-ABC123", wantPrefix: "bd", want: true},
+		{name: "uppercase prefix is preserved", query: "BD-ABC123", wantPrefix: "BD", want: true},
+		{name: "hyphenated prefix", query: "bead-me-up-a3f8e9", wantPrefix: "bead-me-up", want: true},
+		{name: "directory-name prefix", query: "claude-config-a3f8e9", wantPrefix: "claude-config", want: true},
+		{name: "underscore prefix", query: "bd_001-a3f8e9", wantPrefix: "bd_001", want: true},
+		{name: "prefix over eight characters", query: "toolongprefix-1", wantPrefix: "toolongprefix", want: true},
+		{name: "wisp ID", query: "bd-wisp-xyz", wantPrefix: "bd-wisp", want: true},
 		{name: "ID-shaped ordinary word", query: "race-condition", wantPrefix: "race", want: true},
-		{name: "wisp ID has a hyphenated tail", query: "bd-wisp-xyz", want: false},
-		{name: "multiple dashes", query: "a-b-c", want: false},
+		{name: "ID-shaped ordinary phrase", query: "use-after-free", wantPrefix: "use-after", want: true},
 		{name: "plain word", query: "hello", want: false},
 		{name: "has spaces", query: "bd abc", want: false},
 		{name: "empty string", query: "", want: false},
 		{name: "just a dash", query: "-", want: false},
 		{name: "leading dash", query: "-abc", want: false},
 		{name: "trailing dash", query: "abc-", want: false},
+		{name: "hyphen in the tail is the separator", query: "a-b-c", wantPrefix: "a-b", want: true},
 		{name: "special characters", query: "bd-abc@123", want: false},
+		{name: "dot in the prefix", query: "bd.x-abc", want: false},
 		{name: "unicode characters", query: "bd-café", want: false},
-		{name: "prefix over eight characters", query: "toolongprefix-1", want: false},
 		{name: "over the length bound", query: strings.Repeat("a", 8) + "-" + strings.Repeat("b", 60), want: false},
 	}
 

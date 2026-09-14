@@ -582,7 +582,10 @@ func (t *doltTransaction) SearchIssues(ctx context.Context, query string, filter
 		tables = issueops.WispsFilterTables
 	}
 
-	filter = issueops.ResolveIDQuery(ctx, t.txFor(tables.Main), query, filter, tables)
+	filter, err := issueops.ResolveIDQuery(ctx, t.txFor(tables.Main), query, filter, tables)
+	if err != nil {
+		return nil, err
+	}
 	whereClauses, args, err := issueops.BuildIssueFilterClauses(query, filter, tables)
 	if err != nil {
 		return nil, err
