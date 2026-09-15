@@ -33,6 +33,7 @@ Examples:
   bd notify pending
   bd notify resolve --seat wiseman
   bd notify drain --seat wiseman
+  bd notify drain                 # current actor only (--actor / BEADS_ACTOR)
   bd notify drain --all
   bd notify drain --seat wiseman --print
   bd notify drain --seat wiseman --exec 'echo "$BD_NOTIFY_ID"'
@@ -45,6 +46,16 @@ var notifyPendingCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		seat, _ := cmd.Flags().GetString("seat")
+		if strings.TrimSpace(seat) == "" {
+			seat = currentNotifyActor()
+			if isUnassignedNotifySeat(seat) {
+				if jsonOutput {
+					return printJSON([]notify.Record{})
+				}
+				fmt.Printf("%s no pending notifies\n", ui.RenderAccent("*"))
+				return nil
+			}
+		}
 		o, err := openNotifyOutbox()
 		if err != nil {
 			return err
@@ -126,7 +137,7 @@ var notifyResolveCmd = &cobra.Command{
 var notifyDrainCmd = &cobra.Command{
 	Use:   "drain",
 	Short: "Deliver pending rows for a seat via herdr (or --exec)",
-	Long: `Drain pending notify rows for one seat (or --all seats with pending work).
+	Long: `Drain pending notify rows for one seat, the current actor, or --all assigned seats.
 
 Default transport is herdr:
   1. Discover live agents across running herdr sessions
@@ -140,7 +151,9 @@ Flags:
   --print   print rows only (no herdr, still acks unless --no-ack)
   --exec    override transport with a shell command (BD_NOTIFY_* env)
   --no-ack  leave rows pending after delivery attempt
-  --all     drain every seat that has pending rows`,
+  --all     drain every assigned seat that has pending rows
+Unassigned beads are never notified. Without --seat/--all, only the current
+actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		seat, _ := cmd.Flags().GetString("seat")
@@ -150,8 +163,14 @@ Flags:
 		printOnly, _ := cmd.Flags().GetBool("print")
 		noAck, _ := cmd.Flags().GetBool("no-ack")
 
-		if !all && strings.TrimSpace(seat) == "" {
-			return HandleError("notify drain requires --seat or --all")
+		explicitSeat := strings.TrimSpace(seat) != ""
+		actor := currentNotifyActor()
+		if !all && !explicitSeat {
+			if isUnassignedNotifySeat(actor) {
+				return HandleError("notify drain requires --seat, --all, or a current actor (--actor / BEADS_ACTOR)")
+			}
+			seat = actor
+			explicitSeat = true
 		}
 
 		o, err := openNotifyOutbox()
@@ -193,6 +212,9 @@ Flags:
 		var results []seatResult
 
 		for _, s := range seats {
+			if !shouldDeliverNotifySeat(s, actor, all, explicitSeat && !all) {
+				continue
+			}
 			pending, err := o.Pending(s)
 			if err != nil {
 				return HandleError("%v", err)
@@ -371,6 +393,9 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 	}
 	var n int
 	for _, seat := range seats {
+		if isUnassignedNotifySeat(seat.Assignee) {
+			continue
+		}
 		for _, id := range seat.IDs {
 			kind := notify.KindDue
 			if escalated[id] {
@@ -447,6 +472,9 @@ func enqueueStaleClaimNotifies(skipIDs []string) {
 			continue
 		}
 		title := sc.Title
+		if isUnassignedNotifySeat(sc.Assignee) {
+			continue
+		}
 		if title == "" {
 			title = sc.Reason
 		} else {
