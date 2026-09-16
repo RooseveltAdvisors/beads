@@ -614,13 +614,18 @@ func RunCommenterDeletesComment(t *testing.T, ctx context.Context, fixture Comme
 		t.Fatalf("DeleteComment result = %#v, want deleted comment %q", deleted.Comment, added.Comment.ID)
 	}
 	assertCommenterRowCount(t, ctx, fixture, "comments", anchor, 0)
-	var actor, audit string
+	var actor string
+	var audit sql.NullString
 	if err := fixture.QueryScalar(ctx, `SELECT actor, comment FROM events
-		WHERE issue_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`, []any{anchor}, &actor, &audit); err != nil {
+		WHERE issue_id = ? AND event_type = ? ORDER BY created_at DESC, id DESC LIMIT 1`,
+		[]any{anchor, string(types.EventCommented)}, &actor, &audit); err != nil {
 		t.Fatalf("read delete audit event: %v", err)
 	}
-	if actor != "deleter" || audit != "Deleted comment "+added.Comment.ID {
-		t.Errorf("delete audit = actor %q comment %q, want actor %q and comment %q", actor, audit, "deleter", "Deleted comment "+added.Comment.ID)
+	if !audit.Valid {
+		t.Fatalf("delete audit comment is NULL; want %q", "Deleted comment "+added.Comment.ID)
+	}
+	if actor != "deleter" || audit.String != "Deleted comment "+added.Comment.ID {
+		t.Errorf("delete audit = actor %q comment %q, want actor %q and comment %q", actor, audit.String, "deleter", "Deleted comment "+added.Comment.ID)
 	}
 	if _, err := fixture.Commenter.DeleteComment(ctx, publicops.DeleteCommentRequest{
 		Actor: "deleter", IssueID: anchor, CommentID: added.Comment.ID,

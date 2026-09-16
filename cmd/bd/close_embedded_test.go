@@ -23,12 +23,24 @@ import (
 // Retries on flock contention.
 func bdClose(t *testing.T, bd, dir string, args ...string) string {
 	t.Helper()
+	args = ensureCloseReason(args)
 	fullArgs := append([]string{"close"}, args...)
 	out, err := bdRunWithFlockRetry(t, bd, dir, fullArgs...)
 	if err != nil {
 		t.Fatalf("bd close %s failed: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return string(out)
+}
+
+// ensureCloseReason satisfies comment.progress_required (house default ON)
+// for assigned fixtures. --force only bypasses close-authority, not progress.
+func ensureCloseReason(args []string) []string {
+	for _, a := range args {
+		if a == "--reason" || strings.HasPrefix(a, "--reason=") {
+			return args
+		}
+	}
+	return append(args, "--reason", "test close")
 }
 
 // bdCloseFail runs "bd close" expecting failure.
@@ -171,7 +183,7 @@ func TestEmbeddedClose(t *testing.T) {
 		child := bdCreate(t, bd, dir, "Epic child force", "--type", "task")
 		bdDepAdd(t, bd, dir, child.ID, epic.ID, "--type", "parent-child")
 
-		cmd := exec.Command(bd, "close", epic.ID, "--force")
+		cmd := exec.Command(bd, "close", epic.ID, "--force", "--reason", "test close")
 		cmd.Dir = dir
 		cmd.Env = bdEnv(dir)
 		out, err := cmd.CombinedOutput()

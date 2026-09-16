@@ -4,6 +4,7 @@
       "created_at": "<TS>",
       "created_by": "protocol-test",
       "description": "updated corpus root",
+      "due_source": "explicit",
       "id": "corpus-root",
       "issue_type": "feature",
       "labels": [

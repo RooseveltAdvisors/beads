@@ -2,6 +2,7 @@
   "created_at": "<TS>",
   "created_by": "protocol-test",
   "description": "deterministic corpus dependency",
+  "due_source": "explicit",
   "id": "corpus-dep",
   "issue_type": "task",
   "owner": "test@protocol.test",

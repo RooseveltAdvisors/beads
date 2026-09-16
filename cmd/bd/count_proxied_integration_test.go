@@ -24,7 +24,7 @@ func TestProxiedServerCount(t *testing.T) {
 	closedIssue := bdProxiedCreate(t, bd, p.dir, "Count closed one", "--type", "task", "--priority", "2", "--assignee", "alice")
 	// --force: closedIssue is assigned to alice, and the close-authority guard
 	// refuses a cross-actor close (test actor != alice) without it.
-	if out, err := bdProxiedRun(t, bd, p.dir, "close", closedIssue.ID, "--force"); err != nil {
+	if out, err := bdProxiedRun(t, bd, p.dir, "close", closedIssue.ID, "--force", "--reason", "test close"); err != nil {
 		t.Fatalf("close %s: %v\n%s", closedIssue.ID, err, out)
 	}
 	bdProxiedCreate(t, bd, p.dir, "Count labeled", "--type", "task", "--label", "frontend", "--label", "urgent")
@@ -457,7 +457,7 @@ func TestProxiedServerCountIncludeInfra(t *testing.T) {
 	bdProxiedCreate(t, bd, p.dir, "Infra durable task two", "--type", "task")
 	bdProxiedCreate(t, bd, p.dir, "Infra durable bug", "--type", "bug")
 	closedIssue := bdProxiedCreate(t, bd, p.dir, "Infra durable task closed", "--type", "task")
-	if out, err := bdProxiedRun(t, bd, p.dir, "close", closedIssue.ID, "--force"); err != nil {
+	if out, err := bdProxiedRun(t, bd, p.dir, "close", closedIssue.ID, "--force", "--reason", "test close"); err != nil {
 		t.Fatalf("close %s: %v\n%s", closedIssue.ID, err, out)
 	}
 	// Wisps tier: no_history beads are durable work that list --include-infra
