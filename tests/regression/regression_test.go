@@ -537,6 +537,8 @@ var versionSpecificFields = []string{
 	"_type", "deleted_at", "deleted_by", "delete_reason", "original_type",
 	"comment_count", "dependency_count", "dependent_count",
 	"epic_total_children", "epic_closed_children", "epic_closeable",
+	// Additive vs v0.49.6: due provenance on create/show JSON.
+	"due_source",
 }
 
 // normalizeJSONL parses JSONL, normalizes each issue, applies ID canonicalization,
