@@ -3,7 +3,8 @@
 // Due/repeat firing is beads time. This package is beads delivery: each fired
 // bead becomes a durable seat-addressed row under .beads/notify/, independent
 // of firstmate, herdr, or any LLM harness. Seat drains (bd notify drain) pull
-// pending rows and hand them to a transport plugin; transports are not the bus.
+// pending rows and deliver only to an exact pin in pins.json; transports are
+// not the bus. No pin or a dead pin holds the row and marks escalation.
 package notify
 
 import (
@@ -33,15 +34,15 @@ const (
 type Kind string
 
 const (
-	KindDue        Kind = "due"
-	KindEscalate   Kind = "escalate"
-	KindDefer      Kind = "defer"
-	KindManual     Kind = "manual"
+	KindDue      Kind = "due"
+	KindEscalate Kind = "escalate"
+	KindDefer    Kind = "defer"
+	KindManual   Kind = "manual"
 	// KindStaleClaim is assigned in_progress (or open claimed) work that has
 	// gone quiet without a close. Wakes must teach finish-line bd commands.
 	KindStaleClaim Kind = "stale-claim"
 	// KindProgress is missing comment.progress trail while still open.
-	KindProgress   Kind = "progress"
+	KindProgress Kind = "progress"
 )
 
 // UnassignedSeat is the routing key when a bead has no assignee.
@@ -321,4 +322,3 @@ func (o *Outbox) HasRecent(issueID string, kind Kind, since time.Time) (bool, er
 	}
 	return false, nil
 }
-

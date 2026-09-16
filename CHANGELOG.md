@@ -276,6 +276,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Seat notify drain is exact-pin only, never a fuzzy herdr lookalike.** A
+  due ping for an assignee used to score live herdr panes (session name, title
+  token, cwd, focused/idle) and prompt the winner. That delivered a
+  firstmate ping to a stale `π - firstmate` pane instead of the pinned
+  primary. Drain now reads `.beads/notify/pins.json` (herdr session + pane
+  id, or agent session id): pinned target live → deliver there; no pin or a
+  dead pin → leave the row queued and mark the seat in
+  `.beads/notify/holds.json` so the parent escalates. `bd notify resolve`
+  remains a labeled human diagnostic and is not used for delivery.
+
 - **Free-text `bd search` now matches description text.** A text query only
   matched titles (plus the ID), so a bead whose title was terse and whose
   description carried the keyword was invisible to `bd search "<keyword>"`

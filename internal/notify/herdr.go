@@ -16,15 +16,16 @@ import (
 // Instance is one live herdr-hosted agent of any harness (pi, claude, codex, …).
 // Herdr detects the harness; beads only needs session + pane to deliver.
 type Instance struct {
-	Session     string `json:"session"`
-	PaneID      string `json:"pane_id"`
-	Harness     string `json:"harness"` // herdr "agent" field
-	Status      string `json:"status"`
-	Title       string `json:"title"`
-	Cwd         string `json:"cwd"`
-	Focused     bool   `json:"focused"`
-	Score       int    `json:"score,omitempty"`
-	MatchReason string `json:"match_reason,omitempty"`
+	Session        string `json:"session"`
+	PaneID         string `json:"pane_id"`
+	Harness        string `json:"harness"` // herdr "agent" field
+	Status         string `json:"status"`
+	Title          string `json:"title"`
+	Cwd            string `json:"cwd"`
+	Focused        bool   `json:"focused"`
+	AgentSessionID string `json:"agent_session_id,omitempty"`
+	Score          int    `json:"score,omitempty"`
+	MatchReason    string `json:"match_reason,omitempty"`
 }
 
 // HerdrDiscoverer finds live agent instances via herdr session/agent list.
@@ -130,6 +131,9 @@ func (h HerdrDiscoverer) listSession(session string) ([]Instance, error) {
 				PaneID                string `json:"pane_id"`
 				TerminalTitle         string `json:"terminal_title"`
 				TerminalTitleStripped string `json:"terminal_title_stripped"`
+				AgentSession          struct {
+					Value string `json:"value"`
+				} `json:"agent_session"`
 			} `json:"agents"`
 		} `json:"result"`
 	}
@@ -146,19 +150,21 @@ func (h HerdrDiscoverer) listSession(session string) ([]Instance, error) {
 			title = a.TerminalTitle
 		}
 		outI = append(outI, Instance{
-			Session: session,
-			PaneID:  a.PaneID,
-			Harness: a.Agent,
-			Status:  a.AgentStatus,
-			Title:   title,
-			Cwd:     a.Cwd,
-			Focused: a.Focused,
+			Session:        session,
+			PaneID:         a.PaneID,
+			Harness:        a.Agent,
+			Status:         a.AgentStatus,
+			Title:          title,
+			Cwd:            a.Cwd,
+			Focused:        a.Focused,
+			AgentSessionID: a.AgentSession.Value,
 		})
 	}
 	return outI, nil
 }
 
-// ResolveSeat picks the best live instance for an assignee seat.
+// ResolveSeat is a human diagnostic: fuzzy score of seat vs live instances.
+// It is NOT used for delivery. Drain uses DecideDelivery against pins.json.
 //
 // Scoring (higher wins):
 //

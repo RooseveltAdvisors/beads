@@ -23,11 +23,11 @@ type closeProxiedInput struct {
 	force          bool
 	forceNoComment bool
 	continueOn     bool
-	noAuto      bool
-	suggestNext bool
-	claimNext   bool
-	session     string
-	jsonOut     bool
+	noAuto         bool
+	suggestNext    bool
+	claimNext      bool
+	session        string
+	jsonOut        bool
 }
 
 // closeProxiedPreflight is the CLI's own close policy, decided before the

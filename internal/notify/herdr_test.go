@@ -3,6 +3,7 @@ package notify
 import "testing"
 
 func TestResolveSeatPrefersSessionName(t *testing.T) {
+	// Diagnostic-only: drain must not call ResolveSeat.
 	instances := []Instance{
 		{Session: "firstmate", PaneID: "w1:p9", Harness: "pi", Status: "idle", Title: "π - firstmate", Focused: true},
 		{Session: "wiseman", PaneID: "w1:p1", Harness: "pi", Status: "working", Title: "π - wiseman", Focused: true},

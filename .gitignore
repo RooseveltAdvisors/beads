@@ -131,6 +131,8 @@ bd_test
 .beads/*
 !.beads/formulas/
 !.beads/formulas/**
+!.beads/notify/
+!.beads/notify/pins.json
 .opencode/
 
 # Beads / Dolt files (added by bd init)

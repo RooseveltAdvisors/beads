@@ -5,10 +5,10 @@ import "testing"
 func TestShouldDeliverNotifySeat(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name         string
-		seat, actor  string
+		name          string
+		seat, actor   string
 		all, explicit bool
-		want         bool
+		want          bool
 	}{
 		{name: "unassigned skipped", seat: "unassigned", actor: "alice", want: false},
 		{name: "empty seat skipped", seat: "", actor: "alice", want: false},
