@@ -51,8 +51,19 @@ func bdProxiedEnv(dir string) []string {
 	)
 }
 
+// injectCloseReason satisfies comment.progress_required for assigned fixtures.
+func injectCloseReason(args []string) []string {
+	for i, a := range args {
+		if a == "close" {
+			return append(append([]string{}, args[:i+1]...), ensureCloseReason(args[i+1:])...)
+		}
+	}
+	return args
+}
+
 func bdProxiedRun(t *testing.T, bd, dir string, args ...string) ([]byte, error) {
 	t.Helper()
+	args = injectCloseReason(args)
 	cmd := exec.Command(bd, args...)
 	cmd.Dir = dir
 	cmd.Env = bdProxiedEnv(dir)

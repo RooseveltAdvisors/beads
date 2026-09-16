@@ -189,7 +189,7 @@ func TestProxiedServerServeRelease(t *testing.T) {
 		if status, body := sp.claim(t, issue.ID, "worker-a"); status != http.StatusOK {
 			t.Fatalf("claim: status = %d, want 200: %v", status, body)
 		}
-		if status, body := sp.closeIssue(t, issue.ID, `{"actor":"worker-a","force":true}`); status != http.StatusOK {
+		if status, body := sp.closeIssue(t, issue.ID, `{"actor":"worker-a","force":true,"reason":"test close"}`); status != http.StatusOK {
 			t.Fatalf("close: status = %d, want 200: %v", status, body)
 		}
 

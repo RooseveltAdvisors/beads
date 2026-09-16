@@ -186,8 +186,12 @@ func TestProxiedServerList(t *testing.T) {
 	})
 
 	t.Run("overdue", func(t *testing.T) {
+		// Ready reads above run the due sweep, which pushes an arrived
+		// deadline forward (issueops.DueMissGrace). Seed a fresh overdue.
+		pastDue := time.Now().Add(-48 * time.Hour).Format("2006-01-02")
+		overdue := bdProxiedCreate(t, bd, p.dir, "Still overdue", "--type", "task", "--priority", "1", "--due", pastDue)
 		issues := bdProxiedListJSON(t, bd, p, "--overdue")
-		if !containsID(issues, seed.overdueTask) {
+		if !containsID(issues, overdue.ID) {
 			t.Error("overdue task should appear with --overdue")
 		}
 		for _, issue := range issues {
@@ -334,19 +338,22 @@ func TestProxiedServerList(t *testing.T) {
 	})
 
 	t.Run("due_after_excludes_overdue", func(t *testing.T) {
-		// overdueTask has due 48h in the past; --due-after now must exclude it.
+		pastDue := time.Now().Add(-48 * time.Hour).Format("2006-01-02")
+		overdue := bdProxiedCreate(t, bd, p.dir, "Due-after overdue", "--type", "task", "--priority", "1", "--due", pastDue)
 		issues := bdProxiedListJSON(t, bd, p, "--due-after", "+1h", "--all")
-		if containsID(issues, seed.overdueTask) {
-			t.Errorf("overdueTask %s should not appear with --due-after +1h, got %v",
-				seed.overdueTask, listIssueIDs(issues))
+		if containsID(issues, overdue.ID) {
+			t.Errorf("overdue %s should not appear with --due-after +1h, got %v",
+				overdue.ID, listIssueIDs(issues))
 		}
 	})
 
 	t.Run("due_before_includes_overdue", func(t *testing.T) {
+		pastDue := time.Now().Add(-48 * time.Hour).Format("2006-01-02")
+		overdue := bdProxiedCreate(t, bd, p.dir, "Due-before overdue", "--type", "task", "--priority", "1", "--due", pastDue)
 		issues := bdProxiedListJSON(t, bd, p, "--due-before", "+1h", "--all")
-		if !containsID(issues, seed.overdueTask) {
-			t.Errorf("overdueTask %s should appear with --due-before +1h, got %v",
-				seed.overdueTask, listIssueIDs(issues))
+		if !containsID(issues, overdue.ID) {
+			t.Errorf("overdue %s should appear with --due-before +1h, got %v",
+				overdue.ID, listIssueIDs(issues))
 		}
 	})
 
