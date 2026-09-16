@@ -174,6 +174,9 @@ var commentsAddCmd = &cobra.Command{
 	Short: "Add a comment to an issue",
 	Long: `Add a comment to an issue.
 
+A comment on an assigned bead pings that assignee's pinned pane
+(.beads/notify/pins.json). Self-comments and unassigned beads do not ping.
+
 Examples:
   # Add a comment
   bd comments add bd-123 "Working on this now"
@@ -244,6 +247,7 @@ Examples:
 			return HandleErrorRespectJSON("failed to commit: %v", err)
 		}
 
+		pingCommentAssignee(result.Issue.Assignee, issueID, result.Issue.Title, author, commentText)
 		if jsonOutput {
 			return outputJSON(comment)
 		}

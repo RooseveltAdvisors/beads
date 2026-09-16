@@ -75,6 +75,7 @@ func runCommentProxiedServer(ctx context.Context, id, author, text string) error
 		return HandleErrorRespectJSON("%v", err)
 	}
 
+	pingCommentAssignee(issue.Assignee, issue.ID, issue.Title, author, text)
 	SetLastTouchedID(issue.ID)
 
 	if jsonOutput {
@@ -90,6 +91,7 @@ func runCommentsAddProxiedServer(ctx context.Context, issueID, author, text stri
 		return HandleErrorRespectJSON("%v", err)
 	}
 
+	pingCommentAssignee(issue.Assignee, issue.ID, issue.Title, author, text)
 	if jsonOutput {
 		return outputJSON(comment)
 	}

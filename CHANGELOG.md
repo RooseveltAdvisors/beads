@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`bd comment` pings the assignee's pinned pane.** A comment on an assigned
+  bead enqueues a `comment` notify row for that assignee and drains it through
+  the same exact-pin path as due wakes (`.beads/notify/pins.json`). Self-comments
+  and unassigned beads do not ping. A missing or dead pin leaves the row queued
+  and marks the seat in `holds.json` for parent escalation. MCP `comment` goes
+  through `bd comment`, so it inherits the ping; HTTP `POST /v0/beads/issues/{id}/comments`
+  does not yet.
+
 - **`bd due sweep` is the seam an external clock stands on, and due beads now
   escalate.** Beads fire lazily on ready-work reads, which is a latency floor
   rather than a clock: a workspace nobody reads never fires anything. The new
