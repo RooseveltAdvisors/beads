@@ -344,6 +344,15 @@ Do not only update chat or state/*.status - the bead thread is the handoff.
   bd comment %s "what you found / did"
   bd close %s --reason "..."   # only if the work is truly finished
 `, id, id, id)
+	case KindComment:
+		return fmt.Sprintf(`Someone commented on a bead assigned to you. Read it, act, stamp progress.
+
+  bd comments %s
+  bd comment %s "what you did next"
+When the work is finished:
+  bd close %s --reason "short real reason"
+Do not only reply in chat. Do not ask the captain.
+`, id, id, id)
 	default:
 		// due / defer / manual - still teach the finish line without drowning the body.
 		return fmt.Sprintf(`When the work is finished, close it in beads (harness-agnostic):

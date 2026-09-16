@@ -56,6 +56,9 @@ var commentCmd = &cobra.Command{
 
 Shorthand for 'bd comments add <id> "text"'.
 
+A comment on an assigned bead pings that assignee's pinned pane
+(.beads/notify/pins.json). Self-comments and unassigned beads do not ping.
+
 Examples:
   bd comment bd-123 "Working on this now"
   bd comment bd-123 Working on this now
@@ -128,6 +131,7 @@ To list comments on an issue, use the plural form: bd comments <id>`,
 			return HandleErrorRespectJSON("failed to commit: %v", err)
 		}
 
+		pingCommentAssignee(result.Issue.Assignee, result.ResolvedID, result.Issue.Title, author, commentText)
 		SetLastTouchedID(result.ResolvedID)
 
 		if jsonOutput {

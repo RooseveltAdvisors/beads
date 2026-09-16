@@ -1,10 +1,11 @@
 // Package notify is the beads-owned delivery outbox.
 //
-// Due/repeat firing is beads time. This package is beads delivery: each fired
-// bead becomes a durable seat-addressed row under .beads/notify/, independent
-// of firstmate, herdr, or any LLM harness. Seat drains (bd notify drain) pull
-// pending rows and deliver only to an exact pin in pins.json; transports are
-// not the bus. No pin or a dead pin holds the row and marks escalation.
+// Due/repeat firing and comment events are beads time. This package is beads
+// delivery: each fired bead or comment ping becomes a durable seat-addressed
+// row under .beads/notify/, independent of firstmate, herdr, or any LLM
+// harness. Seat drains (bd notify drain) pull pending rows and deliver only
+// to an exact pin in pins.json; transports are not the bus. No pin or a dead
+// pin holds the row and marks escalation.
 package notify
 
 import (
@@ -43,6 +44,8 @@ const (
 	KindStaleClaim Kind = "stale-claim"
 	// KindProgress is missing comment.progress trail while still open.
 	KindProgress Kind = "progress"
+	// KindComment is a new comment on a bead assigned to a seat.
+	KindComment Kind = "comment"
 )
 
 // UnassignedSeat is the routing key when a bead has no assignee.

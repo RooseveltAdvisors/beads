@@ -20,10 +20,13 @@ import (
 var notifyCmd = &cobra.Command{
 	Use:   "notify",
 	Short: "Seat-addressed notify outbox (beads-owned delivery)",
-	Long: `The notify outbox is how beads delivers due/repeat fires to assignee seats.
+	Long: `The notify outbox is how beads delivers due/repeat fires and comment
+pings to assignee seats.
 
 bd due sweep enqueues one row per fired bead under its assignee seat
-(.beads/notify/). bd notify drain delivers that seat only to the exact herdr
+(.beads/notify/). bd comment and bd comments add enqueue a comment ping
+for the assignee (skipping self-comments and unassigned beads).
+bd notify drain delivers that seat only to the exact herdr
 target recorded in .beads/notify/pins.json (session + pane id, or agent
 session id). There is no fuzzy search: a missing pin or a dead pinned
 target leaves the row queued and marks the seat for parent escalation.
@@ -409,6 +412,78 @@ var notifyAckCmd = &cobra.Command{
 		fmt.Printf("%s acked seat %s through seq %d\n", ui.RenderAccent("*"), seat, upto)
 		return nil
 	},
+}
+
+// pingCommentAssignee enqueues a pin-addressed notify for the bead's assignee
+// after a successful comment. Best-effort: never fails the comment.
+func pingCommentAssignee(assignee, issueID, issueTitle, author, text string) {
+	seat, ok := notify.CommentAssigneeSeat(assignee, author)
+	if !ok {
+		return
+	}
+	o, err := openNotifyOutbox()
+	if err != nil {
+		return
+	}
+	title := notify.CommentPingTitle(issueTitle, author, text)
+	if _, err := o.Enqueue(seat, issueID, notify.KindComment, title); err != nil {
+		fmt.Fprintf(os.Stderr, "notify: enqueue comment ping: %v\n", err)
+		return
+	}
+	tryDrainCommentPing(o, seat)
+}
+
+// tryDrainCommentPing delivers pending rows for seat through the exact pin.
+// No pin → hold+escalate without herdr discovery. Tests skip herdr entirely.
+func tryDrainCommentPing(o *notify.Outbox, seat string) {
+	if os.Getenv("BEADS_TEST_MODE") != "" {
+		return
+	}
+	pending, err := o.Pending(seat)
+	if err != nil || len(pending) == 0 {
+		return
+	}
+	pins, err := o.LoadPins()
+	if err != nil {
+		return
+	}
+	pin, havePin := pins[strings.ToLower(strings.TrimSpace(seat))]
+	if !havePin || !pin.Valid() {
+		_ = o.SetHold(seat, notify.Hold{Reason: notify.HoldNoPin, Pending: len(pending)})
+		return
+	}
+	discover := notify.HerdrDiscoverer{}
+	instances, err := discover.ListAllInstances()
+	if err != nil {
+		_ = o.SetHold(seat, notify.Hold{
+			Reason: notify.HoldDeadPin, Session: pin.Session, PaneID: pin.PaneID,
+			AgentSessionID: pin.AgentSessionID, Pending: len(pending),
+		})
+		return
+	}
+	dec := notify.DecideDelivery(seat, pins, instances)
+	if !dec.OK {
+		_ = o.SetHold(seat, notify.Hold{
+			Reason: dec.Reason, Session: dec.Pin.Session, PaneID: dec.Pin.PaneID,
+			AgentSessionID: dec.Pin.AgentSessionID, Pending: len(pending),
+		})
+		return
+	}
+	var lastOK int64
+	for _, rec := range pending {
+		prompt := notify.DefaultPrompt(rec)
+		if body := beadNotifyBody(rec.IssueID); body != "" {
+			prompt = prompt + "\n\n" + body
+		}
+		if err := discover.Prompt(dec.Instance, prompt); err != nil {
+			break
+		}
+		lastOK = rec.Seq
+	}
+	if lastOK > 0 {
+		_ = o.AckSeat(seat, lastOK)
+		_ = o.ClearHold(seat)
+	}
 }
 
 func holdError(dec notify.Delivery) string {
