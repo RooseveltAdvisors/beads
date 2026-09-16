@@ -22,7 +22,6 @@ import (
 
 func bdProxiedClose(t *testing.T, bd, dir string, args ...string) string {
 	t.Helper()
-	args = ensureCloseReason(args)
 	fullArgs := append([]string{"close"}, args...)
 	stdout, stderr, err := bdProxiedRunBuffers(t, bd, dir, fullArgs...)
 	if err != nil {
@@ -45,7 +44,6 @@ func bdProxiedCloseFail(t *testing.T, bd, dir string, args ...string) string {
 
 func bdProxiedCloseJSON(t *testing.T, bd, dir string, args ...string) []*types.Issue {
 	t.Helper()
-	args = ensureCloseReason(args)
 	fullArgs := append([]string{"close", "--json"}, args...)
 	stdout, stderr, err := bdProxiedRunBuffers(t, bd, dir, fullArgs...)
 	if err != nil {
@@ -65,7 +63,6 @@ func bdProxiedCloseJSON(t *testing.T, bd, dir string, args ...string) []*types.I
 
 func bdProxiedCloseJSONEnvelope(t *testing.T, bd, dir string, args ...string) map[string]json.RawMessage {
 	t.Helper()
-	args = ensureCloseReason(args)
 	fullArgs := append([]string{"close", "--json"}, args...)
 	stdout, stderr, err := bdProxiedRunBuffers(t, bd, dir, fullArgs...)
 	if err != nil {
