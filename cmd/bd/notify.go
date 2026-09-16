@@ -16,18 +16,20 @@ import (
 )
 
 // notifyCmd is the beads-owned delivery surface. Time (due sweep) enqueues;
-// drain resolves assignee seats to live herdr agent instances (any harness).
+// drain delivers only to an exact pin in .beads/notify/pins.json.
 var notifyCmd = &cobra.Command{
 	Use:   "notify",
 	Short: "Seat-addressed notify outbox (beads-owned delivery)",
 	Long: `The notify outbox is how beads delivers due/repeat fires to assignee seats.
 
 bd due sweep enqueues one row per fired bead under its assignee seat
-(.beads/notify/). bd notify drain resolves that seat to a live herdr agent
-instance (pi, claude, codex, … — whatever herdr detects) and prompts it.
+(.beads/notify/). bd notify drain delivers that seat only to the exact herdr
+target recorded in .beads/notify/pins.json (session + pane id, or agent
+session id). There is no fuzzy search: a missing pin or a dead pinned
+target leaves the row queued and marks the seat for parent escalation.
 
-No seat is special-cased. Harness support comes from herdr detection, not
-from beads knowing each runtime.
+bd notify resolve is a human diagnostic. It may show a scored lookalike,
+but that match is not used for delivery.
 
 Examples:
   bd notify pending
@@ -105,33 +107,87 @@ var notifySeatsCmd = &cobra.Command{
 
 var notifyResolveCmd = &cobra.Command{
 	Use:   "resolve",
-	Short: "Show which live herdr agent instance a seat maps to",
-	Args:  cobra.NoArgs,
+	Short: "Human diagnostic: show pin and a non-authoritative fuzzy match",
+	Long: `Show the authoritative pin for a seat (from .beads/notify/pins.json)
+and, separately, a fuzzy herdr lookalike.
+
+The fuzzy match is diagnostic only. Drain never uses it. Delivery is exact:
+pinned target live → deliver there; no pin or dead pin → hold and escalate.`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		seat, _ := cmd.Flags().GetString("seat")
 		if strings.TrimSpace(seat) == "" {
 			return HandleError("notify resolve requires --seat")
+		}
+		var pin notify.Pin
+		var pinned bool
+		var pinLive bool
+		var pinInst notify.Instance
+		o, err := openNotifyOutbox()
+		if err == nil {
+			pins, perr := o.LoadPins()
+			if perr != nil {
+				return HandleError("pins: %v", perr)
+			}
+			pin, pinned = pins[strings.ToLower(strings.TrimSpace(seat))]
+			if pinned && !pin.Valid() {
+				pinned = false
+			}
 		}
 		d := notify.HerdrDiscoverer{}
 		instances, err := d.ListAllInstances()
 		if err != nil {
 			return HandleError("herdr discover: %v", err)
 		}
-		inst, ok := notify.ResolveSeat(seat, instances)
-		if jsonOutput {
-			if !ok {
-				return printJSON(map[string]any{"seat": seat, "matched": false, "instances_scanned": len(instances)})
-			}
-			return printJSON(map[string]any{"seat": seat, "matched": true, "instance": inst, "instances_scanned": len(instances)})
+		if pinned {
+			pinInst, pinLive = notify.FindPinnedInstance(pin, instances)
 		}
-		if !ok {
-			fmt.Printf("%s seat %s: no live herdr instance (%d scanned)\n", ui.RenderWarn("!"), seat, len(instances))
+		inst, fuzzy := notify.ResolveSeat(seat, instances)
+		if jsonOutput {
+			return printJSON(map[string]any{
+				"seat":              seat,
+				"pin":               pinOrNil(pinned, pin),
+				"pin_live":          pinLive,
+				"authoritative":     pinned,
+				"diagnostic":        instOrNil(fuzzy, inst),
+				"diagnostic_note":   "fuzzy ResolveSeat is not used for delivery",
+				"instances_scanned": len(instances),
+			})
+		}
+		if pinned {
+			live := "not live — drain will hold and escalate"
+			if pinLive {
+				live = fmt.Sprintf("live %s %s harness=%s status=%s", pinInst.Session, pinInst.PaneID, pinInst.Harness, pinInst.Status)
+			}
+			fmt.Printf("%s seat %s pin: %s %s (%s)\n",
+				ui.RenderAccent("*"), seat, pin.Session, pin.PaneID, live)
+		} else {
+			fmt.Printf("%s seat %s: no pin in .beads/notify/pins.json (drain will hold and escalate)\n",
+				ui.RenderWarn("!"), seat)
+		}
+		if !fuzzy {
+			fmt.Printf("%s diagnostic (not used for delivery): no fuzzy herdr match (%d scanned)\n",
+				ui.RenderAccent("*"), len(instances))
 			return nil
 		}
-		fmt.Printf("%s seat %s → %s %s (%s) harness=%s status=%s score=%d [%s]\n",
-			ui.RenderAccent("*"), seat, inst.Session, inst.PaneID, inst.Title, inst.Harness, inst.Status, inst.Score, inst.MatchReason)
+		fmt.Printf("%s diagnostic (not used for delivery): %s %s (%s) harness=%s status=%s score=%d [%s]\n",
+			ui.RenderAccent("*"), inst.Session, inst.PaneID, inst.Title, inst.Harness, inst.Status, inst.Score, inst.MatchReason)
 		return nil
 	},
+}
+
+func pinOrNil(ok bool, pin notify.Pin) any {
+	if !ok {
+		return nil
+	}
+	return pin
+}
+
+func instOrNil(ok bool, inst notify.Instance) any {
+	if !ok {
+		return nil
+	}
+	return inst
 }
 
 var notifyDrainCmd = &cobra.Command{
@@ -139,11 +195,12 @@ var notifyDrainCmd = &cobra.Command{
 	Short: "Deliver pending rows for a seat via herdr (or --exec)",
 	Long: `Drain pending notify rows for one seat, the current actor, or --all assigned seats.
 
-Default transport is herdr:
-  1. Discover live agents across running herdr sessions
-  2. Resolve assignee seat → best matching instance (session name, title token, cwd)
-  3. herdr agent prompt <pane> with a beads notify prompt
+Default transport is herdr, exact-pin only:
+  1. Load .beads/notify/pins.json (seat → session+pane_id or agent_session_id)
+  2. Discover live herdr agents
+  3. If the pinned target is live, herdr agent prompt that pane
   4. Ack on success
+  Missing pin or dead pin: leave rows queued, mark escalate, never pick a lookalike.
 
 Harness-agnostic: herdr already knows pi/claude/codex/… in each pane.
 
@@ -191,11 +248,17 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 		// Discover once per drain invocation when using herdr.
 		var (
 			instances []notify.Instance
+			pins      map[string]notify.Pin
 			discErr   error
 			discover  notify.HerdrDiscoverer
 		)
 		needHerdr := execCmd == "" && !printOnly
 		if needHerdr {
+			var perr error
+			pins, perr = o.LoadPins()
+			if perr != nil {
+				return HandleError("pins: %v", perr)
+			}
 			instances, discErr = discover.ListAllInstances()
 			if discErr != nil {
 				return HandleError("herdr discover: %v", discErr)
@@ -203,11 +266,13 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 		}
 
 		type seatResult struct {
-			Seat      string           `json:"seat"`
-			Delivered int              `json:"delivered"`
-			AckedThru int64            `json:"acked_through,omitempty"`
-			Instance  *notify.Instance `json:"instance,omitempty"`
-			Error     string           `json:"error,omitempty"`
+			Seat       string           `json:"seat"`
+			Delivered  int              `json:"delivered"`
+			AckedThru  int64            `json:"acked_through,omitempty"`
+			Instance   *notify.Instance `json:"instance,omitempty"`
+			Error      string           `json:"error,omitempty"`
+			Escalate   bool             `json:"escalate,omitempty"`
+			HoldReason string           `json:"hold_reason,omitempty"`
 		}
 		var results []seatResult
 
@@ -228,17 +293,29 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 
 			res := seatResult{Seat: s}
 			var inst notify.Instance
-			var hasInst bool
 			if needHerdr {
-				inst, hasInst = notify.ResolveSeat(s, instances)
-				if !hasInst {
-					res.Error = "no live herdr instance for seat"
+				dec := notify.DecideDelivery(s, pins, instances)
+				if !dec.OK {
+					res.Error = holdError(dec)
+					res.Escalate = dec.Escalate
+					res.HoldReason = dec.Reason
+					if err := o.SetHold(s, notify.Hold{
+						Reason:         dec.Reason,
+						Session:        dec.Pin.Session,
+						PaneID:         dec.Pin.PaneID,
+						AgentSessionID: dec.Pin.AgentSessionID,
+						Pending:        len(pending),
+					}); err != nil {
+						return HandleError("hold: %v", err)
+					}
 					results = append(results, res)
 					if !jsonOutput {
-						fmt.Printf("%s seat %s: %s (%d pending left)\n", ui.RenderWarn("!"), s, res.Error, len(pending))
+						fmt.Printf("%s seat %s: %s (%d pending left); escalate\n",
+							ui.RenderWarn("!"), s, res.Error, len(pending))
 					}
 					continue
 				}
+				inst = dec.Instance
 				res.Instance = &inst
 			}
 
@@ -286,6 +363,11 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 				}
 				res.AckedThru = lastOK
 			}
+			if needHerdr && res.Error == "" && delivered > 0 {
+				if err := o.ClearHold(s); err != nil {
+					return HandleError("clear hold: %v", err)
+				}
+			}
 			results = append(results, res)
 			if !jsonOutput {
 				if res.Error != "" && delivered == 0 {
@@ -327,6 +409,26 @@ var notifyAckCmd = &cobra.Command{
 		fmt.Printf("%s acked seat %s through seq %d\n", ui.RenderAccent("*"), seat, upto)
 		return nil
 	},
+}
+
+func holdError(dec notify.Delivery) string {
+	switch dec.Reason {
+	case notify.HoldDeadPin:
+		target := strings.TrimSpace(dec.Pin.Session + " " + dec.Pin.PaneID)
+		if dec.Pin.AgentSessionID != "" {
+			if target == "" {
+				target = dec.Pin.AgentSessionID
+			} else {
+				target = target + " " + dec.Pin.AgentSessionID
+			}
+		}
+		if target == "" {
+			target = "pin"
+		}
+		return "pinned target " + target + " is not live"
+	default:
+		return "no pin in .beads/notify/pins.json"
+	}
 }
 
 func openNotifyOutbox() (*notify.Outbox, error) {
@@ -418,7 +520,6 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 		fmt.Printf("  notify enqueued %d\n", n)
 	}
 }
-
 
 // enqueueStaleClaimNotifies finds assigned in_progress work quiet longer than
 // comment.stale_claim_after and enqueues KindStaleClaim (educational playbook).

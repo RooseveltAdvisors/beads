@@ -2,7 +2,6 @@ package conformance
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"slices"
@@ -574,17 +573,17 @@ func RunCommenterAdvancesIssueActivity(t *testing.T, ctx context.Context, fixtur
 	if after.Assignee != before.Assignee {
 		t.Errorf("anchor %s assignee went %q -> %q across a comment", anchor, before.Assignee, after.Assignee)
 	}
-	var commentCreated, updated, lastActivity sql.NullTime
+	var commentCreated, updated, lastActivity time.Time
 	if err := fixture.QueryScalar(ctx, `SELECT c.created_at, i.updated_at, i.last_activity
 		FROM comments c JOIN issues i ON i.id = c.issue_id
 		WHERE c.issue_id = ? ORDER BY c.created_at DESC, c.id DESC LIMIT 1`, []any{anchor},
 		&commentCreated, &updated, &lastActivity); err != nil {
 		t.Fatalf("read activity timestamps for %s: %v", anchor, err)
 	}
-	if !commentCreated.Valid || !updated.Valid || updated.Time.Before(commentCreated.Time) {
+	if updated.Before(commentCreated) {
 		t.Errorf("anchor %s updated_at = %v, comment created_at = %v; updated_at must be at least the comment activity time", anchor, updated, commentCreated)
 	}
-	if !lastActivity.Valid || lastActivity.Time.Before(commentCreated.Time) {
+	if lastActivity.Before(commentCreated) {
 		t.Errorf("anchor %s last_activity = %v, comment created_at = %v; last_activity must be at least the comment activity time", anchor, lastActivity, commentCreated)
 	}
 	// The append itself has to have happened, or every equality above is a
@@ -615,8 +614,9 @@ func RunCommenterDeletesComment(t *testing.T, ctx context.Context, fixture Comme
 	}
 	assertCommenterRowCount(t, ctx, fixture, "comments", anchor, 0)
 	var actor, audit string
-	if err := fixture.QueryScalar(ctx, `SELECT actor, comment FROM events
-		WHERE issue_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`, []any{anchor}, &actor, &audit); err != nil {
+	if err := fixture.QueryScalar(ctx, `SELECT actor, COALESCE(comment, '') FROM events
+		WHERE issue_id = ? AND event_type = ? ORDER BY created_at DESC, id DESC LIMIT 1`,
+		[]any{anchor, string(types.EventCommented)}, &actor, &audit); err != nil {
 		t.Fatalf("read delete audit event: %v", err)
 	}
 	if actor != "deleter" || audit != "Deleted comment "+added.Comment.ID {

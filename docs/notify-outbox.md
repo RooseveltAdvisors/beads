@@ -1,11 +1,12 @@
-# Beads notify outbox - harness-agnostic seat delivery (2026-09-13)
+# Beads notify outbox - harness-agnostic seat delivery
 
 ## Thesis
 
 Beads owns **time** (due/repeat/sweep) and **delivery ledger** (seat-addressed outbox).
-Assignee is a stable **seat identity**. Live agent instances (any harness) are
-resolved later by generic drain/discovery - not by special-casing names like
-firstmate or wiseman in beads core.
+Assignee is a stable **seat identity**. Drain delivers only to an exact pin
+(`.beads/notify/pins.json`: herdr session + pane id, or agent session id).
+There is no fuzzy search. A missing pin or a dead pinned target leaves the
+row queued and marks the seat for parent escalation.
 
 Firstmate is an orchestrator that may *host* harnesses; it is not a harness and
 not the notify bus. No assignee gets a privileged code path in beads.
@@ -18,7 +19,7 @@ bd due sweep
   → enqueue .beads/notify/outbox.jsonl  {seq, seat, issue_id, kind, title}
 
 bd notify drain --seat <assignee> [--exec transport]
-  → pending rows for that seat → optional transport → ack
+  → pending rows for that seat → exact pin (or hold+escalate) → ack
 ```
 
 - **Seat** = `assignee` (empty → `unassigned`)
@@ -41,27 +42,31 @@ that is not per-bead seat delivery.
 - `bd notify drain --seat S [--limit N] [--exec CMD] [--no-ack]`
 - `bd notify ack --seat S --upto N`
 - `bd notify seats`
+- `bd notify resolve --seat S` — human diagnostic only (fuzzy lookalike is not delivery)
 
-## Next (not this change)
-
-Seat directory + live instance discovery (herdr agent list, any harness) so
-drain targets agent instances by assignee without static pane commands.
-
-## Herdr discovery (v1)
+## Exact pin delivery
 
 `bd notify drain` default transport:
 
-1. `herdr session list --json` → running sessions
-2. `herdr --session S agent list` → agents (any harness)
-3. Score assignee seat against session name, title tokens, cwd segments
-4. `herdr --session S agent prompt <pane> <text>`
+1. Load `.beads/notify/pins.json` (seat → `{session, pane_id}` or `agent_session_id`).
+   A fleet seed is in `examples/notify/pins.json`.
+2. `herdr session list --json` → running sessions
+3. `herdr --session S agent list` → live agents (any harness)
+4. If the pinned target is among them, `herdr --session S agent prompt <pane> <text>`
+5. Else hold the outbox row and write `.beads/notify/holds.json` so the parent escalates
+
+A lookalike pane (same title, same session name, focused idle pi, …) never
+receives the ping. `bd notify resolve` may still print a scored diagnostic
+match; drain ignores it.
 
 Supporting a new harness = herdr detecting it. Beads does not embed harness SDKs.
 
 ## Deployment (ponytail)
 
 One systemd timer runs sweep then drain. No separate notify timer.
-Pending outbox rows retry on the next sweep when the agent is offline.
+Pending outbox rows retry on the next sweep when the pinned target is live.
+Unpinned or dead-pinned seats stay queued until a human (or lock owner) pins
+the exact herdr id.
 
 
 ## Prompt playbook (finish-line education)

@@ -39,6 +39,9 @@ var docsPublishExemptions = map[string]bool{
 	// docs/RECOVERY.md#pk-fork-refused), and github.com blob URLs cannot be
 	// redirected. Keep until no supported release prints it.
 	"RECOVERY.md": true,
+	// House-fork clock/notify pages; not part of the Mintlify user site.
+	"comment-progress.md": true,
+	"notify-outbox.md":    true,
 }
 
 // rootDocFiles are the curated root-level markdown files whose local links

@@ -123,7 +123,6 @@ func progressFresh(issue *types.Issue, comments []*types.Comment) bool {
 	return false
 }
 
-
 var progressStaleCmd = &cobra.Command{
 	Use:           "stale",
 	Short:         "List assigned in_progress beads quiet longer than comment.stale_claim_after",

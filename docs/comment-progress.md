@@ -49,7 +49,8 @@ Kinds:
 - `stale-claim` - full playbook (close / delta comment / reassign)
 - `progress` - missing progress trail while still open
 
-Enqueue stale-claim/progress from clocks or ops (`bd notify` outbox); drain delivers via herdr to any harness.
+Enqueue stale-claim/progress from clocks or ops (`bd notify` outbox); drain
+delivers via herdr to the seat's exact pin (any harness herdr detects).
 
 ## Stale-claim clock
 

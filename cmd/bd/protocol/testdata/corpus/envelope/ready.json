@@ -7,6 +7,7 @@
       "dependency_count": 0,
       "dependent_count": 0,
       "description": "deterministic corpus closeable",
+      "due_source": "explicit",
       "id": "corpus-closed",
       "issue_type": "task",
       "owner": "test@protocol.test",
@@ -22,6 +23,7 @@
       "dependency_count": 0,
       "dependent_count": 0,
       "description": "deterministic corpus dependency",
+      "due_source": "explicit",
       "id": "corpus-dep",
       "issue_type": "task",
       "owner": "test@protocol.test",
@@ -37,6 +39,7 @@
       "dependency_count": 0,
       "dependent_count": 0,
       "description": "updated corpus root",
+      "due_source": "explicit",
       "id": "corpus-root",
       "issue_type": "feature",
       "labels": [
