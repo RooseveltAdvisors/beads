@@ -94,6 +94,7 @@ var roleContractCases = []roleContract{
 		RunBatchCreatorRecordsOneHistoryEntry,
 		RunBatchCreatorRecordsNoHistoryForAnEphemeralBatch,
 		RunBatchCreatorDoesNotMutateTheCallerRequest,
+		RunBatchCreatorEchoesSubSecondTimestamps,
 	),
 
 	roleCases("BlockingAnnotator", "BlockingAnnotator()", oncePerRole,
@@ -413,6 +414,7 @@ var roleContractCases = []roleContract{
 		RunLifecycleCreateRefusesAForeignIDPrefix,
 		RunLifecycleCreateInheritsParentLabels,
 		RunLifecycleCreateWritesEveryScalarField,
+		RunLifecycleCreateEchoesSubSecondTimestamps,
 	),
 
 	roleCases("LifecycleUpdate", "IssueLifecycle()", oncePerRole,

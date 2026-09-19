@@ -49,11 +49,11 @@
     },
     "envelope/list": {
       "cmd": "bd list --all --json",
-      "sha256": "0712628dd6ef0c661d8fb1b8f07dc0ce1c61faddbd3e2dbe2d2a922953f9cf58"
+      "sha256": "7317a1b51728df55aa64075f5099e3bf1cb90c14a0bbd900fdcb47824ef50d91"
     },
     "envelope/ready": {
       "cmd": "bd ready --json",
-      "sha256": "0712628dd6ef0c661d8fb1b8f07dc0ce1c61faddbd3e2dbe2d2a922953f9cf58"
+      "sha256": "7317a1b51728df55aa64075f5099e3bf1cb90c14a0bbd900fdcb47824ef50d91"
     },
     "envelope/reopen": {
       "cmd": "bd reopen --json corpus-closed",
@@ -65,7 +65,7 @@
     },
     "envelope/update": {
       "cmd": "bd update corpus-root --json --priority 0 --add-label corpus-label --set-metadata phase=2 --description \"updated corpus root\"",
-      "sha256": "0a4f6778c528027cce9e901b72cd65e8f019c4b3c1dc478a647310075acc3c7d"
+      "sha256": "8f7693350a4e122e2bf38c4aa5c0439b50281b2bae4f2b18b437735c67e6db1d"
     },
     "envelope/version": {
       "cmd": "bd version --json",
@@ -117,11 +117,11 @@
     },
     "flat/list": {
       "cmd": "bd list --all --json",
-      "sha256": "a56bf202082f99bfa98b4a0fcc74ac3afd706ff5677468a622f369cfe0f7572a"
+      "sha256": "6a10f8d91e925c58515997cb76a4bb94caf3444925102df0247587353742ac0d"
     },
     "flat/ready": {
       "cmd": "bd ready --json",
-      "sha256": "a56bf202082f99bfa98b4a0fcc74ac3afd706ff5677468a622f369cfe0f7572a"
+      "sha256": "6a10f8d91e925c58515997cb76a4bb94caf3444925102df0247587353742ac0d"
     },
     "flat/reopen": {
       "cmd": "bd reopen --json corpus-closed",
@@ -133,7 +133,7 @@
     },
     "flat/update": {
       "cmd": "bd update corpus-root --json --priority 0 --add-label corpus-label --set-metadata phase=2 --description \"updated corpus root\"",
-      "sha256": "bc7e4d7536291a65431747772a8619b50ab6f1cbd44e219b14f281526a605f04"
+      "sha256": "1d1f8e21df93df7a1885430fd804d2435cd3d7289cfcfcd1f4f511e241a8d805"
     },
     "flat/version": {
       "cmd": "bd version --json",
