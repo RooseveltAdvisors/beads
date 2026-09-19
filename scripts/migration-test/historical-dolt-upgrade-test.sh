@@ -1551,10 +1551,14 @@ verify_lease_plane() {
 
 # Closing the blocker must release the plain-blocks and conditional-blocks
 # wisps; the wisp-blocked wisp stays blocked because its blocker is still open.
+#
+# --reason satisfies this fork's comment.progress_required close gate: the lane
+# claimed $i1 in verify_lease_plane, so it is assigned work with no progress
+# comment since the claim, which is exactly what the gate refuses.
 verify_unblock_path() {
     local version="$1" i1 w2 w3 w4 actual expected
     i1=$(wisp_id 1); w2=$(wisp_id 4); w3=$(wisp_id 5); w4=$(wisp_id 6)
-    run_in_workspace "$candidate" close "$i1" >/dev/null ||
+    run_in_workspace "$candidate" close "$i1" --reason 'wisp-plane unblock check' >/dev/null ||
         die "$version: candidate could not close the blocker while holding its own claim"
     actual=$(oracle_rows "$version" "SELECT id, is_blocked FROM wisps WHERE id IN ('$w2', '$w3', '$w4') ORDER BY id")
     expected=$(printf '%s,0\n%s,1\n%s,0\n' "$w2" "$w3" "$w4" | LC_ALL=C sort)

@@ -118,7 +118,7 @@ func (o *Outbox) Enqueue(seat, issueID string, kind Kind, title string) (Record,
 		return Record{}, err
 	}
 	path := filepath.Join(o.dir, OutboxFile)
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) //nolint:gosec // G304: o.dir is the outbox path; OutboxFile is a constant
 	if err != nil {
 		return Record{}, fmt.Errorf("notify: open outbox: %w", err)
 	}
@@ -223,14 +223,16 @@ func (o *Outbox) Seats() ([]string, error) {
 func (o *Outbox) nextSeqLocked() (int64, error) {
 	path := filepath.Join(o.dir, SeqFile)
 	var cur int64
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: o.dir is the outbox path; SeqFile is a constant
 	if err == nil {
-		fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &cur)
+		// A corrupt counter leaves cur at 0 and restarts the sequence; the
+		// ledger is append-only, so a replayed seq is visible, not silent.
+		_, _ = fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &cur)
 	} else if !os.IsNotExist(err) {
 		return 0, err
 	}
 	cur++
-	if err := os.WriteFile(path, []byte(fmt.Sprintf("%d\n", cur)), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(fmt.Sprintf("%d\n", cur)), 0o600); err != nil {
 		return 0, err
 	}
 	return cur, nil
@@ -238,7 +240,7 @@ func (o *Outbox) nextSeqLocked() (int64, error) {
 
 func (o *Outbox) readAllLocked() ([]Record, error) {
 	path := filepath.Join(o.dir, OutboxFile)
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // G304: o.dir is the outbox path; OutboxFile is a constant
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -266,7 +268,7 @@ func (o *Outbox) readAllLocked() ([]Record, error) {
 
 func (o *Outbox) loadAcksLocked() (map[string]int64, error) {
 	path := filepath.Join(o.dir, AckFile)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // G304: o.dir is the outbox path; AckFile is a constant
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]int64{}, nil
@@ -292,7 +294,7 @@ func (o *Outbox) saveAcksLocked(acks map[string]int64) error {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
