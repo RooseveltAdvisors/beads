@@ -28,7 +28,7 @@
 | 4 | Zero open HIGH | PASS | Reviewer's OWASP walk: 9 categories, all N/A/checked, one non-blocking minor (logging), no HIGH findings |
 | 5 | Clean git status | PASS | `git status --short` clean on `deploy/be-dy66n-gate` at SHA `26033d8e4` |
 | 6 | No merge conflicts with BASE_REF | PASS | `origin/main` unchanged since branch cut; merge-base == origin/main tip; no conflict possible |
-| 7 | Single feature theme/ancestry scope | PASS | 5 files, +424/-1, all on-theme for migration-0067 versioned-beads schema (see diffstat below) |
+| 7 | Single feature theme/ancestry scope | PASS | 5 files, +424/-1, all on-theme for migration-0069 versioned-beads schema (see diffstat below) |
 
 **Diffstat** (`git diff --stat origin/main...HEAD`):
 ```
