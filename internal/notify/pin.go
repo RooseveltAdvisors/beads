@@ -68,6 +68,7 @@ type Delivery struct {
 	OK       bool
 	Escalate bool
 	Reason   string
+	Mode     DeliveryMode
 }
 
 // DecideDelivery is the only delivery resolver. No pin or a dead pin holds
@@ -90,7 +91,7 @@ func DecideDelivery(seat string, pins map[string]Pin, live []Instance) Delivery 
 	}
 	inst.MatchReason = "pin"
 	inst.Score = 0
-	return Delivery{Instance: inst, Pin: pin, OK: true}
+	return Delivery{Instance: inst, Pin: pin, OK: true, Mode: ModeForHarness(inst.Harness)}
 }
 
 // FindPinnedInstance returns the live instance that exactly matches pin.

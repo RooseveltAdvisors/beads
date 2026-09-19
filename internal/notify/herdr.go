@@ -14,7 +14,8 @@ import (
 )
 
 // Instance is one live herdr-hosted agent of any harness (pi, claude, codex, …).
-// Herdr detects the harness; beads only needs session + pane to deliver.
+// Herdr detects the harness. Drain uses session + pane to address the pin, and
+// the harness label to choose follow-up vs steer.
 type Instance struct {
 	Session        string `json:"session"`
 	PaneID         string `json:"pane_id"`
@@ -33,6 +34,8 @@ type Instance struct {
 type HerdrDiscoverer struct {
 	Bin     string
 	Timeout time.Duration
+	// runFn, when set, replaces the herdr subprocess. Tests record argv.
+	runFn func(args ...string) ([]byte, error)
 }
 
 func (h HerdrDiscoverer) bin() string {
@@ -57,6 +60,9 @@ func (h HerdrDiscoverer) timeout() time.Duration {
 }
 
 func (h HerdrDiscoverer) run(args ...string) ([]byte, error) {
+	if h.runFn != nil {
+		return h.runFn(args...)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), h.timeout())
 	defer cancel()
 	cmd := exec.CommandContext(ctx, h.bin(), args...)
@@ -279,15 +285,20 @@ func cwdHasSeatSegment(cwd, seat string) bool {
 	return false
 }
 
-// Prompt delivers text to the agent in inst's pane. Harness-agnostic.
+// Prompt delivers text using ModeForHarness(inst.Harness).
 func (h HerdrDiscoverer) Prompt(inst Instance, text string) error {
-	args := make([]string, 0, 8)
-	if inst.Session != "" {
-		args = append(args, "--session", inst.Session)
+	return h.Deliver(inst, text, ModeForHarness(inst.Harness))
+}
+
+// Deliver submits text with an explicit delivery mode. Follow-up uses the
+// harness queue key; steer uses herdr agent prompt (Enter).
+func (h HerdrDiscoverer) Deliver(inst Instance, text string, mode DeliveryMode) error {
+	for _, call := range deliveryCalls(inst, text, mode) {
+		if _, err := h.run(call.Args...); err != nil {
+			return err
+		}
 	}
-	args = append(args, "agent", "prompt", inst.PaneID, text)
-	_, err := h.run(args...)
-	return err
+	return nil
 }
 
 // DefaultPrompt builds the standard beads notify prompt for a record.
