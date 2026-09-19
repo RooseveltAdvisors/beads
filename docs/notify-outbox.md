@@ -42,7 +42,7 @@ that is not per-bead seat delivery.
 - `bd notify drain --seat S [--limit N] [--exec CMD] [--no-ack]`
 - `bd notify ack --seat S --upto N`
 - `bd notify seats`
-- `bd notify resolve --seat S` — human diagnostic only (fuzzy lookalike is not delivery)
+- `bd notify resolve --seat S` - human diagnostic only (fuzzy lookalike is not delivery)
 
 ## Exact pin delivery
 
@@ -52,14 +52,37 @@ that is not per-bead seat delivery.
    A fleet seed is in `examples/notify/pins.json`.
 2. `herdr session list --json` → running sessions
 3. `herdr --session S agent list` → live agents (any harness)
-4. If the pinned target is among them, `herdr --session S agent prompt <pane> <text>`
+4. If the pinned target is among them, submit with that pane's **delivery mode**:
+   - `follow_up` when the harness has a non-steer queue key (does not redirect the current turn)
+   - `steer` (herdr `agent prompt` / Enter) as the fallback
 5. Else hold the outbox row and write `.beads/notify/holds.json` so the parent escalates
+
+The notify body (`notify.DefaultPrompt`) is the same in both modes. Only the submit key changes.
 
 A lookalike pane (same title, same session name, focused idle pi, …) never
 receives the ping. `bd notify resolve` may still print a scored diagnostic
 match; drain ignores it.
 
-Supporting a new harness = herdr detecting it. Beads does not embed harness SDKs.
+Supporting a new harness = herdr detecting it, plus a follow-up key in
+`internal/notify/delivery.go` when that harness actually has one. Beads does
+not embed harness SDKs and does not depend on firstmate's event bus.
+
+## Follow-up vs steer
+
+Steer lands at the next tool boundary and can redirect in-flight work. Follow-up
+waits until the current run is done. Drain prefers follow-up so a due/comment
+ping does not yank the model mid-task.
+
+| Harness (herdr `agent` label) | Mode | How |
+|---|---|---|
+| `pi`, `pi-signed` | `follow_up` | Option/Alt+Enter (`pane send-text` then `pane send-keys alt+enter`). Pi docs: Enter steers, Alt+Enter queues until the run finishes. |
+| `cursor`, `cursor-agent` | `follow_up` | Tab queues after the turn on Cursor agent surfaces (Agents Window / queue). CLI Enter while busy is steer. |
+| `codex` | `follow_up` | Tab queues for the next turn. Enter injects a steer after the current tool call. |
+| `claude` (and `claude-code`) | `steer` | No follow-up submit distinct from Enter. Mid-run input is steer; a follow-up modifier is still an upstream feature request. |
+| anything else herdr detects | `steer` | `herdr agent prompt` (text + Enter). |
+
+JSON drain rows include `delivery_mode` (`follow_up` or `steer`). Human drain
+lines print `session pane (harness/mode)`.
 
 ## Deployment (ponytail)
 

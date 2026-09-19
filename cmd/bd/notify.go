@@ -28,8 +28,11 @@ bd due sweep enqueues one row per fired bead under its assignee seat
 for the assignee (skipping self-comments and unassigned beads).
 bd notify drain delivers that seat only to the exact herdr
 target recorded in .beads/notify/pins.json (session + pane id, or agent
-session id). There is no fuzzy search: a missing pin or a dead pinned
-target leaves the row queued and marks the seat for parent escalation.
+session id). Delivery uses the pinned pane's harness follow-up submit
+when the harness supports it (so a due fire does not steer mid-turn),
+and Enter/steer otherwise. There is no fuzzy search: a missing pin or a
+dead pinned target leaves the row queued and marks the seat for parent
+escalation.
 
 bd notify resolve is a human diagnostic. It may show a scored lookalike,
 but that match is not used for delivery.
@@ -201,11 +204,13 @@ var notifyDrainCmd = &cobra.Command{
 Default transport is herdr, exact-pin only:
   1. Load .beads/notify/pins.json (seat → session+pane_id or agent_session_id)
   2. Discover live herdr agents
-  3. If the pinned target is live, herdr agent prompt that pane
+  3. If the pinned target is live, deliver with that pane's harness mode:
+     follow_up (pi Option+Enter, cursor/codex Tab) or steer (Enter) as fallback
   4. Ack on success
   Missing pin or dead pin: leave rows queued, mark escalate, never pick a lookalike.
 
 Harness-agnostic: herdr already knows pi/claude/codex/… in each pane.
+Drain picks follow-up vs steer from that harness; it does not import firstmate.
 
 Flags:
   --print   print rows only (no herdr, still acks unless --no-ack)
@@ -269,13 +274,14 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 		}
 
 		type seatResult struct {
-			Seat       string           `json:"seat"`
-			Delivered  int              `json:"delivered"`
-			AckedThru  int64            `json:"acked_through,omitempty"`
-			Instance   *notify.Instance `json:"instance,omitempty"`
-			Error      string           `json:"error,omitempty"`
-			Escalate   bool             `json:"escalate,omitempty"`
-			HoldReason string           `json:"hold_reason,omitempty"`
+			Seat         string              `json:"seat"`
+			Delivered    int                 `json:"delivered"`
+			AckedThru    int64               `json:"acked_through,omitempty"`
+			Instance     *notify.Instance    `json:"instance,omitempty"`
+			DeliveryMode notify.DeliveryMode `json:"delivery_mode,omitempty"`
+			Error        string              `json:"error,omitempty"`
+			Escalate     bool                `json:"escalate,omitempty"`
+			HoldReason   string              `json:"hold_reason,omitempty"`
 		}
 		var results []seatResult
 
@@ -320,6 +326,7 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 				}
 				inst = dec.Instance
 				res.Instance = &inst
+				res.DeliveryMode = dec.Mode
 			}
 
 			var lastOK int64
@@ -344,7 +351,12 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 					if body := beadNotifyBody(rec.IssueID); body != "" {
 						prompt = prompt + "\n\n" + body
 					}
-					if err := discover.Prompt(inst, prompt); err != nil {
+					mode := res.DeliveryMode
+					if mode == "" {
+						mode = notify.ModeForHarness(inst.Harness)
+						res.DeliveryMode = mode
+					}
+					if err := discover.Deliver(inst, prompt, mode); err != nil {
 						res.Error = err.Error()
 						if !jsonOutput {
 							fmt.Fprintf(os.Stderr, "notify drain: seq %d herdr %s %s: %v\n", rec.Seq, inst.Session, inst.PaneID, err)
@@ -352,7 +364,7 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 						goto finishSeat
 					}
 					if !jsonOutput {
-						fmt.Printf("  %d  → %s %s (%s) %s\n", rec.Seq, inst.Session, inst.PaneID, inst.Harness, rec.IssueID)
+						fmt.Printf("  %d  → %s %s (%s/%s) %s\n", rec.Seq, inst.Session, inst.PaneID, inst.Harness, mode, rec.IssueID)
 					}
 				}
 				delivered++
@@ -470,12 +482,16 @@ func tryDrainCommentPing(o *notify.Outbox, seat string) {
 		return
 	}
 	var lastOK int64
+	mode := dec.Mode
+	if mode == "" {
+		mode = notify.ModeForHarness(dec.Instance.Harness)
+	}
 	for _, rec := range pending {
 		prompt := notify.DefaultPrompt(rec)
 		if body := beadNotifyBody(rec.IssueID); body != "" {
 			prompt = prompt + "\n\n" + body
 		}
-		if err := discover.Prompt(dec.Instance, prompt); err != nil {
+		if err := discover.Deliver(dec.Instance, prompt, mode); err != nil {
 			break
 		}
 		lastOK = rec.Seq
