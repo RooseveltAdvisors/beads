@@ -196,6 +196,12 @@ and picks up where it left off.
 Those lines go to stderr, and only when stderr is a terminal, so a piped or CI
 upgrade prints nothing at all. Silence there is not a stall either.
 
+The ordinals and counts in this section describe the 1.3.0 migration set. A
+binary built past that tag — including this repository's `main`, which carries
+migrations beyond it — reports a higher schema ceiling and applies more than the
+28 above. Run `bd migrate --inspect --json` with the binary you are about to
+install and trust the plan it prints over the numbers here.
+
 #### Upgrade every client that shares a store, together
 
 A bd binary refuses a database migrated past the schema it knows, rather than
