@@ -1,0 +1,47 @@
+# Advisory OCR API-mode pilot. This check must stay off the required-status
+# list: Juror remains review gate 3, and OCR never blocks a merge during the
+# two-week window. Score comments against Juror in
+# /opt/ra/firstmate/data/fm-ocr-pilot/.
+#
+# Secrets OCR_LLM_URL and OCR_LLM_AUTH_TOKEN come from a dedicated ocr-pilot
+# vault bundle (not the portal-juror-review provisioner).
+name: OpenCodeReview
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ocr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ocr:
+    name: OpenCodeReview
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run OpenCodeReview
+        uses: alibaba/open-code-review@5c7b38381d1fdd36de6cf622a2a1f768243c4704 # v1.12.8
+        with:
+          llm_url: ${{ secrets.OCR_LLM_URL }}
+          llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+          llm_model: glm-5.2
+          llm_use_anthropic: "false"
+          github_token: ${{ github.token }}
+          sticky_summary: "true"
+          incremental: "true"
+          route_severity_below: medium
+          max_tokens_budget: "800000"
+          rule: .ocr/rule.json
+          ocr_version: 1.12.8
