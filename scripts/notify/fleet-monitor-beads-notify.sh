@@ -4,7 +4,13 @@
 
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+if [ -d "$PWD/.beads/notify" ]; then
+    REPO_DIR="$PWD"
+elif [ -n "${1-}" ] && [ -d "$1/.beads/notify" ]; then
+    REPO_DIR="$1"
+else
+    REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+fi
 cd "$REPO_DIR"
 
 TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -95,7 +101,12 @@ else
 fi
 
 # 7. Execute Turn-Boundary Drain
-DRAIN_OUT=$("$REPO_DIR/scripts/notify/bd-notify-drain" --all 2>&1 || true)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -x "$SCRIPT_DIR/bd-notify-drain" ]; then
+    DRAIN_OUT=$("$SCRIPT_DIR/bd-notify-drain" --all 2>&1 || true)
+else
+    DRAIN_OUT=$(bd-notify-drain --all 2>&1 || true)
+fi
 log_metric PASS "Turn-boundary drain executed cleanly: $DRAIN_OUT"
 
 echo ""
