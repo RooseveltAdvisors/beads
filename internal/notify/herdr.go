@@ -291,8 +291,24 @@ func (h HerdrDiscoverer) Prompt(inst Instance, text string) error {
 }
 
 // Deliver submits text with an explicit delivery mode. Follow-up uses the
-// harness queue key; steer uses herdr agent prompt (Enter).
+// harness queue key (with ctrl+j fallback for pi); steer uses herdr agent prompt (Enter).
 func (h HerdrDiscoverer) Deliver(inst Instance, text string, mode DeliveryMode) error {
+	norm := normalizeHarness(inst.Harness)
+	if mode == ModeFollowUp && (norm == "pi" || norm == "pi-signed") {
+		pasteCall := deliveryCall{Args: sessionArgs(inst, "pane", "send-text", inst.PaneID, wrapFollowUpPaste(text))}
+		if _, err := h.run(pasteCall.Args...); err != nil {
+			return err
+		}
+		keyCall := deliveryCall{Args: sessionArgs(inst, "pane", "send-keys", inst.PaneID, "alt+enter")}
+		if _, err := h.run(keyCall.Args...); err != nil {
+			fallbackCall := deliveryCall{Args: sessionArgs(inst, "pane", "send-keys", inst.PaneID, "ctrl+j")}
+			if _, err2 := h.run(fallbackCall.Args...); err2 != nil {
+				return fmt.Errorf("pi follow-up send-keys failed: %w (ctrl+j fallback: %v)", err, err2)
+			}
+		}
+		return nil
+	}
+
 	for _, call := range deliveryCalls(inst, text, mode) {
 		if _, err := h.run(call.Args...); err != nil {
 			return err

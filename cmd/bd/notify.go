@@ -274,14 +274,15 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 		}
 
 		type seatResult struct {
-			Seat         string              `json:"seat"`
-			Delivered    int                 `json:"delivered"`
-			AckedThru    int64               `json:"acked_through,omitempty"`
-			Instance     *notify.Instance    `json:"instance,omitempty"`
-			DeliveryMode notify.DeliveryMode `json:"delivery_mode,omitempty"`
-			Error        string              `json:"error,omitempty"`
-			Escalate     bool                `json:"escalate,omitempty"`
-			HoldReason   string              `json:"hold_reason,omitempty"`
+			Seat           string              `json:"seat"`
+			Delivered      int                 `json:"delivered"`
+			AckedThru      int64               `json:"acked_through,omitempty"`
+			Instance       *notify.Instance    `json:"instance,omitempty"`
+			DeliveryMode   notify.DeliveryMode `json:"delivery_mode,omitempty"`
+			Error          string              `json:"error,omitempty"`
+			Escalate       bool                `json:"escalate,omitempty"`
+			HoldReason     string              `json:"hold_reason,omitempty"`
+			Classification int                 `json:"classification,omitempty"`
 		}
 		var results []seatResult
 
@@ -308,25 +309,34 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 					res.Error = holdError(dec)
 					res.Escalate = dec.Escalate
 					res.HoldReason = dec.Reason
-					if err := o.SetHold(s, notify.Hold{
-						Reason:         dec.Reason,
-						Session:        dec.Pin.Session,
-						PaneID:         dec.Pin.PaneID,
-						AgentSessionID: dec.Pin.AgentSessionID,
-						Pending:        len(pending),
-					}); err != nil {
-						return HandleError("hold: %v", err)
+					res.Classification = dec.Classification
+					if dec.Escalate {
+						if err := o.SetHold(s, notify.Hold{
+							Reason:         dec.Reason,
+							Session:        dec.Pin.Session,
+							PaneID:         dec.Pin.PaneID,
+							AgentSessionID: dec.Pin.AgentSessionID,
+							Pending:        len(pending),
+						}); err != nil {
+							return HandleError("hold: %v", err)
+						}
 					}
 					results = append(results, res)
 					if !jsonOutput {
-						fmt.Printf("%s seat %s: %s (%d pending left); escalate\n",
-							ui.RenderWarn("!"), s, res.Error, len(pending))
+						if dec.Escalate {
+							fmt.Printf("%s seat %s: %s (%d pending left); escalate\n",
+								ui.RenderWarn("!"), s, res.Error, len(pending))
+						} else {
+							fmt.Printf("%s seat %s: %s (%d pending left); holding until idle\n",
+								ui.RenderAccent("*"), s, res.Error, len(pending))
+						}
 					}
 					continue
 				}
 				inst = dec.Instance
 				res.Instance = &inst
 				res.DeliveryMode = dec.Mode
+				res.Classification = dec.Classification
 			}
 
 			var lastOK int64
@@ -395,10 +405,18 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 		}
 
 		if jsonOutput {
-			return printJSON(results)
-		}
-		if len(results) == 0 {
+			if err := printJSON(results); err != nil {
+				return err
+			}
+		} else if len(results) == 0 {
 			fmt.Printf("%s nothing pending\n", ui.RenderAccent("*"))
+		}
+		if explicitSeat && !all && len(results) == 1 && results[0].Escalate {
+			code := results[0].Classification
+			if code == 0 {
+				code = 1
+			}
+			return &exitError{Code: code}
 		}
 		return nil
 	},
@@ -475,10 +493,12 @@ func tryDrainCommentPing(o *notify.Outbox, seat string) {
 	}
 	dec := notify.DecideDelivery(seat, pins, instances)
 	if !dec.OK {
-		_ = o.SetHold(seat, notify.Hold{
-			Reason: dec.Reason, Session: dec.Pin.Session, PaneID: dec.Pin.PaneID,
-			AgentSessionID: dec.Pin.AgentSessionID, Pending: len(pending),
-		})
+		if dec.Escalate {
+			_ = o.SetHold(seat, notify.Hold{
+				Reason: dec.Reason, Session: dec.Pin.Session, PaneID: dec.Pin.PaneID,
+				AgentSessionID: dec.Pin.AgentSessionID, Pending: len(pending),
+			})
+		}
 		return
 	}
 	var lastOK int64
@@ -517,6 +537,14 @@ func holdError(dec notify.Delivery) string {
 			target = "pin"
 		}
 		return "pinned target " + target + " is not live"
+	case notify.HoldBlocked:
+		target := strings.TrimSpace(dec.Pin.Session + " " + dec.Pin.PaneID)
+		if target == "" {
+			target = "pin"
+		}
+		return "pinned target " + target + " is at an approval dialog (blocked)"
+	case notify.HoldUntilIdle:
+		return fmt.Sprintf("target %s (%s) is working; holding until idle", dec.Instance.PaneID, dec.Instance.Harness)
 	default:
 		return "no pin in .beads/notify/pins.json"
 	}

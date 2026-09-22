@@ -489,9 +489,12 @@ func cycleDetectorTouching(report publicops.CycleReport, ids ...string) [][]stri
 // expectation itself.
 func assertCycleDetectorPath(t *testing.T, cycle publicops.Cycle, edgeOrder ...string) {
 	t.Helper()
+	if len(edgeOrder) == 0 {
+		return
+	}
 	lowest := 0
 	for i, id := range edgeOrder {
-		if id < edgeOrder[lowest] {
+		if id < edgeOrder[lowest] { //nolint:gosec // G602: edgeOrder is non-empty, lowest < len(edgeOrder)
 			lowest = i
 		}
 	}

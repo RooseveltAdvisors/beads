@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# bd-notify-drain — deliver pending beads notify rows to their assignees'
+# live herdr panes, with harness-correct follow-up vs steer semantics.
+#
+# Usage:
+#   bin/bd-notify-drain [--seat SEAT] [--all] [--transport exec|bd] [--no-ensure]
+#
+#   --seat SEAT      drain only this seat (default: every seat with pending rows)
+#   --all            same as default; kept for symmetry with `bd notify drain --all`
+#   --transport exec use bin/bd-notify-deliver (default: harness-aware follow-up
+#                    vs steer matrix, defers instead of interrupting)
+#   --transport bd   use bd's built-in herdr transport verbatim
+#   --no-ensure      skip pin discovery/refresh before draining
+#
+# Run this after commenting (bin/bd-comment-notify does it automatically), from
+# a turn boundary, or from a watcher/cron line, e.g.:
+#   */2 * * * * cd /home/jon/git/wiseman && bin/bd-notify-drain --all
+
+set -euo pipefail
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bd-notify-lib.sh
+source "$LIB_DIR/bd-notify-lib.sh"
+
+seat="" transport="exec" ensure=1
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --seat)      seat="${2:?}"; shift 2 ;;
+        --all)       shift ;;
+        --transport) transport="${2:?}"; shift 2 ;;
+        --no-ensure) ensure=0; shift ;;
+        -h|--help)   grep '^#   \|^# Run\|^# bd-notify-drain' "$LIB_DIR/bd-notify-drain" | sed 's/^# \?//'; exit 0 ;;
+        *) echo "unknown arg: $1" >&2; exit 2 ;;
+    esac
+done
+
+# collect seats that actually have pending rows
+pending_seats="$(bd notify pending --json 2>/dev/null | _jq -r '.[].seat | sort | unique | .[]' 2>/dev/null || true)"
+if [ -z "$pending_seats" ]; then
+    echo "bd-notify-drain: nothing pending"
+    exit 0
+fi
+if [ -n "$seat" ]; then
+    if ! grep -qx "$seat" <<<"$pending_seats"; then
+        echo "bd-notify-drain: no pending rows for seat '$seat'"
+        exit 0
+    fi
+    pending_seats="$seat"
+fi
+
+overall=0
+for s in $pending_seats; do
+    # ensure a live pin exists before draining
+    if [ "$ensure" = 1 ]; then
+        pin="$(pin_get "$s")"
+        need=0
+        if [ -z "$pin" ]; then
+            need=1
+        else
+            p_session="$(_jq -r '.session // ""'       <<<"$pin")"
+            p_pane="$(_jq -r '.pane_id // ""'          <<<"$pin")"
+            p_asid="$(_jq -r '.agent_session_id // ""' <<<"$pin")"
+            find_live_row "$p_session" "$p_pane" "$p_asid" >/dev/null 2>&1 || need=1
+        fi
+        if [ "$need" = 1 ]; then
+            echo "bd-notify-drain: ensuring pin for seat '$s'..."
+            if out="$("$LIB_DIR/bd-notify-pin" discover "$s")"; then
+                echo "bd-notify-drain:   $out"
+            else
+                rc=$?
+                echo "bd-notify-drain:   pin discovery failed for '$s' (rc=$rc); leaving rows queued" >&2
+                overall=5
+                continue
+            fi
+        fi
+    fi
+
+    echo "bd-notify-drain: draining seat '$s' (transport=$transport)"
+    if [ "$transport" = "bd" ]; then
+        if ! bd notify drain --seat "$s"; then
+            overall=1
+        fi
+    else
+        if ! bd notify drain --seat "$s" --exec "$LIB_DIR/bd-notify-deliver"; then
+            overall=1
+        fi
+    fi
+done
+
+exit "$overall"

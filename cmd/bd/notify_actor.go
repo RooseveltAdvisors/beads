@@ -7,12 +7,15 @@ import (
 )
 
 // currentNotifyActor is the seat that should receive BEADS NOTIFY output:
-// --actor, then BEADS_ACTOR (via getActor / resolveConfiguredActor).
+// --actor, then BEADS_ACTOR (via getActor / resolveConfiguredActor / notify.ResolveActor).
 func currentNotifyActor() string {
 	if a := strings.TrimSpace(getActor()); a != "" {
 		return a
 	}
-	return strings.TrimSpace(resolveConfiguredActor())
+	if a := strings.TrimSpace(resolveConfiguredActor()); a != "" {
+		return a
+	}
+	return notify.ResolveActor()
 }
 
 func isUnassignedNotifySeat(seat string) bool {

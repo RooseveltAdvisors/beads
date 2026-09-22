@@ -669,7 +669,7 @@ func assertRelationsPage(t *testing.T, items []*publicops.RelatedIssue, want []s
 		return
 	}
 	for i := range got {
-		if got[i] != want[i] {
+		if got[i] != want[i] { //nolint:gosec // G602: len(got) == len(want) checked above
 			t.Errorf("%s = %v, want %v", describe, got, want)
 			return
 		}
