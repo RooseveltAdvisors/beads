@@ -230,7 +230,7 @@ func deliveryCalls(inst Instance, text string, mode DeliveryMode) []deliveryCall
 				{Args: sessionArgs(inst, "pane", "send-keys", inst.PaneID, prof.SubmitKey)},
 			}
 		}
-		// claude natively queues text typed with Enter while busy.
+		// Fallback if a profile has no SubmitKey but does not HoldUntilIdle.
 		return []deliveryCall{
 			{Args: sessionArgs(inst, "agent", "prompt", inst.PaneID, text)},
 		}

@@ -29,9 +29,10 @@ for the assignee (skipping self-comments and unassigned beads).
 bd notify drain delivers that seat only to the exact herdr
 target recorded in .beads/notify/pins.json (session + pane id, or agent
 session id). Delivery uses the pinned pane's harness follow-up submit
-when the harness supports it (so a due fire does not steer mid-turn),
-and Enter/steer otherwise. There is no fuzzy search: a missing pin or a
-dead pinned target leaves the row queued and marks the seat for parent
+when verified (so a due fire does not steer mid-turn), holds until idle
+for unverified mid-turn harnesses, and uses Enter/steer otherwise.
+There is no fuzzy search: a missing pin, dead pinned target, or blocked
+approval dialog leaves the row queued and marks the seat for parent
 escalation.
 
 bd notify resolve is a human diagnostic. It may show a scored lookalike,
@@ -205,9 +206,10 @@ Default transport is herdr, exact-pin only:
   1. Load .beads/notify/pins.json (seat → session+pane_id or agent_session_id)
   2. Discover live herdr agents
   3. If the pinned target is live, deliver with that pane's harness mode:
-     follow_up (pi Option+Enter, cursor/codex Tab) or steer (Enter) as fallback
+     follow_up (pi Option+Enter, cursor/codex Tab), hold-until-idle for
+     unverified mid-turn harnesses, or steer (Enter) when idle
   4. Ack on success
-  Missing pin or dead pin: leave rows queued, mark escalate, never pick a lookalike.
+  Missing pin, dead pin, or blocked dialog: leave rows queued, mark escalate, never pick a lookalike.
 
 Harness-agnostic: herdr already knows pi/claude/codex/… in each pane.
 Drain picks follow-up vs steer from that harness; it does not import firstmate.

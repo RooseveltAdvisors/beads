@@ -92,8 +92,8 @@ type Delivery struct {
 //   - No pin or dead pin: hold row and mark for parent escalation (exit 5/7).
 //   - Blocked dialog (approval dialog open): never type into it; hold row and mark for escalation (exit 8).
 //   - Mid-turn working:
-//   - Verified follow-up (pi, cursor, codex, claude): deliver as follow-up (Option+Enter, Tab, or busy-Enter).
-//   - Unverified queue (agy, gemini, kimi, omp, muse, unknown): hold-until-idle (exit 9 deferred, row stays queued, no escalation).
+//   - Verified follow-up (pi, cursor, codex): deliver as follow-up (Option+Enter or Tab).
+//   - Unverified queue (claude, agy, gemini, kimi, omp, muse, unknown): hold-until-idle (exit 9 deferred, row stays queued, no escalation).
 //   - Idle/done: deliver immediately with Enter prompt (trivially non-interrupting).
 //   - Unknown status:
 //   - pi, cursor, codex: safe follow-up.
@@ -146,7 +146,7 @@ func DecideDelivery(seat string, pins map[string]Pin, live []Instance) Delivery 
 				Classification: ExitDeferred,
 			}
 		}
-		// Verified non-interrupting follow-up submit (pi, cursor, codex, claude)
+		// Verified non-interrupting follow-up submit (pi, cursor, codex)
 		return Delivery{
 			Instance:       inst,
 			Pin:            pin,
