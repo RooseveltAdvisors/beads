@@ -16,10 +16,23 @@ const (
 	// HoldsFile records seats whose drain held for parent escalation.
 	HoldsFile = "holds.json"
 
-	// HoldNoPin means the seat has no pin; the row stays queued.
+	// HoldNoPin means the seat has no pin; the row stays queued and escalates.
 	HoldNoPin = "no-pin"
-	// HoldDeadPin means the pin exists but that exact target is not live.
+	// HoldDeadPin means the pin exists but that exact target is not live; the row stays queued and escalates.
 	HoldDeadPin = "pinned-target-dead"
+	// HoldBlocked means the target is at an approval dialog or blocked; the row stays queued and escalates.
+	HoldBlocked = "target-blocked"
+	// HoldUntilIdle means target is working and harness has no verified follow-up queue;
+	// the row stays queued for the next turn boundary without parent escalation.
+	HoldUntilIdle = "hold-until-idle"
+
+	// Delivery exit classifications matching prototype semantics:
+	ExitDelivered = 0
+	ExitNoPin     = 5
+	ExitDeadPin   = 7
+	ExitBlocked   = 8
+	ExitDeferred  = 9 // hold-until-idle
+	ExitFailed    = 10
 )
 
 // Pin is an exact delivery target. Session+pane_id and/or agent_session_id
@@ -63,35 +76,121 @@ func (p Pin) Matches(inst Instance) bool {
 
 // Delivery is the drain decision for one seat.
 type Delivery struct {
-	Instance Instance
-	Pin      Pin
-	OK       bool
-	Escalate bool
-	Reason   string
-	Mode     DeliveryMode
+	Instance       Instance
+	Pin            Pin
+	OK             bool
+	Escalate       bool
+	Reason         string
+	Mode           DeliveryMode
+	Classification int
 }
 
-// DecideDelivery is the only delivery resolver. No pin or a dead pin holds
-// the outbox row and marks escalation. Lookalike panes never win.
+// DecideDelivery is the delivery resolver.
+//
+// Semantics:
+//   - Unassigned or empty: no delivery.
+//   - No pin or dead pin: hold row and mark for parent escalation (exit 5/7).
+//   - Blocked dialog (approval dialog open): never type into it; hold row and mark for escalation (exit 8).
+//   - Mid-turn working:
+//   - Verified follow-up (pi, cursor, codex): deliver as follow-up (Option+Enter or Tab).
+//   - Unverified queue (claude, agy, gemini, kimi, omp, muse, unknown): hold-until-idle (exit 9 deferred, row stays queued, no escalation).
+//   - Idle/done: deliver immediately with Enter prompt (trivially non-interrupting).
+//   - Unknown status:
+//   - pi, cursor, codex: safe follow-up.
+//   - others: hold-until-idle.
 func DecideDelivery(seat string, pins map[string]Pin, live []Instance) Delivery {
 	seat = strings.TrimSpace(strings.ToLower(seat))
 	if seat == "" || seat == UnassignedSeat {
-		return Delivery{Reason: HoldNoPin}
+		return Delivery{Reason: HoldNoPin, Classification: ExitNoPin}
 	}
 	if pins == nil {
-		return Delivery{Reason: HoldNoPin, Escalate: true}
+		return Delivery{Reason: HoldNoPin, Escalate: true, Classification: ExitNoPin}
 	}
 	pin, ok := pins[seat]
 	if !ok || !pin.Valid() {
-		return Delivery{Pin: pin, Reason: HoldNoPin, Escalate: true}
+		return Delivery{Pin: pin, Reason: HoldNoPin, Escalate: true, Classification: ExitNoPin}
 	}
 	inst, found := FindPinnedInstance(pin, live)
 	if !found {
-		return Delivery{Pin: pin, Reason: HoldDeadPin, Escalate: true}
+		return Delivery{Pin: pin, Reason: HoldDeadPin, Escalate: true, Classification: ExitDeadPin}
 	}
 	inst.MatchReason = "pin"
 	inst.Score = 0
-	return Delivery{Instance: inst, Pin: pin, OK: true, Mode: ModeForHarness(inst.Harness)}
+
+	status := strings.ToLower(strings.TrimSpace(inst.Status))
+	prof := ProfileForHarness(inst.Harness)
+
+	switch status {
+	case "blocked":
+		// Target is at an approval dialog. Never type into it; hold and mark for escalation.
+		return Delivery{
+			Instance:       inst,
+			Pin:            pin,
+			OK:             false,
+			Escalate:       true,
+			Reason:         HoldBlocked,
+			Classification: ExitBlocked,
+		}
+
+	case "working":
+		if prof.HoldUntilIdle {
+			// Target is mid-turn and harness lacks verified non-interrupting queue.
+			// Hold row for the next turn boundary; do NOT mark for parent escalation.
+			return Delivery{
+				Instance:       inst,
+				Pin:            pin,
+				OK:             false,
+				Escalate:       false,
+				Reason:         HoldUntilIdle,
+				Mode:           ModeHoldUntilIdle,
+				Classification: ExitDeferred,
+			}
+		}
+		// Verified non-interrupting follow-up submit (pi, cursor, codex)
+		return Delivery{
+			Instance:       inst,
+			Pin:            pin,
+			OK:             true,
+			Escalate:       false,
+			Mode:           ModeFollowUp,
+			Classification: ExitDelivered,
+		}
+
+	case "idle", "done":
+		// Target is not in flight; Enter submit starts a turn without interrupting.
+		return Delivery{
+			Instance:       inst,
+			Pin:            pin,
+			OK:             true,
+			Escalate:       false,
+			Mode:           ModeSteer,
+			Classification: ExitDelivered,
+		}
+
+	default:
+		// "unknown" or unset status
+		// Follow-up key harnesses (pi, cursor, codex) are safe to queue
+		if prof.SubmitKey != "" {
+			return Delivery{
+				Instance:       inst,
+				Pin:            pin,
+				OK:             true,
+				Escalate:       false,
+				Mode:           ModeFollowUp,
+				Classification: ExitDelivered,
+			}
+		}
+		// Conservative fallback for others: hold until idle
+		return Delivery{
+			Instance:       inst,
+			Pin:            pin,
+			OK:             false,
+			Escalate:       false,
+			Reason:         HoldUntilIdle,
+			Mode:           ModeHoldUntilIdle,
+			Classification: ExitDeferred,
+		}
+	}
 }
 
 // FindPinnedInstance returns the live instance that exactly matches pin.

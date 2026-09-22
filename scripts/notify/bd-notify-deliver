@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+# bd-notify-deliver — transport for `bd notify drain --exec`.
+#
+# bd invokes this once per pending notify row with:
+#   BD_NOTIFY_SEQ    row seq
+#   BD_NOTIFY_SEAT   assignee seat
+#   BD_NOTIFY_KIND   row kind (comment, due, ...)
+#   BD_NOTIFY_TITLE  row title
+#   BD_NOTIFY_PROMPT message text bd wants submitted to the agent
+#   BD_NOTIFY_JSON   full row as JSON
+# Exit 0 = delivered (bd acks the row); non-zero = hold/defer (bd keeps it queued).
+#
+# Delivery matrix (the point of this whole wiring):
+#
+#   harness        agent state    submit                          semantics
+#   -------------  -------------  ------------------------------  --------------------------
+#   pi             working        pane send-text + alt+enter      FOLLOW-UP: queued for pi's
+#                  (ctrl+j fallback)                              next turn boundary — never
+#                                                                 interrupts in-flight work
+#   pi             idle/done      agent prompt (Enter)            starts a turn now (trivially
+#                                                                 non-interrupting: it's idle)
+#   cursor/codex   working        pane send-text + tab            follow-up-equivalent queue
+#   cursor/codex   idle/done      agent prompt (Enter)
+#   claude/agy/    working        DEFER (exit 9)                  no known non-interrupting
+#   cmd/grok/...                                                  submit; retried by next drain
+#   anything       idle/done      agent prompt (Enter)
+#   anything       blocked        DEFER (exit 8)                  approval dialog open; never
+#                                                                 type into it
+#   pin dead       —              DEFER (exit 7)                  re-pin via bd-notify-pin refresh
+#
+# Safe by construction: this script never starts/stops/kills sessions or panes.
+
+set -euo pipefail
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bd-notify-lib.sh
+source "$LIB_DIR/bd-notify-lib.sh"
+
+SEQ="${BD_NOTIFY_SEQ:-?}"
+SEAT="${BD_NOTIFY_SEAT:-}"
+PROMPT="${BD_NOTIFY_PROMPT:-}"
+ROW_JSON="${BD_NOTIFY_JSON:-}"
+
+if [ -z "$SEAT" ]; then
+    echo "bd-notify-deliver: BD_NOTIFY_SEAT not set" >&2
+    exit 2
+fi
+
+# resolve pin
+pin="$(pin_get "$SEAT")"
+if [ -z "$pin" ]; then
+    echo "bd-notify-deliver: seat '$SEAT' has no pin in $(bd_notify_pins_file)" >&2
+    exit 5
+fi
+session="$(_jq -r '.session // ""'          <<<"$pin")"
+pane="$(_jq -r '.pane_id // ""'             <<<"$pin")"
+asid="$(_jq -r '.agent_session_id // ""'    <<<"$pin")"
+pinned_harness="$(_jq -r '.harness // ""'   <<<"$pin")"
+
+if [ -z "$session" ] || { [ -z "$pane" ] && [ -z "$asid" ]; }; then
+    echo "bd-notify-deliver: pin for '$SEAT' is malformed" >&2
+    exit 5
+fi
+
+# live lookup: prefer pane_id; fall back to agent_session_id (survives pane moves)
+row=""
+if ! row="$(find_live_row "$session" "$pane" "$asid")"; then
+    # pane id may have drifted — try matching by agent_session_id and repin
+    if [ -n "$asid" ] && row="$(find_live_row "$session" "" "$asid")"; then
+        newpane="$(cut -f2 <<<"$row")"
+        pin_write "$SEAT" "$session" "$newpane" "$asid" "$(cut -f4 <<<"$row")" "re-pinned after pane move $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        pane="$newpane"
+        echo "bd-notify-deliver: seat '$SEAT' pane moved -> repinned to $pane" >&2
+    else
+        echo "bd-notify-deliver: pinned target for '$SEAT' ($session ${pane:-$asid}) is not live; holding" >&2
+        exit 7
+    fi
+fi
+
+IFS=$'\t' read -r -a f <<<"$row"
+l_pane="${f[1]}"
+harness="${f[3]}"
+status="${f[4]}"
+# live harness kind wins; pinned harness is the fallback if herdr omitted it
+[ -n "$harness" ] || harness="$pinned_harness"
+
+# annotate the prompt with how to read the full thread
+issue="$(_jq -r '.issue_id // ""' <<<"${ROW_JSON:-{\}}" 2>/dev/null || true)"
+if [ -n "$issue" ] && ! grep -q "bd comments $issue" <<<"$PROMPT"; then
+    PROMPT="${PROMPT}
+[beads ${issue}: full thread via: bd comments ${issue}]"
+fi
+
+submit_followup() { # text queued for the agent's next turn boundary
+    local text="$1"
+    if "$BD_NOTIFY_HERDR" --session "$session" pane send-text "$l_pane" "$text" 2>/dev/null; then
+        if "$BD_NOTIFY_HERDR" --session "$session" pane send-keys "$l_pane" alt+enter >/dev/null 2>&1 \
+           || "$BD_NOTIFY_HERDR" --session "$session" pane send-keys "$l_pane" ctrl+j >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+submit_now() { # Enter-submit; only legal when the agent is idle/done
+    local text="$1"
+    "$BD_NOTIFY_HERDR" --session "$session" agent prompt "$l_pane" "$text" >/dev/null
+}
+
+case "$status" in
+    blocked)
+        echo "bd-notify-deliver: $SEAT target ($session $l_pane) is at an approval dialog; holding" >&2
+        exit 8
+        ;;
+    working)
+        case "$harness" in
+            pi)
+                if submit_followup "$PROMPT"; then
+                    echo "bd-notify-deliver: $SEAT (pi, $session $l_pane): FOLLOW-UP queued for next turn boundary (seq $SEQ)"
+                    exit 0
+                fi
+                echo "bd-notify-deliver: $SEAT: follow-up submit failed; holding" >&2
+                exit 10
+                ;;
+            cursor|codex)
+                if "$BD_NOTIFY_HERDR" --session "$session" pane send-text "$l_pane" "$PROMPT" 2>/dev/null \
+                   && "$BD_NOTIFY_HERDR" --session "$session" pane send-keys "$l_pane" tab >/dev/null 2>&1; then
+                    echo "bd-notify-deliver: $SEAT ($harness, $session $l_pane): message queued via tab (seq $SEQ)"
+                    exit 0
+                fi
+                echo "bd-notify-deliver: $SEAT: $harness queue submit failed; holding" >&2
+                exit 10
+                ;;
+            *)
+                echo "bd-notify-deliver: $SEAT ($harness, $session $l_pane) is working and has no known" \
+                     "non-interrupting submit; deferring (next drain will retry)" >&2
+                exit 9
+                ;;
+        esac
+        ;;
+    idle|done|unknown)
+        # idle/done: an Enter submit cannot interrupt anything — start the turn now.
+        if [ "$status" = "unknown" ]; then
+            # be conservative with unclassifiable panes that are mid-something
+            case "$harness" in
+                pi)
+                    if submit_followup "$PROMPT"; then
+                        echo "bd-notify-deliver: $SEAT (pi, $session $l_pane): FOLLOW-UP queued (state unknown, seq $SEQ)"
+                        exit 0
+                    fi
+                    echo "bd-notify-deliver: $SEAT: follow-up submit failed; holding" >&2
+                    exit 10
+                    ;;
+                cursor|codex)
+                    if "$BD_NOTIFY_HERDR" --session "$session" pane send-text "$l_pane" "$PROMPT" 2>/dev/null \
+                       && "$BD_NOTIFY_HERDR" --session "$session" pane send-keys "$l_pane" tab >/dev/null 2>&1; then
+                        echo "bd-notify-deliver: $SEAT ($harness, $session $l_pane): message queued via tab (state unknown, seq $SEQ)"
+                        exit 0
+                    fi
+                    echo "bd-notify-deliver: $SEAT: $harness queue submit failed; holding" >&2
+                    exit 10
+                    ;;
+                *)
+                    echo "bd-notify-deliver: $SEAT ($harness) state unknown; deferring" >&2
+                    exit 9
+                    ;;
+            esac
+        fi
+        if submit_now "$PROMPT"; then
+            echo "bd-notify-deliver: $SEAT ($harness, $session $l_pane): delivered via prompt, agent was $status (seq $SEQ)"
+            exit 0
+        fi
+        # prompt may have raced with a state change; retry once as follow-up if possible
+        case "$harness" in
+            pi)
+                if submit_followup "$PROMPT"; then
+                    echo "bd-notify-deliver: $SEAT (pi): raced to working; FOLLOW-UP queued instead (seq $SEQ)"
+                    exit 0
+                fi
+                ;;
+        esac
+        echo "bd-notify-deliver: $SEAT: submit failed; holding" >&2
+        exit 10
+        ;;
+    *)
+        echo "bd-notify-deliver: $SEAT target status '$status' not deliverable; holding" >&2
+        exit 9
+        ;;
+esac

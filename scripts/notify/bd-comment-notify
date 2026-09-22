@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# bd-comment-notify — drop-in wrapper for `bd comment` that also routes a
+# notification to the issue's assignee with harness-correct semantics:
+#
+#   - comment author != assignee  ->  assignee's pane receives the comment as a
+#     NON-INTERRUPTING follow-up (pi: Option+Enter queue, delivered at the
+#     agent's next turn boundary). Interrupting steer is never used for
+#     comment pings; Enter is used only when the target is idle.
+#   - self-comment (actor == assignee) or unassigned bead -> no ping (bd
+#     already skips enqueueing; the wrapper just skips the drain).
+#
+# Usage (same forms as `bd comment`):
+#   bin/bd-comment-notify <issue-id> "text..."
+#   echo "text" | bin/bd-comment-notify <issue-id> --stdin
+#   bin/bd-comment-notify <issue-id> --file notes.txt
+#   bin/bd-comment-notify --no-drain <issue-id> "text..."   # skip notification
+#
+# Seat attribution: set BEADS_ACTOR to YOUR seat (e.g. arcs-fm, wiseman,
+# portal-codex) so self-comments never ping you and others' comments ping the
+# right assignee. Without it, bd falls back to git user.name, which hides which
+# agent spoke.
+#
+# Exit code: 0 if the comment landed (even if delivery was deferred — a failed
+# notification must not trick the caller into re-posting the comment).
+# Set BD_COMMENT_NOTIFY_STRICT=1 to propagate delivery failures as exit 3.
+
+set -euo pipefail
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bd-notify-lib.sh
+source "$LIB_DIR/bd-notify-lib.sh"
+
+no_drain=0
+if [ "${1:-}" = "--no-drain" ]; then
+    no_drain=1
+    shift
+fi
+[ $# -ge 1 ] || { sed -n '2,20p' "$LIB_DIR/bd-comment-notify" | sed 's/^# \?//'; exit 2; }
+issue_id="$1"
+
+if [ -z "${BEADS_ACTOR:-}" ]; then
+    echo "bd-comment-notify: BEADS_ACTOR is unset — attributing this comment to" \
+         "'$(git config user.name 2>/dev/null || id -un)'. Export BEADS_ACTOR=<your seat> for correct notify semantics." >&2
+fi
+
+if ! bd comment "$@"; then
+    echo "bd-comment-notify: bd comment failed" >&2
+    exit 1
+fi
+
+[ "$no_drain" = 1 ] && exit 0
+
+# who should hear about it?
+assignee="$(bd show "$issue_id" --json 2>/dev/null | _jq -r '.[0].assignee // .[0].owner // ""' || true)"
+actor="${BEADS_ACTOR:-$(git config user.name 2>/dev/null || id -un)}"
+if [ -z "$assignee" ]; then
+    echo "bd-comment-notify: $issue_id has no assignee; nothing to notify"
+    exit 0
+fi
+if [ "$assignee" = "$actor" ]; then
+    echo "bd-comment-notify: self-comment by assignee '$actor'; no ping needed"
+    exit 0
+fi
+
+echo "bd-comment-notify: notifying assignee '$assignee'..."
+if "$LIB_DIR/bd-notify-drain" --seat "$assignee"; then
+    echo "bd-comment-notify: assignee '$assignee' notified (or delivery deliberately deferred)"
+    exit 0
+else
+    rc=$?
+    echo "bd-comment-notify: WARNING — comment landed on $issue_id but notification to" \
+         "'$assignee' did not deliver (rc=$rc). Rows stay queued; run bin/bd-notify-drain --all later." >&2
+    [ "${BD_COMMENT_NOTIFY_STRICT:-0}" = "1" ] && exit 3
+    exit 0
+fi

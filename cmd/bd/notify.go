@@ -29,9 +29,10 @@ for the assignee (skipping self-comments and unassigned beads).
 bd notify drain delivers that seat only to the exact herdr
 target recorded in .beads/notify/pins.json (session + pane id, or agent
 session id). Delivery uses the pinned pane's harness follow-up submit
-when the harness supports it (so a due fire does not steer mid-turn),
-and Enter/steer otherwise. There is no fuzzy search: a missing pin or a
-dead pinned target leaves the row queued and marks the seat for parent
+when verified (so a due fire does not steer mid-turn), holds until idle
+for unverified mid-turn harnesses, and uses Enter/steer otherwise.
+There is no fuzzy search: a missing pin, dead pinned target, or blocked
+approval dialog leaves the row queued and marks the seat for parent
 escalation.
 
 bd notify resolve is a human diagnostic. It may show a scored lookalike,
@@ -205,9 +206,10 @@ Default transport is herdr, exact-pin only:
   1. Load .beads/notify/pins.json (seat → session+pane_id or agent_session_id)
   2. Discover live herdr agents
   3. If the pinned target is live, deliver with that pane's harness mode:
-     follow_up (pi Option+Enter, cursor/codex Tab) or steer (Enter) as fallback
+     follow_up (pi Option+Enter, cursor/codex Tab), hold-until-idle for
+     unverified mid-turn harnesses, or steer (Enter) when idle
   4. Ack on success
-  Missing pin or dead pin: leave rows queued, mark escalate, never pick a lookalike.
+  Missing pin, dead pin, or blocked dialog: leave rows queued, mark escalate, never pick a lookalike.
 
 Harness-agnostic: herdr already knows pi/claude/codex/… in each pane.
 Drain picks follow-up vs steer from that harness; it does not import firstmate.
@@ -274,14 +276,15 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 		}
 
 		type seatResult struct {
-			Seat         string              `json:"seat"`
-			Delivered    int                 `json:"delivered"`
-			AckedThru    int64               `json:"acked_through,omitempty"`
-			Instance     *notify.Instance    `json:"instance,omitempty"`
-			DeliveryMode notify.DeliveryMode `json:"delivery_mode,omitempty"`
-			Error        string              `json:"error,omitempty"`
-			Escalate     bool                `json:"escalate,omitempty"`
-			HoldReason   string              `json:"hold_reason,omitempty"`
+			Seat           string              `json:"seat"`
+			Delivered      int                 `json:"delivered"`
+			AckedThru      int64               `json:"acked_through,omitempty"`
+			Instance       *notify.Instance    `json:"instance,omitempty"`
+			DeliveryMode   notify.DeliveryMode `json:"delivery_mode,omitempty"`
+			Error          string              `json:"error,omitempty"`
+			Escalate       bool                `json:"escalate,omitempty"`
+			HoldReason     string              `json:"hold_reason,omitempty"`
+			Classification int                 `json:"classification,omitempty"`
 		}
 		var results []seatResult
 
@@ -308,25 +311,34 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 					res.Error = holdError(dec)
 					res.Escalate = dec.Escalate
 					res.HoldReason = dec.Reason
-					if err := o.SetHold(s, notify.Hold{
-						Reason:         dec.Reason,
-						Session:        dec.Pin.Session,
-						PaneID:         dec.Pin.PaneID,
-						AgentSessionID: dec.Pin.AgentSessionID,
-						Pending:        len(pending),
-					}); err != nil {
-						return HandleError("hold: %v", err)
+					res.Classification = dec.Classification
+					if dec.Escalate {
+						if err := o.SetHold(s, notify.Hold{
+							Reason:         dec.Reason,
+							Session:        dec.Pin.Session,
+							PaneID:         dec.Pin.PaneID,
+							AgentSessionID: dec.Pin.AgentSessionID,
+							Pending:        len(pending),
+						}); err != nil {
+							return HandleError("hold: %v", err)
+						}
 					}
 					results = append(results, res)
 					if !jsonOutput {
-						fmt.Printf("%s seat %s: %s (%d pending left); escalate\n",
-							ui.RenderWarn("!"), s, res.Error, len(pending))
+						if dec.Escalate {
+							fmt.Printf("%s seat %s: %s (%d pending left); escalate\n",
+								ui.RenderWarn("!"), s, res.Error, len(pending))
+						} else {
+							fmt.Printf("%s seat %s: %s (%d pending left); holding until idle\n",
+								ui.RenderAccent("*"), s, res.Error, len(pending))
+						}
 					}
 					continue
 				}
 				inst = dec.Instance
 				res.Instance = &inst
 				res.DeliveryMode = dec.Mode
+				res.Classification = dec.Classification
 			}
 
 			var lastOK int64
@@ -336,6 +348,10 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 				case execCmd != "":
 					if err := runNotifyExec(execCmd, rec); err != nil {
 						res.Error = err.Error()
+						res.Classification = notify.ExitFailed
+						if exitErr, ok := err.(*exec.ExitError); ok {
+							res.Classification = exitErr.ExitCode()
+						}
 						if !jsonOutput {
 							fmt.Fprintf(os.Stderr, "notify drain: seq %d %s: %v\n", rec.Seq, rec.IssueID, err)
 						}
@@ -358,6 +374,7 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 					}
 					if err := discover.Deliver(inst, prompt, mode); err != nil {
 						res.Error = err.Error()
+						res.Classification = notify.ExitFailed
 						if !jsonOutput {
 							fmt.Fprintf(os.Stderr, "notify drain: seq %d herdr %s %s: %v\n", rec.Seq, inst.Session, inst.PaneID, err)
 						}
@@ -395,10 +412,28 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 		}
 
 		if jsonOutput {
-			return printJSON(results)
-		}
-		if len(results) == 0 {
+			if err := printJSON(results); err != nil {
+				return err
+			}
+		} else if len(results) == 0 {
 			fmt.Printf("%s nothing pending\n", ui.RenderAccent("*"))
+		}
+		if explicitSeat && !all && len(results) == 1 {
+			res := results[0]
+			if res.Escalate {
+				code := res.Classification
+				if code == 0 {
+					code = 1
+				}
+				return &exitError{Code: code}
+			}
+			if res.Error != "" && res.Classification != notify.ExitDeferred {
+				code := res.Classification
+				if code == 0 || code == notify.ExitDelivered {
+					code = notify.ExitFailed
+				}
+				return &exitError{Code: code}
+			}
 		}
 		return nil
 	},
@@ -475,10 +510,12 @@ func tryDrainCommentPing(o *notify.Outbox, seat string) {
 	}
 	dec := notify.DecideDelivery(seat, pins, instances)
 	if !dec.OK {
-		_ = o.SetHold(seat, notify.Hold{
-			Reason: dec.Reason, Session: dec.Pin.Session, PaneID: dec.Pin.PaneID,
-			AgentSessionID: dec.Pin.AgentSessionID, Pending: len(pending),
-		})
+		if dec.Escalate {
+			_ = o.SetHold(seat, notify.Hold{
+				Reason: dec.Reason, Session: dec.Pin.Session, PaneID: dec.Pin.PaneID,
+				AgentSessionID: dec.Pin.AgentSessionID, Pending: len(pending),
+			})
+		}
 		return
 	}
 	var lastOK int64
@@ -517,6 +554,14 @@ func holdError(dec notify.Delivery) string {
 			target = "pin"
 		}
 		return "pinned target " + target + " is not live"
+	case notify.HoldBlocked:
+		target := strings.TrimSpace(dec.Pin.Session + " " + dec.Pin.PaneID)
+		if target == "" {
+			target = "pin"
+		}
+		return "pinned target " + target + " is at an approval dialog (blocked)"
+	case notify.HoldUntilIdle:
+		return fmt.Sprintf("target %s (%s) is working; holding until idle", dec.Instance.PaneID, dec.Instance.Harness)
 	default:
 		return "no pin in .beads/notify/pins.json"
 	}

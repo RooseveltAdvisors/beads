@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# bd-notify-pin — manage .beads/notify/pins.json: the seat -> live-herdr-pane
+# map that `bd notify drain` delivers against.
+#
+# Usage:
+#   bin/bd-notify-pin list                 show pins + live status
+#   bin/bd-notify-pin get <seat>           print one pin as JSON
+#   bin/bd-notify-pin set <seat> <session> <pane_id> [harness] [note]
+#                                          write a pin manually
+#   bin/bd-notify-pin discover <seat>      auto-discover the assignee's live
+#                                          pane and write the pin
+#   bin/bd-notify-pin refresh [<seat>|--all]
+#                                          re-discover stale/dead pins
+#   bin/bd-notify-pin forget <seat>        remove a pin
+#
+# Discovery order:
+#   1. explicit hint in .beads/notify/seat-map.json (session/pane/name/title/cwd/pick)
+#   2. herdr agent whose name/kind equals the seat
+#   3. terminal-title substring match on the seat name
+#   4. seat-suffix conventions: "<x>-fm" -> primary firstmate pi in the
+#      'firstmate' herdr session; "<x>-agy"/"-codex"/"-cc" -> that agent kind
+#   5. agents whose cwd is inside this repo
+# Refuses to guess when two candidates rank equally (exit 6).
+
+set -euo pipefail
+LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=bd-notify-lib.sh
+source "$LIB_DIR/bd-notify-lib.sh"
+
+usage() { grep '^#   bin/bd-notify-pin' "$LIB_DIR/bd-notify-pin" | sed 's/^#   //'; exit 2; }
+
+cmd="${1:-}"; shift || true
+
+case "$cmd" in
+    list)
+        file="$(bd_notify_pins_file)"
+        [ -f "$file" ] || { echo "(no pins yet: $file)"; exit 0; }
+        seats="$(_jq -r 'keys[]' "$file")"
+        [ -n "$seats" ] || { echo "(pins file empty)"; exit 0; }
+        for seat in $seats; do
+            pin="$(_jq -c --arg s "$seat" '.[$s]' "$file")"
+            session="$(_jq -r '.session // ""'       <<<"$pin")"
+            pane="$(_jq -r '.pane_id // ""'          <<<"$pin")"
+            asid="$(_jq -r '.agent_session_id // ""' <<<"$pin")"
+            if row="$(find_live_row "$session" "$pane" "$asid")"; then
+                status="$(cut -f5 <<<"$row")"; kind="$(cut -f4 <<<"$row")"; lpane="$(cut -f2 <<<"$row")"
+                note="$(_jq -r '.note // ""' <<<"$pin")"
+                printf '%-12s -> %-10s %-8s %-8s %s (live: %s)\n' "$seat" "$session" "$kind" "$status" "$note" "$lpane"
+            else
+                printf '%-12s -> %-10s %-8s %-8s  ** STALE **\n' "$seat" "$session" "$(_jq -r '.harness // "?"' <<<"$pin")" "dead"
+            fi
+        done
+        ;;
+
+    get)
+        seat="${1:?seat required}"; pin_get "$seat"
+        ;;
+
+    set)
+        seat="${1:?seat required}"; session="${2:?session required}"; pane="${3:?pane_id required}"
+        harness="${4:-}"; note="${5:-}"
+        pin_write "$seat" "$session" "$pane" "" "$harness" "$note"
+        echo "pinned $seat -> $session $pane"
+        ;;
+
+    discover)
+        seat="${1:?seat required}"
+        if out="$(discover_seat "$seat")"; then
+            IFS=$'\t' read -r session pane asid harness <<<"$out"
+            pin_write "$seat" "$session" "$pane" "$asid" "$harness" "auto-discovered $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "pinned $seat -> $session $pane ($harness)"
+        else
+            rc=$?
+            echo "discover failed for seat '$seat' (rc=$rc)" >&2
+            exit "$rc"
+        fi
+        ;;
+
+    refresh)
+        target="${1:---all}"
+        file="$(bd_notify_pins_file)"
+        [ -f "$file" ] || { echo "no pins file"; exit 0; }
+        if [ "$target" = "--all" ] || [ -z "${1:-}" ]; then
+            seats="$(_jq -r 'keys[]' "$file")"
+        else
+            seats="$target"
+        fi
+        rc=0
+        for seat in $seats; do
+            session="$(_jq -r --arg s "$seat" '.[$s].session // ""' "$file")"
+            pane="$(_jq -r --arg s "$seat" '.[$s].pane_id // ""' "$file")"
+            asid="$(_jq -r --arg s "$seat" '.[$s].agent_session_id // ""' "$file")"
+            if find_live_row "$session" "$pane" "$asid" >/dev/null; then
+                echo "$seat: pin still live ($session $pane)"
+                continue
+            fi
+            echo "$seat: pin stale ($session $pane), re-discovering..."
+            if out="$(discover_seat "$seat")"; then
+                IFS=$'\t' read -r ns npane nasid nkind <<<"$out"
+                pin_write "$seat" "$ns" "$npane" "$nasid" "$nkind" "re-discovered $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                echo "$seat: repinned -> $ns $npane ($nkind)"
+            else
+                echo "$seat: re-discovery failed; keeping old pin" >&2
+                rc=5
+            fi
+        done
+        exit "$rc"
+        ;;
+
+    forget)
+        seat="${1:?seat required}"
+        pin_delete "$seat"
+        echo "forgot $seat"
+        ;;
+
+    *)
+        usage
+        ;;
+esac

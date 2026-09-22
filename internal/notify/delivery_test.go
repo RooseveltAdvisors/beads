@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -19,12 +20,17 @@ func TestModeForHarness(t *testing.T) {
 		{"cursor", "cursor", ModeFollowUp, "tab"},
 		{"cursor-agent", "cursor-agent", ModeFollowUp, "tab"},
 		{"codex", "codex", ModeFollowUp, "tab"},
-		{"claude", "claude", ModeSteer, ""},
-		{"claude-code", "claude-code", ModeSteer, ""},
-		{"omp", "omp", ModeSteer, ""},
-		{"grok", "grok", ModeSteer, ""},
-		{"empty", "", ModeSteer, ""},
-		{"unknown", "unknown", ModeSteer, ""},
+		{"claude", "claude", ModeHoldUntilIdle, ""},
+		{"claude-code", "claude-code", ModeHoldUntilIdle, ""},
+		{"agy", "agy", ModeHoldUntilIdle, ""},
+		{"antigravity", "antigravity", ModeHoldUntilIdle, ""},
+		{"gemini", "gemini", ModeHoldUntilIdle, ""},
+		{"kimi", "kimi", ModeHoldUntilIdle, ""},
+		{"omp", "omp", ModeHoldUntilIdle, ""},
+		{"muse", "muse", ModeHoldUntilIdle, ""},
+		{"grok", "grok", ModeHoldUntilIdle, ""},
+		{"empty", "", ModeHoldUntilIdle, ""},
+		{"unknown", "unknown", ModeHoldUntilIdle, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -36,6 +42,34 @@ func TestModeForHarness(t *testing.T) {
 				t.Fatalf("FollowUpSubmitKey(%q) = %q, want %q", tc.harness, got, tc.key)
 			}
 		})
+	}
+}
+
+func TestHarnessProfilesTable(t *testing.T) {
+	t.Parallel()
+	profiles := HarnessProfiles()
+	if len(profiles) == 0 {
+		t.Fatal("expected non-empty HarnessProfiles")
+	}
+	// Verify verified harnesses have Verified=true and non-empty notes
+	verifiedCount := 0
+	for _, p := range profiles {
+		if p.Notes == "" {
+			t.Errorf("profile %s has empty notes", p.Harness)
+		}
+		if p.Verified {
+			verifiedCount++
+			if p.HoldUntilIdle {
+				t.Errorf("verified harness %s should not default to hold-until-idle", p.Harness)
+			}
+		} else {
+			if !p.HoldUntilIdle {
+				t.Errorf("unverified harness %s must default to hold-until-idle", p.Harness)
+			}
+		}
+	}
+	if verifiedCount < 5 {
+		t.Errorf("expected at least 5 verified harness rows (pi, pi-signed, cursor, cursor-agent, codex), got %d", verifiedCount)
 	}
 }
 
@@ -81,21 +115,46 @@ func TestDeliverPiFollowUpUsesAltEnter(t *testing.T) {
 	}
 }
 
-func TestDeliverUnsupportedHarnessSteers(t *testing.T) {
+func TestDeliverPiFollowUpCtrlJFallback(t *testing.T) {
+	t.Parallel()
+	prompt := "hello"
+	inst := Instance{Session: "wiseman", PaneID: "w1:p1", Harness: "pi"}
+	var calls [][]string
+	h := HerdrDiscoverer{
+		runFn: func(args ...string) ([]byte, error) {
+			calls = append(calls, append([]string(nil), args...))
+			if containsSeq(args, "send-keys", "w1:p1", "alt+enter") {
+				return nil, errors.New("alt+enter unsupported in terminal")
+			}
+			return nil, nil
+		},
+	}
+	if err := h.Deliver(inst, prompt, ModeFollowUp); err != nil {
+		t.Fatalf("Deliver with fallback failed: %v", err)
+	}
+	if len(calls) != 3 {
+		t.Fatalf("expected 3 calls (paste, alt+enter, ctrl+j), got %d: %v", len(calls), calls)
+	}
+	if !containsSeq(calls[2], "send-keys", "w1:p1", "ctrl+j") {
+		t.Fatalf("expected ctrl+j fallback call, got %v", calls[2])
+	}
+}
+
+func TestDeliverSteerUsesAgentPromptWhenIdle(t *testing.T) {
 	t.Parallel()
 	rec := Record{Kind: KindDue, Seat: "wiseman", IssueID: "bd-1", Title: "Do thing"}
 	prompt := DefaultPrompt(rec)
-	for _, harness := range []string{"claude", "omp", "grok", ""} {
-		inst := Instance{Session: "wiseman", PaneID: "w1:p2", Harness: harness}
-		got := captureDeliver(t, inst, prompt, ModeForHarness(harness))
+	for _, harness := range []string{"claude", "omp", "grok", "agy", "gemini", ""} {
+		inst := Instance{Session: "wiseman", PaneID: "w1:p2", Harness: harness, Status: "idle"}
+		got := captureDeliver(t, inst, prompt, ModeSteer)
 		if len(got) != 1 {
 			t.Fatalf("%s steer calls = %d, want 1: %v", harness, len(got), got)
 		}
 		if !containsSeq(got[0], "agent", "prompt", "w1:p2") {
-			t.Fatalf("%s should steer via agent prompt, got %v", harness, got[0])
+			t.Fatalf("%s should prompt via agent prompt, got %v", harness, got[0])
 		}
 		if promptText(deliveryCall{Args: got[0]}) != prompt {
-			t.Fatalf("%s steered body drifted from notify prompt", harness)
+			t.Fatalf("%s body drifted from notify prompt", harness)
 		}
 	}
 }
@@ -151,28 +210,69 @@ func TestFollowUpSubmitKeysOnSupportedHarnesses(t *testing.T) {
 	}
 }
 
-func TestForcedFollowUpOnClaudeFallsBackToSteer(t *testing.T) {
+func TestClaudeHoldsUntilIdle(t *testing.T) {
 	t.Parallel()
-	inst := Instance{Session: "s", PaneID: "p9", Harness: "claude"}
-	calls := deliveryCalls(inst, "hello", ModeFollowUp)
-	if len(calls) != 1 || !containsSeq(calls[0].Args, "agent", "prompt") {
-		t.Fatalf("claude has no follow-up key; want steer, got %#v", calls)
+	prof := ProfileForHarness("claude")
+	if !prof.HoldUntilIdle {
+		t.Fatalf("claude profile must hold until idle: %+v", prof)
+	}
+	if got := ModeForHarness("claude"); got != ModeHoldUntilIdle {
+		t.Fatalf("claude mode must be ModeHoldUntilIdle, got %v", got)
 	}
 }
 
-func TestDecideDeliveryRecordsFollowUpMode(t *testing.T) {
+func TestDecideDeliveryMatrix(t *testing.T) {
 	t.Parallel()
 	pins := map[string]Pin{"wiseman": {Session: "wiseman", PaneID: "w1:p1"}}
-	live := []Instance{{Session: "wiseman", PaneID: "w1:p1", Harness: "pi"}}
+
+	// 1. Pi working -> follow-up
+	live := []Instance{{Session: "wiseman", PaneID: "w1:p1", Harness: "pi", Status: "working"}}
 	got := DecideDelivery("wiseman", pins, live)
-	if !got.OK || got.Mode != ModeFollowUp {
-		t.Fatalf("pinned pi seat: %+v", got)
+	if !got.OK || got.Mode != ModeFollowUp || got.Escalate {
+		t.Fatalf("pi working seat: %+v", got)
 	}
 
+	// 2. Claude working -> hold-until-idle (OK=false, Escalate=false, Reason=HoldUntilIdle, Classification=ExitDeferred)
 	live[0].Harness = "claude"
+	live[0].Status = "working"
 	got = DecideDelivery("wiseman", pins, live)
-	if !got.OK || got.Mode != ModeSteer {
-		t.Fatalf("pinned claude seat: %+v", got)
+	if got.OK || got.Escalate || got.Reason != HoldUntilIdle || got.Classification != ExitDeferred {
+		t.Fatalf("claude working seat: %+v", got)
+	}
+
+	// 3. Claude idle -> steer (prompt Enter)
+	live[0].Status = "idle"
+	got = DecideDelivery("wiseman", pins, live)
+	if !got.OK || got.Mode != ModeSteer || got.Escalate {
+		t.Fatalf("claude idle seat: %+v", got)
+	}
+
+	// 4. Agy working -> hold-until-idle (OK=false, Escalate=false, Reason=HoldUntilIdle, Classification=ExitDeferred)
+	live[0].Harness = "agy"
+	live[0].Status = "working"
+	got = DecideDelivery("wiseman", pins, live)
+	if got.OK || got.Escalate || got.Reason != HoldUntilIdle || got.Classification != ExitDeferred {
+		t.Fatalf("agy working seat: %+v", got)
+	}
+
+	// 5. Agy idle -> prompt Enter (OK=true, Mode=ModeSteer, Classification=ExitDelivered)
+	live[0].Status = "idle"
+	got = DecideDelivery("wiseman", pins, live)
+	if !got.OK || got.Escalate || got.Mode != ModeSteer || got.Classification != ExitDelivered {
+		t.Fatalf("agy idle seat: %+v", got)
+	}
+
+	// 6. Blocked agent -> never type into approval dialog (OK=false, Escalate=true, Reason=HoldBlocked, Classification=ExitBlocked)
+	live[0].Status = "blocked"
+	got = DecideDelivery("wiseman", pins, live)
+	if got.OK || !got.Escalate || got.Reason != HoldBlocked || got.Classification != ExitBlocked {
+		t.Fatalf("blocked seat: %+v", got)
+	}
+
+	// 7. Dead pin -> OK=false, Escalate=true, Reason=HoldDeadPin, Classification=ExitDeadPin
+	got = DecideDelivery("wiseman", pins, []Instance{})
+	if got.OK || !got.Escalate || got.Reason != HoldDeadPin || got.Classification != ExitDeadPin {
+		t.Fatalf("dead pin seat: %+v", got)
 	}
 }
 

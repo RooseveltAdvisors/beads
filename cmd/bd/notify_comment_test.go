@@ -99,3 +99,34 @@ func TestTryDrainCommentPing_NoPinHoldsWithoutHerdr(t *testing.T) {
 		t.Fatalf("unpinned drain must leave the row queued, got %d", len(pending))
 	}
 }
+
+func TestNotifyDrain_PropagatesExecError(t *testing.T) {
+	t.Setenv("BEADS_TEST_MODE", "")
+	dir := setupNotifyBeadsDir(t)
+
+	o, err := notify.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Enqueue("wiseman", "fm-c", notify.KindComment, "hello"); err != nil {
+		t.Fatal(err)
+	}
+
+	notifyDrainCmd.Flags().Set("seat", "wiseman")
+	notifyDrainCmd.Flags().Set("all", "false")
+	notifyDrainCmd.Flags().Set("exec", "sh -c 'exit 42'")
+	defer func() {
+		notifyDrainCmd.Flags().Set("seat", "")
+		notifyDrainCmd.Flags().Set("all", "false")
+		notifyDrainCmd.Flags().Set("exec", "")
+	}()
+
+	err = notifyDrainCmd.RunE(notifyDrainCmd, nil)
+	if err == nil {
+		t.Fatal("expected non-nil error when --exec fails")
+	}
+	code, ok := exitCodeFromError(err)
+	if !ok || code != 42 {
+		t.Fatalf("expected exit code 42, got %d (err: %v)", code, err)
+	}
+}

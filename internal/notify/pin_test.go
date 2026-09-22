@@ -11,7 +11,7 @@ func lookalikeInstances() []Instance {
 		{Session: "firstmate", PaneID: "w1:p9", Harness: "pi", Status: "idle", Title: "π - firstmate", Focused: true, AgentSessionID: "stale-pi-2026-09-13"},
 		{Session: "firstmate", PaneID: "w0:p2", Harness: "claude", Status: "idle", Title: "Arcs Macro ops", Cwd: "/work/firstmate"},
 		{Session: "adhoc", PaneID: "w1:p3", Harness: "codex", Status: "idle", Title: "π - firstmate", Focused: true},
-		{Session: "firstmate", PaneID: "w6:p2", Harness: "claude", Status: "working", Title: "advisory"},
+		{Session: "firstmate", PaneID: "w6:p2", Harness: "claude", Status: "idle", Title: "advisory"},
 	}
 }
 
