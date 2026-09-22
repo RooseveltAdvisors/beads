@@ -134,17 +134,13 @@ func TestE2E_Journey(t *testing.T) {
 			t.Fatalf("codex follow-up calls should submit tab: %v", callsCodex)
 		}
 
-		// Claude mid-turn (working): native typed-while-busy queue with Enter (agent prompt)
+		// Claude mid-turn (working): hold-until-idle like agy
 		liveClaudeWorking := []Instance{
 			{Session: "firstmate", PaneID: "w1:pA", Harness: "claude", Status: "working"},
 		}
 		decClaude := DecideDelivery("arcs-fm", pins, liveClaudeWorking)
-		if !decClaude.OK || decClaude.Mode != ModeFollowUp || decClaude.Escalate {
-			t.Fatalf("claude working should deliver follow-up: %+v", decClaude)
-		}
-		callsClaude := deliveryCalls(decClaude.Instance, "test message", decClaude.Mode)
-		if len(callsClaude) != 1 || !containsSeq(callsClaude[0].Args, "agent", "prompt", "w1:pA") {
-			t.Fatalf("claude follow-up should submit via agent prompt: %v", callsClaude)
+		if decClaude.OK || decClaude.Escalate || decClaude.Reason != HoldUntilIdle || decClaude.Classification != ExitDeferred {
+			t.Fatalf("claude working should hold until idle: %+v", decClaude)
 		}
 
 		// Idle agent on any harness: delivered via Enter prompt (trivially non-interrupting)
@@ -165,8 +161,8 @@ func TestE2E_Journey(t *testing.T) {
 			"worker-agy": {Session: "worker", PaneID: "w2:p1"},
 		}
 
-		// Harnesses with unverified queue semantics while working: agy, gemini, kimi, omp, muse
-		unverified := []string{"agy", "antigravity", "gemini", "kimi", "omp", "muse", "unknown-agent"}
+		// Harnesses with unverified queue semantics while working: claude, claude-code, agy, gemini, kimi, omp, muse
+		unverified := []string{"claude", "claude-code", "agy", "antigravity", "gemini", "kimi", "omp", "muse", "unknown-agent"}
 		for _, h := range unverified {
 			liveWorking := []Instance{
 				{Session: "worker", PaneID: "w2:p1", Harness: h, Status: "working"},

@@ -346,6 +346,10 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 				case execCmd != "":
 					if err := runNotifyExec(execCmd, rec); err != nil {
 						res.Error = err.Error()
+						res.Classification = notify.ExitFailed
+						if exitErr, ok := err.(*exec.ExitError); ok {
+							res.Classification = exitErr.ExitCode()
+						}
 						if !jsonOutput {
 							fmt.Fprintf(os.Stderr, "notify drain: seq %d %s: %v\n", rec.Seq, rec.IssueID, err)
 						}
@@ -368,6 +372,7 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 					}
 					if err := discover.Deliver(inst, prompt, mode); err != nil {
 						res.Error = err.Error()
+						res.Classification = notify.ExitFailed
 						if !jsonOutput {
 							fmt.Fprintf(os.Stderr, "notify drain: seq %d herdr %s %s: %v\n", rec.Seq, inst.Session, inst.PaneID, err)
 						}
@@ -411,12 +416,22 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 		} else if len(results) == 0 {
 			fmt.Printf("%s nothing pending\n", ui.RenderAccent("*"))
 		}
-		if explicitSeat && !all && len(results) == 1 && results[0].Escalate {
-			code := results[0].Classification
-			if code == 0 {
-				code = 1
+		if explicitSeat && !all && len(results) == 1 {
+			res := results[0]
+			if res.Escalate {
+				code := res.Classification
+				if code == 0 {
+					code = 1
+				}
+				return &exitError{Code: code}
 			}
-			return &exitError{Code: code}
+			if res.Error != "" && res.Classification != notify.ExitDeferred {
+				code := res.Classification
+				if code == 0 || code == notify.ExitDelivered {
+					code = notify.ExitFailed
+				}
+				return &exitError{Code: code}
+			}
 		}
 		return nil
 	},

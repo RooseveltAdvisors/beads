@@ -142,15 +142,28 @@ case "$status" in
         if [ "$status" = "unknown" ]; then
             # be conservative with unclassifiable panes that are mid-something
             case "$harness" in
-                pi|cursor|codex) : ;; # follow-up path is safe regardless
-                *) echo "bd-notify-deliver: $SEAT ($harness) state unknown; deferring" >&2; exit 9 ;;
+                pi)
+                    if submit_followup "$PROMPT"; then
+                        echo "bd-notify-deliver: $SEAT (pi, $session $l_pane): FOLLOW-UP queued (state unknown, seq $SEQ)"
+                        exit 0
+                    fi
+                    echo "bd-notify-deliver: $SEAT: follow-up submit failed; holding" >&2
+                    exit 10
+                    ;;
+                cursor|codex)
+                    if "$BD_NOTIFY_HERDR" --session "$session" pane send-text "$l_pane" "$PROMPT" 2>/dev/null \
+                       && "$BD_NOTIFY_HERDR" --session "$session" pane send-keys "$l_pane" tab >/dev/null 2>&1; then
+                        echo "bd-notify-deliver: $SEAT ($harness, $session $l_pane): message queued via tab (state unknown, seq $SEQ)"
+                        exit 0
+                    fi
+                    echo "bd-notify-deliver: $SEAT: $harness queue submit failed; holding" >&2
+                    exit 10
+                    ;;
+                *)
+                    echo "bd-notify-deliver: $SEAT ($harness) state unknown; deferring" >&2
+                    exit 9
+                    ;;
             esac
-            if submit_followup "$PROMPT"; then
-                echo "bd-notify-deliver: $SEAT (pi, $session $l_pane): FOLLOW-UP queued (state unknown, seq $SEQ)"
-                exit 0
-            fi
-            echo "bd-notify-deliver: $SEAT: follow-up submit failed; holding" >&2
-            exit 10
         fi
         if submit_now "$PROMPT"; then
             echo "bd-notify-deliver: $SEAT ($harness, $session $l_pane): delivered via prompt, agent was $status (seq $SEQ)"

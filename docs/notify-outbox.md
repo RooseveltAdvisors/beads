@@ -77,7 +77,7 @@ match; drain ignores it.
 | `pi`, `pi-signed` | `working` | `follow_up` | Option/Alt+Enter (`pane send-text` then `pane send-keys alt+enter`, with `ctrl+j` fallback). Queues for pi's next turn boundary, never interrupts in-flight work. |
 | `cursor`, `cursor-agent` | `working` | `follow_up` | Tab queue (`pane send-text` then `pane send-keys tab`). Queues after turn on Cursor agent surfaces. |
 | `codex` | `working` | `follow_up` | Tab queue (`pane send-text` then `pane send-keys tab`). Queues for next turn in Codex CLI. |
-| `claude`, `claude-code` | `working` | `follow_up` | Enter queue (`agent prompt` / text + Enter). Claude Code natively queues input typed while busy for the next turn boundary without interruption. |
+| `claude`, `claude-code` | `working` | `hold_until_idle` | **Deferred**: Enter mid-turn is steering. Row stays queued; delivers when target becomes idle. |
 | `agy`, `antigravity` | `working` | `hold_until_idle` | **Deferred**: unverified queue semantics. Row stays queued; delivers when target becomes idle. |
 | `gemini`, `kimi`, `omp`, `muse` | `working` | `hold_until_idle` | **Deferred**: unverified queue semantics. Row stays queued; delivers when target becomes idle. |
 | Any unverified / unknown harness | `working` | `hold_until_idle` | **Deferred**: default to hold-until-idle until live-verified. |

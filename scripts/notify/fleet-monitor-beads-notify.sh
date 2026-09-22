@@ -102,6 +102,7 @@ echo ""
 echo "=== AUDIT SUMMARY: $HEALTHY_COUNT Healthy, $WARNING_COUNT Warnings, $VIOLATION_COUNT Violations ==="
 
 # Return JSON report for callers
+mkdir -p .beads/notify
 cat <<EOF > .beads/notify/last-fleet-audit.json
 {
   "timestamp": "$TIMESTAMP",

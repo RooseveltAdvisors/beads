@@ -20,8 +20,8 @@ func TestModeForHarness(t *testing.T) {
 		{"cursor", "cursor", ModeFollowUp, "tab"},
 		{"cursor-agent", "cursor-agent", ModeFollowUp, "tab"},
 		{"codex", "codex", ModeFollowUp, "tab"},
-		{"claude", "claude", ModeFollowUp, ""},
-		{"claude-code", "claude-code", ModeFollowUp, ""},
+		{"claude", "claude", ModeHoldUntilIdle, ""},
+		{"claude-code", "claude-code", ModeHoldUntilIdle, ""},
 		{"agy", "agy", ModeHoldUntilIdle, ""},
 		{"antigravity", "antigravity", ModeHoldUntilIdle, ""},
 		{"gemini", "gemini", ModeHoldUntilIdle, ""},
@@ -69,7 +69,7 @@ func TestHarnessProfilesTable(t *testing.T) {
 		}
 	}
 	if verifiedCount < 5 {
-		t.Errorf("expected at least 5 verified harness rows (pi, pi-signed, cursor, cursor-agent, codex, claude, claude-code), got %d", verifiedCount)
+		t.Errorf("expected at least 5 verified harness rows (pi, pi-signed, cursor, cursor-agent, codex), got %d", verifiedCount)
 	}
 }
 
@@ -210,12 +210,14 @@ func TestFollowUpSubmitKeysOnSupportedHarnesses(t *testing.T) {
 	}
 }
 
-func TestFollowUpOnClaudeUsesNativeQueueEnter(t *testing.T) {
+func TestClaudeHoldsUntilIdle(t *testing.T) {
 	t.Parallel()
-	inst := Instance{Session: "s", PaneID: "p9", Harness: "claude"}
-	calls := deliveryCalls(inst, "hello", ModeFollowUp)
-	if len(calls) != 1 || !containsSeq(calls[0].Args, "agent", "prompt") {
-		t.Fatalf("claude native queue uses Enter (agent prompt), got %#v", calls)
+	prof := ProfileForHarness("claude")
+	if !prof.HoldUntilIdle {
+		t.Fatalf("claude profile must hold until idle: %+v", prof)
+	}
+	if got := ModeForHarness("claude"); got != ModeHoldUntilIdle {
+		t.Fatalf("claude mode must be ModeHoldUntilIdle, got %v", got)
 	}
 }
 
@@ -230,11 +232,11 @@ func TestDecideDeliveryMatrix(t *testing.T) {
 		t.Fatalf("pi working seat: %+v", got)
 	}
 
-	// 2. Claude working -> follow-up (native busy queue)
+	// 2. Claude working -> hold-until-idle (OK=false, Escalate=false, Reason=HoldUntilIdle, Classification=ExitDeferred)
 	live[0].Harness = "claude"
 	live[0].Status = "working"
 	got = DecideDelivery("wiseman", pins, live)
-	if !got.OK || got.Mode != ModeFollowUp || got.Escalate {
+	if got.OK || got.Escalate || got.Reason != HoldUntilIdle || got.Classification != ExitDeferred {
 		t.Fatalf("claude working seat: %+v", got)
 	}
 

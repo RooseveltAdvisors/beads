@@ -105,7 +105,7 @@ pin_delete() { # $1 seat
     file="$(bd_notify_pins_file)" || return 0
     [ -f "$file" ] || return 0
     tmp="$(mktemp "$file.tmp.XXXXXX")"
-    _jq 'delpaths([[$ARGV[0]]])' --arg s "$1" "$file" > "$tmp"
+    _jq 'del(.[$s])' --arg s "$1" "$file" > "$tmp"
     mv "$tmp" "$file"
 }
 

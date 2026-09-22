@@ -49,9 +49,8 @@ type HarnessProfile struct {
 //     pi / pi-signed: Option+Enter queue (pane send-text + send-keys alt+enter, fallback ctrl+j).
 //     cursor / cursor-agent: Tab queue (pane send-text + send-keys tab).
 //     codex: Tab queue (pane send-text + send-keys tab).
-//     claude / claude-code: native typed-while-busy queue with Enter (agent prompt / text+Enter).
 //   - Hold-until-idle for harnesses without verified queue semantics:
-//     agy, gemini, kimi, omp, muse default to hold-until-idle until live-verified.
+//     claude, claude-code, agy, gemini, kimi, omp, muse default to hold-until-idle until live-verified.
 var harnessProfiles = []HarnessProfile{
 	{
 		Harness:       "pi",
@@ -95,19 +94,19 @@ var harnessProfiles = []HarnessProfile{
 	},
 	{
 		Harness:       "claude",
-		QueueMethod:   QueueMethodEnter,
-		SubmitKey:     "", // herdr agent prompt submits with Enter
-		HoldUntilIdle: false,
-		Verified:      true,
-		Notes:         "Verified live 2026-09-22: Claude Code natively queues input typed with Enter while busy; delivers at next turn boundary without interruption.",
+		QueueMethod:   QueueMethodHoldUntilIdle,
+		SubmitKey:     "",
+		HoldUntilIdle: true,
+		Verified:      false,
+		Notes:         "Claude Code Enter mid-turn is steering; defaults to hold-until-idle.",
 	},
 	{
 		Harness:       "claude-code",
-		QueueMethod:   QueueMethodEnter,
+		QueueMethod:   QueueMethodHoldUntilIdle,
 		SubmitKey:     "",
-		HoldUntilIdle: false,
-		Verified:      true,
-		Notes:         "Verified live 2026-09-22: Claude Code variant; same native typed-while-busy queue with Enter.",
+		HoldUntilIdle: true,
+		Verified:      false,
+		Notes:         "Claude Code variant; defaults to hold-until-idle.",
 	},
 	{
 		Harness:       "agy",
@@ -185,7 +184,7 @@ func HarnessProfiles() []HarnessProfile {
 }
 
 // ModeForHarness returns the default delivery mode for harness when mid-turn.
-// Harnesses with verified non-interrupting follow-up submit (pi, cursor, codex, claude)
+// Harnesses with verified non-interrupting follow-up submit (pi, cursor, codex)
 // return ModeFollowUp. Unverified harnesses return ModeHoldUntilIdle.
 func ModeForHarness(harness string) DeliveryMode {
 	prof := ProfileForHarness(harness)
