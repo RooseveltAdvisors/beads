@@ -86,21 +86,23 @@ out="$(BEADS_ACTOR=wiseman "$REPO_DIR/scripts/notify/bd-comment-notify" wiseman-
 assert_match "notifies assignee" "notifying assignee 'arcs-fm'" "$out"
 assert_match "confirms delivery or deliberate defer" "assignee 'arcs-fm' notified" "$out"
 
-# 4. Test delivery matrix unit behaviors
-echo "Test 4: Delivery script harness matrix"
+# 4. Exact-pin-only guard: the fuzzy resolver and the duplicate shell
+#    transport must stay gone. Fuzzy routing is the defect that lost the
+#    fm-l00u7 daily wake to a random lookalike pane (wiseman-y67).
+echo "Test 4: no fuzzy seat resolution, one delivery implementation"
+fuzzy_hits="$(grep -rn --exclude=test_beads_notify_e2e.sh \
+    -e 'ResolveSeat' -e 'discover_seat' -e 'scoreInstance' -e 'titleHasSeatToken' \
+    "$REPO_DIR/cmd" "$REPO_DIR/internal/notify" "$REPO_DIR/scripts/notify" 2>/dev/null || true)"
+assert_eq "no fuzzy resolver anywhere in the notify path" "" "$fuzzy_hits"
+assert_eq "shell transport twin stays deleted" "" \
+    "$(ls "$REPO_DIR/scripts/notify/bd-notify-deliver" "$REPO_DIR/scripts/notify/bd-notify-drain" 2>/dev/null || true)"
 
-# Simulate blocked agent -> must defer (exit 8)
-set +e
-out="$(BD_NOTIFY_SEAT=arcs-fm BD_NOTIFY_SEQ=999 BD_NOTIFY_PROMPT="test" BD_NOTIFY_HERDR=true status=blocked "$REPO_DIR/scripts/notify/bd-notify-deliver" 2>&1)"
-rc=$?
-set -e
-# Note: bd-notify-deliver resolves live state from herdr, so we test unit helper functions
-assert_match "bd-notify-deliver runs and is executable" "." "$out"
-
-# 5. Test bd-notify-drain
-echo "Test 5: bd-notify-drain execution"
-drain_out="$("$REPO_DIR/scripts/notify/bd-notify-drain" --all 2>&1 || true)"
-assert_match "drain executes cleanly" "bd-notify-drain" "$drain_out"
+# 5. One drain entrypoint: every caller goes through `bd notify drain`.
+echo "Test 5: single drain entrypoint"
+assert_match "bd-comment-notify drains through 'bd notify drain'" 'bd notify drain --seat' \
+    "$(cat "$REPO_DIR/scripts/notify/bd-comment-notify")"
+assert_match "fleet monitor drains through 'bd notify drain'" 'bd notify drain --all' \
+    "$(cat "$REPO_DIR/scripts/notify/fleet-monitor-beads-notify.sh")"
 
 echo ""
 echo "=== SUMMARY: $PASS_COUNT passed, $FAIL_COUNT failed ==="

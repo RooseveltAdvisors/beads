@@ -103,12 +103,13 @@ When a comment is added via `bd comment`:
 ## Fleet tooling (`scripts/notify/`)
 
 The repository includes helper scripts under `scripts/notify/`:
-- `bd-notify-pin`: Seat discovery, pin inspection, refresh, and mapping against herdr.
+- `bd-notify-pin`: Pin inspection and explicit pin writes (`set`/`forget`).
+  There is no discovery: a target is read off `herdr agent list` or a lock
+  owner and written down, never guessed from titles, cwd or focus.
 - `fleet-monitor-beads-notify.sh`: Fleet auditor checking session integrity, outbox health, and non-interrupting delivery compliance.
 - `bd-comment-notify`: Wrapper script for commenting and draining.
-- `bd-notify-drain`: Shell drain wrapper with pin auto-discovery.
-- `bd-notify-deliver`: Transport delivery reference.
-- `test_beads_notify_e2e.sh`: Shell end-to-end integration test.
+- `test_beads_notify_e2e.sh`: Shell end-to-end integration test, including the
+  guard that no fuzzy resolver and no second transport implementation exists.
 
 ## Deployment (ponytail)
 

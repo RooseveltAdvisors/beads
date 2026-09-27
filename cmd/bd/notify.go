@@ -35,8 +35,10 @@ There is no fuzzy search: a missing pin, dead pinned target, or blocked
 approval dialog leaves the row queued and marks the seat for parent
 escalation.
 
-bd notify resolve is a human diagnostic. It may show a scored lookalike,
-but that match is not used for delivery.
+bd notify resolve is a human diagnostic for the pin itself: it prints the
+recorded target and whether that exact target is live. There is no scored
+or fuzzy match anywhere in beads, because a lookalike that reads like a
+target is how a wake once landed on the wrong pane.
 
 Examples:
   bd notify pending
@@ -114,12 +116,13 @@ var notifySeatsCmd = &cobra.Command{
 
 var notifyResolveCmd = &cobra.Command{
 	Use:   "resolve",
-	Short: "Human diagnostic: show pin and a non-authoritative fuzzy match",
+	Short: "Human diagnostic: show a seat's exact pin and whether it is live",
 	Long: `Show the authoritative pin for a seat (from .beads/notify/pins.json)
-and, separately, a fuzzy herdr lookalike.
+and whether that exact target is live in herdr.
 
-The fuzzy match is diagnostic only. Drain never uses it. Delivery is exact:
-pinned target live → deliver there; no pin or dead pin → hold and escalate.`,
+Delivery is exact: pinned target live -> deliver there; no pin or dead pin
+-> hold and escalate. Nothing here is scored or guessed; re-pin a moved
+target by hand with bd-notify-pin set <seat> <session> <pane>.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		seat, _ := cmd.Flags().GetString("seat")
@@ -149,20 +152,17 @@ pinned target live → deliver there; no pin or dead pin → hold and escalate.`
 		if pinned {
 			pinInst, pinLive = notify.FindPinnedInstance(pin, instances)
 		}
-		inst, fuzzy := notify.ResolveSeat(seat, instances)
 		if jsonOutput {
 			return printJSON(map[string]any{
 				"seat":              seat,
 				"pin":               pinOrNil(pinned, pin),
 				"pin_live":          pinLive,
 				"authoritative":     pinned,
-				"diagnostic":        instOrNil(fuzzy, inst),
-				"diagnostic_note":   "fuzzy ResolveSeat is not used for delivery",
 				"instances_scanned": len(instances),
 			})
 		}
 		if pinned {
-			live := "not live — drain will hold and escalate"
+			live := "not live - drain will hold and escalate"
 			if pinLive {
 				live = fmt.Sprintf("live %s %s harness=%s status=%s", pinInst.Session, pinInst.PaneID, pinInst.Harness, pinInst.Status)
 			}
@@ -172,13 +172,6 @@ pinned target live → deliver there; no pin or dead pin → hold and escalate.`
 			fmt.Printf("%s seat %s: no pin in .beads/notify/pins.json (drain will hold and escalate)\n",
 				ui.RenderWarn("!"), seat)
 		}
-		if !fuzzy {
-			fmt.Printf("%s diagnostic (not used for delivery): no fuzzy herdr match (%d scanned)\n",
-				ui.RenderAccent("*"), len(instances))
-			return nil
-		}
-		fmt.Printf("%s diagnostic (not used for delivery): %s %s (%s) harness=%s status=%s score=%d [%s]\n",
-			ui.RenderAccent("*"), inst.Session, inst.PaneID, inst.Title, inst.Harness, inst.Status, inst.Score, inst.MatchReason)
 		return nil
 	},
 }
@@ -188,13 +181,6 @@ func pinOrNil(ok bool, pin notify.Pin) any {
 		return nil
 	}
 	return pin
-}
-
-func instOrNil(ok bool, inst notify.Instance) any {
-	if !ok {
-		return nil
-	}
-	return inst
 }
 
 var notifyDrainCmd = &cobra.Command{
@@ -404,9 +390,14 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 			if !jsonOutput {
 				if res.Error != "" && delivered == 0 {
 					// already printed
-				} else {
+				} else if res.AckedThru > 0 {
 					fmt.Printf("%s seat %s: delivered %d (acked through %d)\n",
-						ui.RenderAccent("*"), s, delivered, lastOK)
+						ui.RenderAccent("*"), s, delivered, res.AckedThru)
+				} else {
+					// ponytail: never claim an ack that did not happen; a summary
+					// line that says "acked" under --no-ack reads as data loss.
+					fmt.Printf("%s seat %s: delivered %d (not acked: --no-ack)\n",
+						ui.RenderAccent("*"), s, delivered)
 				}
 			}
 		}

@@ -1,0 +1,100 @@
+# Deploy the bd binary that drives the notify clock.
+#
+# The clock (bd-due-sweep.service) runs a pinned copy at
+# ~/.local/libexec/bd-due-sweep-bd. Nothing rebuilt that copy, so the
+# 2026-09-13 build survived three later notify fixes and routed a daily wake
+# with fuzzy seat scoring to a random lookalike pane (wiseman-y67). A pinned
+# binary nothing rebuilds is a frozen binary, so: rebuild from main, install
+# atomically, verify against the live outbox and schema, every push that can
+# change the binary - plus daily, so drift cannot accumulate silently.
+name: Deploy notify clock
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'scripts/notify/**'
+      - '.github/workflows/deploy-notify-clock.yml'
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-notify-clock
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  BD_DISABLE_METRICS: "1"
+  BD_DISABLE_EVENT_FLUSH: "1"
+  CLOCK_BIN: /home/jon/.local/libexec/bd-due-sweep-bd
+
+jobs:
+  guard:
+    name: Notify guard (exact pin only)
+    runs-on: [self-hosted, gpu]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+      - name: Fuzzy resolver and duplicate transport stay deleted
+        run: ./scripts/notify/test_beads_notify_e2e.sh
+
+  deploy:
+    name: Rebuild + install clock binary
+    runs-on: [self-hosted, gpu]
+    needs: guard
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Check Go toolchain
+        run: go version
+
+      - name: Build bd
+        env:
+          CGO_ENABLED: "1"
+          GOFLAGS: -tags=gms_pure_go
+        run: go build -trimpath -o "$RUNNER_TEMP/bd" ./cmd/bd
+
+      - name: Install (atomic, keep previous)
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$CLOCK_BIN")"
+          [ -f "$CLOCK_BIN" ] && cp -f "$CLOCK_BIN" "$CLOCK_BIN.prev" || true
+          install -m 0755 "$RUNNER_TEMP/bd" "$CLOCK_BIN"
+
+      - name: Verify installed binary against the live clock
+        run: |
+          set -euo pipefail
+          "$CLOCK_BIN" --version
+
+          # The unit must still run THIS path: a build that nobody's unit
+          # points at is the stale-binary failure mode in reverse.
+          grep -E '^Environment=BD_DUE_SWEEP_BD=(%h|/home/jon)/\.local/libexec/bd-due-sweep-bd$' \
+            /home/jon/.config/systemd/user/bd-due-sweep.service.d/override.conf
+
+          cd /opt/ra/firstmate
+
+          # Schema must be current. Pending migrations gate writes on a
+          # remote-backed DB, so a skew here means the clock silently stops
+          # enqueueing and nobody hears about it.
+          "$CLOCK_BIN" migrate schema --json
+
+          # The notify outbox must be readable and drainable in print mode:
+          # same code path as delivery, no herdr submit, no acks.
+          "$CLOCK_BIN" notify drain --all --print --no-ack >/dev/null
+
+      - name: Roll back on failure
+        if: failure()
+        run: |
+          set -uo pipefail
+          if [ -f "$CLOCK_BIN.prev" ]; then
+            install -m 0755 "$CLOCK_BIN.prev" "$CLOCK_BIN"
+            echo "rolled back to previous clock binary: $("$CLOCK_BIN" --version)" >&2
+          fi

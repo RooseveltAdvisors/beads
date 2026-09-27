@@ -62,13 +62,13 @@ if [ "$assignee" = "$actor" ]; then
 fi
 
 echo "bd-comment-notify: notifying assignee '$assignee'..."
-if "$LIB_DIR/bd-notify-drain" --seat "$assignee"; then
+if bd notify drain --seat "$assignee"; then
     echo "bd-comment-notify: assignee '$assignee' notified (or delivery deliberately deferred)"
     exit 0
 else
     rc=$?
     echo "bd-comment-notify: WARNING — comment landed on $issue_id but notification to" \
-         "'$assignee' did not deliver (rc=$rc). Rows stay queued; run bin/bd-notify-drain --all later." >&2
+         "'$assignee' did not deliver (rc=$rc). Rows stay queued; run 'bd notify drain --all' later." >&2
     [ "${BD_COMMENT_NOTIFY_STRICT:-0}" = "1" ] && exit 3
     exit 0
 fi

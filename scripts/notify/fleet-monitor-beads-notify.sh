@@ -46,8 +46,8 @@ log_metric() {
 echo "=== FLEET BEADS NOTIFICATION MONITOR AUDIT === ($LOCAL_TIME)"
 
 # 1. Verify Global Tooling Availability
-if command -v bd-comment-notify >/dev/null 2>&1 && command -v bd-notify-drain >/dev/null 2>&1; then
-    log_metric PASS "Global binaries bd-comment-notify and bd-notify-drain available in PATH (~/.local/bin)"
+if command -v bd-comment-notify >/dev/null 2>&1 && bd notify --help >/dev/null 2>&1; then
+    log_metric PASS "bd-comment-notify and 'bd notify drain' available (single delivery implementation in PATH)"
 else
     log_metric VIOLATION "Global binaries missing from PATH"
 fi
@@ -101,12 +101,7 @@ else
 fi
 
 # 7. Execute Turn-Boundary Drain
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -x "$SCRIPT_DIR/bd-notify-drain" ]; then
-    DRAIN_OUT=$("$SCRIPT_DIR/bd-notify-drain" --all 2>&1 || true)
-else
-    DRAIN_OUT=$(bd-notify-drain --all 2>&1 || true)
-fi
+DRAIN_OUT=$(bd notify drain --all --limit 20 2>&1 || true)
 log_metric PASS "Turn-boundary drain executed cleanly: $DRAIN_OUT"
 
 echo ""
