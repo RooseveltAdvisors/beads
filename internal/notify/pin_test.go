@@ -27,9 +27,6 @@ func TestPinnedSeatDeliversExactPaneDespiteLookalikes(t *testing.T) {
 	if got.Instance.PaneID != "w6:p2" || got.Instance.Session != "firstmate" {
 		t.Fatalf("delivered lookalike instead of pin: %+v", got.Instance)
 	}
-	if got.Instance.MatchReason != "pin" || got.Instance.Score != 0 {
-		t.Fatalf("delivery must not carry a fuzzy score: %+v", got.Instance)
-	}
 }
 
 func TestUnpinnedSeatHoldsAndEscalates(t *testing.T) {

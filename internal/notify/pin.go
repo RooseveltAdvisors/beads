@@ -114,8 +114,6 @@ func DecideDelivery(seat string, pins map[string]Pin, live []Instance) Delivery 
 	if !found {
 		return Delivery{Pin: pin, Reason: HoldDeadPin, Escalate: true, Classification: ExitDeadPin}
 	}
-	inst.MatchReason = "pin"
-	inst.Score = 0
 
 	status := strings.ToLower(strings.TrimSpace(inst.Status))
 	prof := ProfileForHarness(inst.Harness)

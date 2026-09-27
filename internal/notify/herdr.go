@@ -25,8 +25,6 @@ type Instance struct {
 	Cwd            string `json:"cwd"`
 	Focused        bool   `json:"focused"`
 	AgentSessionID string `json:"agent_session_id,omitempty"`
-	Score          int    `json:"score,omitempty"`
-	MatchReason    string `json:"match_reason,omitempty"`
 }
 
 // HerdrDiscoverer finds live agent instances via herdr session/agent list.
@@ -167,122 +165,6 @@ func (h HerdrDiscoverer) listSession(session string) ([]Instance, error) {
 		})
 	}
 	return outI, nil
-}
-
-// ResolveSeat is a human diagnostic: fuzzy score of seat vs live instances.
-// It is NOT used for delivery. Drain uses DecideDelivery against pins.json.
-//
-// Scoring (higher wins):
-//
-//	+100 session name equals seat
-//	+40  title token equals seat (e.g. "π - wiseman")
-//	+20  cwd path segment equals seat
-//	+10  focused
-//	+5   idle/done (ready)
-//	-5   blocked
-//
-// Primary policy: single best match. Score 0 means no match.
-func ResolveSeat(seat string, instances []Instance) (Instance, bool) {
-	seat = strings.TrimSpace(strings.ToLower(seat))
-	if seat == "" || seat == UnassignedSeat {
-		return Instance{}, false
-	}
-	best := Instance{}
-	bestScore := 0
-	for _, inst := range instances {
-		score, reason := scoreInstance(seat, inst)
-		if score <= 0 {
-			continue
-		}
-		inst.Score = score
-		inst.MatchReason = reason
-		if score > bestScore {
-			bestScore = score
-			best = inst
-		}
-	}
-	if bestScore == 0 {
-		return Instance{}, false
-	}
-	return best, true
-}
-
-func scoreInstance(seat string, inst Instance) (int, string) {
-	var score int
-	var reasons []string
-	session := strings.ToLower(strings.TrimSpace(inst.Session))
-	title := strings.ToLower(inst.Title)
-	cwd := strings.ToLower(inst.Cwd)
-
-	if session == seat {
-		score += 100
-		reasons = append(reasons, "session="+inst.Session)
-	}
-	if titleHasSeatToken(title, seat) {
-		score += 40
-		reasons = append(reasons, "title")
-	}
-	if cwdHasSeatSegment(cwd, seat) {
-		score += 20
-		reasons = append(reasons, "cwd")
-	}
-	if score == 0 {
-		return 0, ""
-	}
-	if inst.Focused {
-		score += 10
-		reasons = append(reasons, "focused")
-	}
-	switch strings.ToLower(inst.Status) {
-	case "idle", "done":
-		score += 5
-		reasons = append(reasons, inst.Status)
-	case "blocked":
-		score -= 5
-		reasons = append(reasons, "blocked")
-	}
-	return score, strings.Join(reasons, ",")
-}
-
-func titleHasSeatToken(title, seat string) bool {
-	title = strings.ToLower(strings.ReplaceAll(title, "—", "-"))
-	seat = strings.ToLower(seat)
-	// Prefer whole-title / suffix forms herdr uses: "π - wiseman", "portal-ops".
-	// Do not split on '-' so multi-segment seats (portal-ops) stay one token.
-	if title == seat {
-		return true
-	}
-	for _, sep := range []string{" - ", " · ", " | ", " / ", ": "} {
-		if i := strings.LastIndex(title, sep); i >= 0 {
-			right := strings.TrimSpace(title[i+len(sep):])
-			if right == seat {
-				return true
-			}
-		}
-	}
-	// Whitespace-separated tokens only (keep hyphens inside a token).
-	for _, f := range strings.Fields(title) {
-		f = strings.Trim(f, "|,/:·")
-		if f == seat {
-			return true
-		}
-	}
-	return false
-}
-
-func cwdHasSeatSegment(cwd, seat string) bool {
-	if cwd == "" {
-		return false
-	}
-	if strings.ToLower(filepath.Base(cwd)) == seat {
-		return true
-	}
-	for _, part := range strings.Split(cwd, string(os.PathSeparator)) {
-		if strings.ToLower(part) == seat {
-			return true
-		}
-	}
-	return false
 }
 
 // Prompt delivers text using ModeForHarness(inst.Harness).
