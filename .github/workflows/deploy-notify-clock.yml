@@ -97,3 +97,61 @@ jobs:
             install -m 0755 "$CLOCK_BIN.prev" "$CLOCK_BIN"
             echo "rolled back to previous clock binary: $("$CLOCK_BIN" --version)" >&2
           fi
+
+  # The release cut rides the same train as the clock deploy: a merge to main
+  # that changes the binary rebuilds it, and if cmd/bd/version.go names a
+  # version nobody has released yet, that build becomes the release and is
+  # installed as the machine's `bd`. Tagging by hand is how a release lags the
+  # code that is already running in production.
+  release-cut:
+    name: Cut release (after merged deploy)
+    runs-on: [self-hosted, gpu]
+    needs: deploy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: Build release binary
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          set -euo pipefail
+          version="$(grep 'Version = ' cmd/bd/version.go | sed 's/.*"\(.*\)".*/\1/')"
+          sha="$(printf '%s' "$GITHUB_SHA" | cut -c1-7)"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "TAG=v$version" >> "$GITHUB_ENV"
+          go build -trimpath -tags=gms_pure_go \
+            -ldflags "-X main.Version=$version -X main.Build=$sha" \
+            -o "$RUNNER_TEMP/bd-linux-amd64" ./cmd/bd
+          "$RUNNER_TEMP/bd-linux-amd64" version
+
+      - name: Create release if this version is not out yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG is already released; nothing to cut."
+            exit 0
+          fi
+          sum="$(sha256sum "$RUNNER_TEMP/bd-linux-amd64" | cut -d' ' -f1)"
+          {
+            echo "Automated cut from main after the notify-clock deploy."
+            echo
+            echo "commit: $GITHUB_SHA"
+            echo "sha256(bd-linux-amd64): $sum"
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" "$RUNNER_TEMP/bd-linux-amd64#bd-linux-amd64" \
+            --target "$GITHUB_SHA" \
+            --title "bd $VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md"
+
+      - name: Install bd for this machine (keep previous)
+        run: |
+          set -euo pipefail
+          target="$HOME/.local/bin/bd"
+          [ -f "$target" ] && cp -f "$target" "$target.prev" || true
+          install -m 0755 "$RUNNER_TEMP/bd-linux-amd64" "$target"
+          "$target" version
