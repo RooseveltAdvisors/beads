@@ -59,8 +59,7 @@ jobs:
       - name: Build bd
         env:
           CGO_ENABLED: "1"
-          GOFLAGS: -tags=gms_pure_go
-        run: go build -trimpath -o "$RUNNER_TEMP/bd" ./cmd/bd
+        run: go build -trimpath -tags=gms_pure_go -o "$RUNNER_TEMP/bd" ./cmd/bd
 
       - name: Install (atomic, keep previous)
         run: |
