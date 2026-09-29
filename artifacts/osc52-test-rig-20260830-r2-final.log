@@ -1,0 +1,53 @@
+=== OSC52 test rig: 2026-08-30T19:12:34Z ===
+log=artifacts/osc52-test-rig-20260830-r2-final.log
+
+--- PROBE HOST: ssh -o ConnectTimeout=4 -o BatchMode=yes agt-3 'uname -a; cat /etc/os-release | head -2; command -v apt' ---
+Identity added: /home/yuan/.ssh/id_ed25519 (yuan@devbox)
+ssh: connect to host agt-3.home.arcs.internal port 22: No route to host
+
+--- PROBE HOST: ssh -o ConnectTimeout=4 -o BatchMode=yes agt-4 'uname -a; cat /etc/os-release | head -2; command -v apt' ---
+Identity added: /home/yuan/.ssh/id_ed25519 (yuan@devbox)
+Linux agt-4 6.17.0-19-generic #19~24.04.2-Ubuntu SMP PREEMPT_DYNAMIC Fri Mar  6 23:08:46 UTC 2 x86_64 x86_64 x86_64 GNU/Linux
+PRETTY_NAME="Ubuntu 24.04.3 LTS"
+NAME="Ubuntu"
+/usr/bin/apt
+selected_host=agt-4
+--- INSTALL: sudo -n apt-get install -y xvfb xclip xterm ---
+Identity added: /home/yuan/.ssh/id_ed25519 (yuan@devbox)
+Reading package lists...
+Building dependency tree...
+Reading state information...
+xvfb is already the newest version (2:21.1.12-1ubuntu1.6).
+xclip is already the newest version (0.13-3).
+xterm is already the newest version (390-1ubuntu3).
+0 upgraded, 0 newly installed, 0 to remove and 403 not upgraded.
+--- L1 PROBE: terminal emulator honors OSC52 ---
+command: Xvfb :99 -screen 0 1280x800x24 -nolisten tcp &
+command: DISPLAY=:99 xterm -xrm 'XTerm*allowWindowOps: true' -e bash -c 'printf "\033]52;c;%s\007" "$(printf t1-marker-abcd | base64)"; sleep 5' &
+command: sleep 3; DISPLAY=:99 xclip -selection clipboard -o
+Identity added: /home/yuan/.ssh/id_ed25519 (yuan@devbox)
+xclip=t1-marker-abcd
+L1 PASS
+--- L2 PROBE: ssh carries OSC52 intact ---
+command: Xvfb :99 -screen 0 1280x800x24 -nolisten tcp &
+command: DISPLAY=:99 xterm -xrm 'XTerm*allowWindowOps: true' -e bash -c 'ssh -o ConnectTimeout=4 -o BatchMode=yes gpu '\\'printf "\033]52;c;%s\007" "$(printf t2-marker-efgh | base64)"'\\'; sleep 5' &
+command: sleep 3; DISPLAY=:99 xclip -selection clipboard -o
+Identity added: /home/yuan/.ssh/id_ed25519 (yuan@devbox)
+xclip=t2-marker-efgh
+L2 PASS
+--- L3 PROBE: guarded Herdr pane stream ---
+command: helper provision <session>; helper run <session> workspace create --label osc52-lab
+command: helper run <session> pane send-text <pane> 'printf "\033]52;c;%s\007" "$(printf t3-marker-ijkl | base64)"'; helper run <session> pane send-keys <pane> enter
+command: xterm reads helper run pane read output; xclip clipboard read
+herdr_session=fm-lab-osc52-test-rig-2-3164119-30989
+{"id":"cli:workspace:create","result":{"root_pane":{"agent_status":"unknown","cwd":"/home/jon","focused":true,"foreground_cwd":"/home/jon","pane_id":"w1:p1","revision":0,"scroll":{"max_offset_from_bottom":0,"offset_from_bottom":0,"viewport_rows":40},"tab_id":"w1:t1","terminal_id":"term_65a4878ba27751","workspace_id":"w1"},"tab":{"agent_status":"unknown","focused":true,"label":"1","number":1,"pane_count":1,"tab_id":"w1:t1","workspace_id":"w1"},"type":"workspace_created","workspace":{"active_tab_id":"w1:t1","agent_status":"unknown","focused":true,"label":"osc52-lab","number":1,"pane_count":1,"tab_count":1,"workspace_id":"w1"}}}
+herdr_pane=w1:p1
+herdr_pane_read=printf "\033]52;c;%s\007" "$(printf t3-marker-ijkl | base64)"
+[0m[1m[38;5;6m~[0m [0m[1m[38;2;166;227;161m➜[0m [0m[38;5;2mprintf[0m [0m[38;5;3m"\033]52;c;%s\007"[0m [0m[38;5;3m"[0m[38;5;5m$([0m[38;5;2mprintf[0m t3-marker-ijkl | [0m[38;5;2mbase64[0m[38;5;5m)[0m[38;5;3m"[0m
+[0m[1m[38;5;6m~[0m [0m[1m[38;2;166;227;161m➜[0m
+Identity added: /home/yuan/.ssh/id_ed25519 (yuan@devbox)
+xclip=Error: target STRING not available
+L3 FAIL
+--- CONCLUSION ---
+L1 PASS and L2 PASS isolate the failure above Herdr input and SSH transport.
+L3 FAIL identifies the Herdr pane/client forwarding layer as the OSC52 copy break.
