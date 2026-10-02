@@ -104,6 +104,26 @@ assert_match "bd-comment-notify drains through 'bd notify drain'" 'bd notify dra
 assert_match "fleet monitor drains through 'bd notify drain'" 'bd notify drain --all' \
     "$(cat "$REPO_DIR/scripts/notify/fleet-monitor-beads-notify.sh")"
 
+# 6. pin_write / pin_delete must write THROUGH a symlinked pins map. Repos
+#    share one machine-canonical seat -> target file by symlinking pins.json;
+#    mktemp+mv would replace the link and silently fork the map again, which is
+#    how seat wiseman ended up with two different targets (w1:pCZ vs w1:pDE).
+echo "Test 6: pin writes preserve a symlinked canonical pins map"
+CANON_PINS="$MOCK_DIR/canon-pins.json"
+LINK_ROOT="$MOCK_DIR/linkrepo"
+mkdir -p "$LINK_ROOT/.beads/notify"
+printf '%s\n' '{"oldseat":{"session":"s","pane_id":"w1:x","agent_session_id":"","harness":"pi","note":"","updated_at":""}}' > "$CANON_PINS"
+ln -s "$CANON_PINS" "$LINK_ROOT/.beads/notify/pins.json"
+BD_NOTIFY_REPO_ROOT="$LINK_ROOT" "$REPO_DIR/scripts/notify/bd-notify-pin" set newsess s w1:zz pi "note" >/dev/null
+assert_eq "pins map is still a symlink after set" "yes" \
+    "$([ -L "$LINK_ROOT/.beads/notify/pins.json" ] && echo yes || echo no)"
+assert_eq "set wrote the new seat to the canonical file" "w1:zz" "$(jq -r '.newsess.pane_id' "$CANON_PINS")"
+assert_eq "set kept the other seat in the canonical file" "w1:x" "$(jq -r '.oldseat.pane_id' "$CANON_PINS")"
+BD_NOTIFY_REPO_ROOT="$LINK_ROOT" "$REPO_DIR/scripts/notify/bd-notify-pin" forget newsess >/dev/null
+assert_eq "pins map is still a symlink after forget" "yes" \
+    "$([ -L "$LINK_ROOT/.beads/notify/pins.json" ] && echo yes || echo no)"
+assert_eq "forget removed the seat from the canonical file" "null" "$(jq -r '.newsess // "null"' "$CANON_PINS")"
+
 echo ""
 echo "=== SUMMARY: $PASS_COUNT passed, $FAIL_COUNT failed ==="
 [ "$FAIL_COUNT" -eq 0 ]

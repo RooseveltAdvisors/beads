@@ -106,6 +106,12 @@ The repository includes helper scripts under `scripts/notify/`:
 - `bd-notify-pin`: Pin inspection and explicit pin writes (`set`/`forget`).
   There is no discovery: a target is read off `herdr agent list` or a lock
   owner and written down, never guessed from titles, cwd or focus.
+- **One seat, one target**: seats are machine-global but each repo keeps its own
+  `.beads/notify/` queue, so a repo may symlink its `pins.json` at the
+  machine-canonical map. `bd-notify-pin set|forget` resolve that link and write
+  through it (mktemp+mv would replace the link and fork the map again - the
+  2026-10-02 incident where seat `wiseman` resolved to two different panes).
+  Regressed by Test 6 in `test_beads_notify_e2e.sh`.
 - `fleet-monitor-beads-notify.sh`: Fleet auditor checking session integrity, outbox health, and non-interrupting delivery compliance.
 - `bd-comment-notify`: Wrapper script for commenting and draining.
 - `test_beads_notify_e2e.sh`: Shell end-to-end integration test, including the
