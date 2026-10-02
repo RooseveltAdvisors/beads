@@ -12,6 +12,9 @@
 #            This is the file bd itself drains against ("bd notify drain").
 #            Pins are written explicitly (bd-notify-pin set) and matched
 #            exactly; nothing here guesses a target from titles, cwd or focus.
+#            A repo may symlink this file at the machine-canonical map so one
+#            seat resolves to one pane in every repo; pin_write/pin_delete
+#            write through the link.
 # delivery   `bd notify drain` owns the harness matrix (follow-up vs steer).
 #
 # Safety: this library never starts, kills or restarts any herdr session, pane
@@ -69,6 +72,12 @@ pin_write() { # $1 seat  $2 session  $3 pane_id  $4 agent_session_id  $5 harness
     local seat="$1" session="$2" pane="$3" asid="${4:-}" harness="${5:-}" note="${6:-}"
     local file tmp
     file="$(bd_notify_pins_file)"
+    # One machine-wide seat -> target map: a repo may symlink its pins.json at
+    # the canonical file so the same seat resolves to the same pane everywhere.
+    # mktemp + mv would replace the symlink itself and silently fork the map
+    # again (that is how seat wiseman ended up with two different targets), so
+    # resolve the link and write through it.
+    if [ -L "$file" ]; then file="$(readlink -f "$file")"; fi
     mkdir -p "$(dirname "$file")"
     tmp="$(mktemp "$file.tmp.XXXXXX")"
     if [ -s "$file" ] && _jq -e . "$file" >/dev/null 2>&1; then
@@ -95,6 +104,7 @@ pin_delete() { # $1 seat
     local file tmp
     file="$(bd_notify_pins_file)" || return 0
     [ -f "$file" ] || return 0
+    if [ -L "$file" ]; then file="$(readlink -f "$file")"; fi
     tmp="$(mktemp "$file.tmp.XXXXXX")"
     _jq 'del(.[$s])' --arg s "$1" "$file" > "$tmp"
     mv "$tmp" "$file"
