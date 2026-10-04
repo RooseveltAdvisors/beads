@@ -219,8 +219,9 @@ func reportBlockedBatch(blocked []blockedJSONItem, createdIDs []string, isJSON b
 }
 
 // filterGraphPlan removes graph nodes that duplicate an active issue and every
-// node whose parent chain reaches a removed node (so no child is created as an
-// orphan). Edges and inline deps that pointed at a duplicate node are remapped
+// node whose parent chain (parent_key, or a parent-child edge or dep) reaches a
+// removed node, so no child is created as an orphan or attached to the
+// existing issue. Edges and inline deps that pointed at a duplicate node are remapped
 // onto the active issue it duplicates, so surviving nodes keep their ordering;
 // edges from a removed node, those touching a removed child, and those left
 // with no new node on either end are dropped. It returns the removed nodes as blocked items.
@@ -262,17 +263,37 @@ func filterGraphPlan(ctx context.Context, s storage.DoltStorage, plan *GraphAppl
 	if len(blocked) == 0 {
 		return nil, nil
 	}
+	parentKeys := make(map[string][]string)
+	for _, node := range plan.Nodes {
+		if key := node.effectiveParentKey(); key != "" {
+			parentKeys[node.Key] = append(parentKeys[node.Key], key)
+		}
+		for _, dep := range node.Deps {
+			if graphApplyDependencyType(dep.Type) == types.DepParentChild {
+				parentKeys[node.Key] = append(parentKeys[node.Key], dep.Target)
+			}
+		}
+	}
+	for _, edge := range plan.Edges {
+		if edge.FromKey != "" && edge.ToKey != "" && edge.ToID == "" && graphApplyDependencyType(edge.Type) == types.DepParentChild {
+			parentKeys[edge.FromKey] = append(parentKeys[edge.FromKey], edge.ToKey)
+		}
+	}
+	blockedParent := func(key string) (blockedJSONItem, bool) {
+		for _, parentKey := range parentKeys[key] {
+			if parent, ok := blockedByKey[parentKey]; ok {
+				return parent, true
+			}
+		}
+		return blockedJSONItem{}, false
+	}
 	for changed := true; changed; {
 		changed = false
 		for _, node := range plan.Nodes {
 			if _, done := blockedByKey[node.Key]; done {
 				continue
 			}
-			parentKey := node.effectiveParentKey()
-			if parentKey == "" {
-				continue
-			}
-			parent, ok := blockedByKey[parentKey]
+			parent, ok := blockedParent(node.Key)
 			if !ok {
 				continue
 			}

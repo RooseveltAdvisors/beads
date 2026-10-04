@@ -535,10 +535,14 @@ func TestCreateDedup_GraphBlockedParentBlocksChildren(t *testing.T) {
 			{"key": "epic", "title": "Existing auth refresh epic", "type": "epic"},
 			{"key": "child", "title": "Write regression tests", "type": "task", "parent_key": "epic"},
 			{"key": "grandchild", "title": "Seed fixture accounts", "type": "task", "parent_key": "child"},
-			{"key": "other", "title": "Unrelated telemetry exporter", "type": "task"}
+			{"key": "other", "title": "Unrelated telemetry exporter", "type": "task"},
+			{"key": "edgechild", "title": "Audit token storage layer", "type": "task"},
+			{"key": "depchild", "title": "Document session renewal flow", "type": "task",
+				"deps": [{"type": "parent-child", "target": "epic"}]}
 		],
 		"edges": [
-			{"from_key": "other", "to_key": "child", "type": "blocks"}
+			{"from_key": "other", "to_key": "child", "type": "blocks"},
+			{"from_key": "edgechild", "to_key": "epic", "type": "parent-child"}
 		]
 	}`
 	planPath := filepath.Join(dir, "plan.json")
@@ -571,7 +575,7 @@ func TestCreateDedup_GraphBlockedParentBlocksChildren(t *testing.T) {
 		}
 		got[b.ID] = b.BlockedParent
 	}
-	want := map[string]string{"epic": "", "child": "epic", "grandchild": "child"}
+	want := map[string]string{"epic": "", "child": "epic", "grandchild": "child", "edgechild": "epic", "depchild": "epic"}
 	if len(got) != len(want) {
 		t.Fatalf("blocked = %+v, want %+v", got, want)
 	}
@@ -590,7 +594,8 @@ func TestCreateDedup_GraphBlockedParentBlocksChildren(t *testing.T) {
 		t.Fatalf("parse list: %v\n%s", err, listOut)
 	}
 	for _, iss := range issues {
-		if iss.Title == "Write regression tests" || iss.Title == "Seed fixture accounts" {
+		switch iss.Title {
+		case "Write regression tests", "Seed fixture accounts", "Audit token storage layer", "Document session renewal flow":
 			t.Fatalf("child of blocked node was created: %s %s", iss.ID, iss.Title)
 		}
 	}
