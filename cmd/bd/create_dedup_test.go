@@ -668,10 +668,12 @@ func TestCreateDedup_GraphEdgeOnBlockedNodeRemapsToConflict(t *testing.T) {
 	plan := `{
 		"nodes": [
 			{"key": "a", "title": "Existing auth refresh epic", "type": "task"},
-			{"key": "b", "title": "Deploy telemetry exporter", "type": "task"}
+			{"key": "b", "title": "Deploy telemetry exporter", "type": "task"},
+			{"key": "c", "title": "Rotate staging certificates", "type": "task"}
 		],
 		"edges": [
-			{"from_key": "b", "to_key": "a", "type": "blocks"}
+			{"from_key": "b", "to_key": "a", "type": "blocks"},
+			{"from_key": "a", "to_key": "c", "type": "blocks"}
 		]
 	}`
 	planPath := filepath.Join(dir, "plan.json")
@@ -688,13 +690,27 @@ func TestCreateDedup_GraphEdgeOnBlockedNodeRemapsToConflict(t *testing.T) {
 	var res struct {
 		Created []string `json:"created"`
 	}
-	if err := json.Unmarshal(out, &res); err != nil || len(res.Created) != 1 {
-		t.Fatalf("expected one created node, got %+v (err %v)\n%s", res.Created, err, out)
+	if err := json.Unmarshal(out, &res); err != nil || len(res.Created) != 2 {
+		t.Fatalf("expected two created nodes, got %+v (err %v)\n%s", res.Created, err, out)
 	}
 
-	readyOut := bdRunWithFlockRetryBytes(t, bd, dir, "ready", "--json")
-	if strings.Contains(string(readyOut), res.Created[0]) {
-		t.Fatalf("%s should stay blocked by ge-exist, but is ready:\n%s", res.Created[0], readyOut)
+	readyOut := string(bdRunWithFlockRetryBytes(t, bd, dir, "ready", "--json"))
+	var readyIssues []*types.Issue
+	if err := json.Unmarshal([]byte(readyOut), &readyIssues); err != nil {
+		t.Fatalf("parse ready: %v\n%s", err, readyOut)
+	}
+	ready := map[string]string{}
+	for _, iss := range readyIssues {
+		ready[iss.Title] = iss.ID
+	}
+	if _, ok := ready["Deploy telemetry exporter"]; ok {
+		t.Fatalf("dependent of the blocked node should stay blocked by ge-exist:\n%s", readyOut)
+	}
+	if _, ok := ready["Existing auth refresh epic"]; !ok {
+		t.Fatalf("existing ge-exist must not gain a dependency from the blocked node's outgoing edge:\n%s", readyOut)
+	}
+	if _, ok := ready["Rotate staging certificates"]; !ok {
+		t.Fatalf("expected the unrelated new node to be ready:\n%s", readyOut)
 	}
 }
 

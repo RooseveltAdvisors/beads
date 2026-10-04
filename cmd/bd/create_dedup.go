@@ -222,8 +222,8 @@ func reportBlockedBatch(blocked []blockedJSONItem, createdIDs []string, isJSON b
 // node whose parent chain reaches a removed node (so no child is created as an
 // orphan). Edges and inline deps that pointed at a duplicate node are remapped
 // onto the active issue it duplicates, so surviving nodes keep their ordering;
-// those touching a removed child, or left with no new node on either end, are
-// dropped. It returns the removed nodes as blocked items.
+// edges from a removed node, those touching a removed child, and those left
+// with no new node on either end are dropped. It returns the removed nodes as blocked items.
 func filterGraphPlan(ctx context.Context, s storage.DoltStorage, plan *GraphApplyPlan, opts GraphApplyOptions) ([]blockedJSONItem, error) {
 	if !isDedupCheckEnabled() || opts.AllowDuplicate || opts.Force {
 		return nil, nil
@@ -322,9 +322,6 @@ func filterGraphPlan(ctx context.Context, s storage.DoltStorage, plan *GraphAppl
 	var edges []GraphApplyEdge
 	for _, edge := range plan.Edges {
 		remapped := false
-		if id, ok := conflictFor(edge.FromKey); ok {
-			edge.FromKey, edge.FromID, remapped = "", id, true
-		}
 		if id, ok := conflictFor(edge.ToKey); ok {
 			edge.ToKey, edge.ToID, remapped = "", id, true
 		}
