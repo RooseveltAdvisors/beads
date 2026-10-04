@@ -62,6 +62,7 @@ var YamlOnlyKeys = map[string]bool{
 
 	// Create command settings
 	"create.require-description": true,
+	"create.dedup-check":         true,
 
 	// Mandatory due dates (read on every create, before the database is
 	// necessarily reachable, so it lives in yaml alongside the create settings)

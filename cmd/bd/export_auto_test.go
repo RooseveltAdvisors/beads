@@ -1347,7 +1347,7 @@ func TestAutoExportSkipsWhenExistingJSONLHasIDsMissingFromStore(t *testing.T) {
 
 	run("config", "set", "export.interval", "1ms")
 	run("config", "set", "export.auto", "true")
-	out := run("create", "--due", "+7d", "another local issue", "-p", "2")
+	out := run("create", "--due", "+7d", "second separate issue", "-p", "2")
 	if !strings.Contains(out, "JSONL-only issue record") || !strings.Contains(out, "dl-jsonl-only") {
 		t.Fatalf("expected JSONL-only refusal warning, got:\n%s", out)
 	}

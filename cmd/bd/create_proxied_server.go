@@ -60,6 +60,10 @@ func runCreateProxiedSingle(_ *cobra.Command, ctx context.Context, in createInpu
 		return HandleError("%v", err)
 	}
 
+	if err := checkDuplicateSingle(ctx, store, in.title, in.explicitID, in.allowDuplicate, in.force); err != nil {
+		return err
+	}
+
 	if in.dryRun {
 		if uowProvider == nil {
 			return HandleError("proxied-server UOW provider not initialized")
@@ -256,7 +260,17 @@ func runCreateProxiedMarkdown(_ *cobra.Command, ctx context.Context, in createIn
 	if len(templates) == 0 {
 		return HandleError("no issues found in markdown file")
 	}
-	request, err := buildMarkdownBatchRequest(templates, in)
+
+	allowedTemplates, blockedItems, err := filterMarkdownTemplates(ctx, store, templates, in)
+	if err != nil {
+		return HandleErrorRespectJSON("%v", err)
+	}
+
+	if len(blockedItems) > 0 && len(allowedTemplates) == 0 {
+		return reportBlockedBatch(blockedItems, nil, in.jsonOutput)
+	}
+
+	request, err := buildMarkdownBatchRequest(allowedTemplates, in)
 	if err != nil {
 		return err
 	}
@@ -268,6 +282,18 @@ func runCreateProxiedMarkdown(_ *cobra.Command, ctx context.Context, in createIn
 	if err != nil {
 		return HandleError("creating issues from markdown: %v", err)
 	}
+	issueIDs := make([]string, 0, len(result.Issues))
+	for _, issue := range result.Issues {
+		issueIDs = append(issueIDs, issue.ID)
+	}
+
+	if len(blockedItems) > 0 {
+		if !in.jsonOutput {
+			_ = reportMarkdownBatch(result.Issues, in)
+		}
+		return reportBlockedBatch(blockedItems, issueIDs, in.jsonOutput)
+	}
+
 	return reportMarkdownBatch(result.Issues, in)
 }
 

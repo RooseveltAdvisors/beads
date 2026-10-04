@@ -402,10 +402,6 @@ var createCmd = &cobra.Command{
 			return nil
 		}
 
-		if dryRun && parentID == "" {
-			return renderDryRun()
-		}
-
 		var targetStore storage.DoltStorage
 		var remoteCache *remotecache.Cache
 		if !dryRun && repoPath != "." {
@@ -470,6 +466,11 @@ var createCmd = &cobra.Command{
 				return HandleError("%v", err)
 			}
 			defer func() { _ = parentLookupStore.Close() }()
+		}
+
+		allowDuplicate, _ := cmd.Flags().GetBool("allow-duplicate")
+		if err := checkDuplicateSingle(rootCtx, parentLookupStore, title, explicitID, allowDuplicate, forceCreate); err != nil {
+			return err
 		}
 
 		var inheritedLabels []string
@@ -971,6 +972,7 @@ func init() {
 	createCmd.Flags().String("waits-for", "", "Spawner issue ID to wait for (creates waits-for dependency for fanout gate)")
 	createCmd.Flags().String("waits-for-gate", "all-children", "Gate type: all-children (wait for all) or any-children (wait for first)")
 	createCmd.Flags().Bool("force", false, "Force creation even if prefix doesn't match database prefix")
+	createCmd.Flags().Bool("allow-duplicate", false, "Allow creating issue even if a similar active issue exists")
 	createCmd.Flags().String("repo", "", "Target repository for issue (overrides auto-routing)")
 	createCmd.Flags().IntP("estimate", "e", 0, "Time estimate in minutes (e.g., 60 for 1 hour)")
 	createCmd.Flags().Bool("ephemeral", false, "Create as ephemeral (short-lived, subject to TTL compaction)")

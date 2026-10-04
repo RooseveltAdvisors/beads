@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"reflect"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/beads/internal/config"
+	"github.com/steveyegge/beads/internal/dedup"
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/types"
 	"github.com/steveyegge/beads/internal/validation"
@@ -112,9 +114,10 @@ type GraphApplyResult struct {
 // GraphApplyOptions carries CLI-level storage options that apply to every node
 // in the graph.
 type GraphApplyOptions struct {
-	Ephemeral bool
-	NoHistory bool
-	Force     bool // --force: allow explicit IDs with foreign prefixes
+	Ephemeral      bool
+	NoHistory      bool
+	Force          bool // --force: allow explicit IDs with foreign prefixes
+	AllowDuplicate bool // --allow-duplicate: bypass duplicate check
 }
 
 func (opts GraphApplyOptions) Validate() error {
@@ -375,13 +378,117 @@ func createIssuesFromGraph(planFile string, dryRun bool, opts GraphApplyOptions)
 		return HandleErrorRespectJSON("invalid graph plan: %v", err)
 	}
 
+	var allowedNodes []GraphApplyNode
+	var blockedItems []blockedJSONItem
+	blockedKeys := make(map[string]bool)
+
+	if isDedupCheckEnabled() && !opts.AllowDuplicate && !opts.Force && store != nil {
+		activeIssues, err := queryActiveIssues(rootCtx, store)
+		if err != nil {
+			return HandleErrorRespectJSON("duplicate check: fetch active issues: %v", err)
+		}
+		matcher := dedup.NewMatcher(activeIssues)
+		for _, node := range plan.Nodes {
+			if conflict := matcher.FindConflict(node.Title); conflict != nil {
+				nodeID := node.ID
+				if nodeID == "" {
+					nodeID = node.Key
+				}
+				blockedItems = append(blockedItems, blockedJSONItem{
+					ID:            nodeID,
+					ConflictID:    conflict.ConflictIssue.ID,
+					ConflictTitle: conflict.ConflictIssue.Title,
+					Similarity:    conflict.Similarity,
+				})
+				blockedKeys[node.Key] = true
+			} else {
+				allowedNodes = append(allowedNodes, node)
+			}
+		}
+		if len(blockedItems) > 0 {
+			plan.Nodes = allowedNodes
+			var allowedEdges []GraphApplyEdge
+			for _, edge := range plan.Edges {
+				if blockedKeys[edge.FromKey] || blockedKeys[edge.ToKey] {
+					continue
+				}
+				allowedEdges = append(allowedEdges, edge)
+			}
+			plan.Edges = allowedEdges
+		}
+	}
+
 	if dryRun {
+		if len(blockedItems) > 0 {
+			if jsonOutput {
+				res := map[string]interface{}{
+					"created": []string{},
+					"blocked": blockedItems,
+				}
+				_ = outputJSON(res)
+				return &exitError{Code: 1}
+			}
+			fmt.Fprintf(os.Stderr, "Blocked %d duplicate graph node(s):\n", len(blockedItems))
+			for _, b := range blockedItems {
+				pct := int(math.Round(b.Similarity * 100))
+				fmt.Fprintf(os.Stderr, "  %s conflicts with %s (%s, %d%% similar)\n",
+					b.ID, b.ConflictID, b.ConflictTitle, pct)
+			}
+			if len(plan.Nodes) > 0 {
+				_ = emitGraphApplyDryRun(&plan, opts)
+			}
+			return &exitError{Code: 1}
+		}
 		return emitGraphApplyDryRun(&plan, opts)
 	}
 
-	result, err := executeGraphApply(rootCtx, &plan, opts)
-	if err != nil {
-		return HandleErrorRespectJSON("graph create: %v", err)
+	var result *GraphApplyResult
+	if len(plan.Nodes) > 0 {
+		var err error
+		result, err = executeGraphApply(rootCtx, &plan, opts)
+		if err != nil {
+			return HandleErrorRespectJSON("graph create: %v", err)
+		}
+	}
+
+	if len(blockedItems) > 0 {
+		if jsonOutput {
+			var createdIDs []string
+			if result != nil {
+				for _, id := range result.IDs {
+					createdIDs = append(createdIDs, id)
+				}
+				sort.Strings(createdIDs)
+			}
+			if createdIDs == nil {
+				createdIDs = []string{}
+			}
+			res := map[string]interface{}{
+				"created": createdIDs,
+				"blocked": blockedItems,
+			}
+			_ = outputJSON(res)
+			return &exitError{Code: 1}
+		}
+
+		fmt.Fprintf(os.Stderr, "Blocked %d duplicate graph node(s):\n", len(blockedItems))
+		for _, b := range blockedItems {
+			pct := int(math.Round(b.Similarity * 100))
+			fmt.Fprintf(os.Stderr, "  %s conflicts with %s (%s, %d%% similar)\n",
+				b.ID, b.ConflictID, b.ConflictTitle, pct)
+		}
+		if result != nil {
+			fmt.Printf("Created %d issues\n", len(result.IDs))
+			keys := make([]string, 0, len(result.IDs))
+			for key := range result.IDs {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				fmt.Printf("  %s -> %s\n", key, result.IDs[key])
+			}
+		}
+		return &exitError{Code: 1}
 	}
 
 	if jsonOutput {

@@ -67,12 +67,18 @@ type createInput struct {
 	owner              string
 	jsonOutput         bool
 	validationMode     string
+	allowDuplicate     bool
 }
 
 // graphApplyOptions projects the plan-wide CLI flags into the options every
 // graph validation/materialization helper takes.
 func (in createInput) graphApplyOptions() GraphApplyOptions {
-	return GraphApplyOptions{Ephemeral: in.ephemeral, NoHistory: in.noHistory, Force: in.force}
+	return GraphApplyOptions{
+		Ephemeral:      in.ephemeral,
+		NoHistory:      in.noHistory,
+		Force:          in.force,
+		AllowDuplicate: in.allowDuplicate,
+	}
 }
 
 // graphApplyOptionsFromFlags is the embedded-path projection of the plan-wide
@@ -84,6 +90,7 @@ func graphApplyOptionsFromFlags(cmd *cobra.Command) GraphApplyOptions {
 	in.ephemeral, _ = cmd.Flags().GetBool("ephemeral")
 	in.noHistory, _ = cmd.Flags().GetBool("no-history")
 	in.force, _ = cmd.Flags().GetBool("force")
+	in.allowDuplicate, _ = cmd.Flags().GetBool("allow-duplicate")
 	return in.graphApplyOptions()
 }
 
@@ -119,6 +126,7 @@ func gatherCreateInput(cmd *cobra.Command, args []string) (createInput, error) {
 
 	in.silent, _ = cmd.Flags().GetBool("silent")
 	in.force, _ = cmd.Flags().GetBool("force")
+	in.allowDuplicate, _ = cmd.Flags().GetBool("allow-duplicate")
 	in.validate, _ = cmd.Flags().GetBool("validate")
 	in.noInheritLabels, _ = cmd.Flags().GetBool("no-inherit-labels")
 	in.ephemeral, _ = cmd.Flags().GetBool("ephemeral")

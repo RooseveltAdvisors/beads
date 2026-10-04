@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/beads/internal/dedup"
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/storage/dberrors"
 	"github.com/steveyegge/beads/internal/storage/depid"
@@ -478,6 +479,18 @@ func SpawnRecurrenceInTx(ctx context.Context, tx DBTX, id, actor string) (SpawnR
 	}
 	successor := nextRecurrenceInstance(issue, next, actor)
 
+	// Recurrence duplicate prevention: closing a --repeat bead must not spawn
+	// an identical child when an active bead already covers the scope.
+	// Only active beads (open, in_progress, blocked) are consulted — historical
+	// closed instances never block subsequent recurrence instances (Ruling 4).
+	activeCover, err := findActiveRecurrenceCover(ctx, tx, successor.Title, id)
+	if err != nil {
+		return result, fmt.Errorf("spawn recurrence for %s: check active duplicates: %w", id, err)
+	}
+	if activeCover != nil {
+		return result, nil
+	}
+
 	prefix, err := ReadConfigPrefix(ctx, tx)
 	if err != nil {
 		return result, fmt.Errorf("spawn recurrence for %s: read prefix: %w", id, err)
@@ -753,4 +766,46 @@ func RunScheduledSweepsInTx(ctx context.Context, tx DBTX) (ScheduledSweepResult,
 	}
 	result.Due = due
 	return result, nil
+}
+
+// findActiveRecurrenceCover checks if an active bead (open, in_progress, blocked)
+// already covers the scope of title. Closed or archived beads are ignored.
+func findActiveRecurrenceCover(ctx context.Context, tx DBTX, title, currentID string) (*types.Issue, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, title, status, priority, COALESCE(assignee, '')
+		FROM issues
+		WHERE status IN ('open', 'in_progress', 'blocked') AND id != ?
+	`, currentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var activeIssues []*types.Issue
+	for rows.Next() {
+		var (
+			issueID, issueTitle, status, assignee string
+			priority                              int
+		)
+		if err := rows.Scan(&issueID, &issueTitle, &status, &priority, &assignee); err != nil {
+			return nil, err
+		}
+		activeIssues = append(activeIssues, &types.Issue{
+			ID:       issueID,
+			Title:    issueTitle,
+			Status:   types.Status(status),
+			Priority: priority,
+			Assignee: assignee,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	matcher := dedup.NewMatcher(activeIssues)
+	conflict := matcher.FindConflict(title)
+	if conflict != nil {
+		return conflict.ConflictIssue, nil
+	}
+	return nil, nil
 }
