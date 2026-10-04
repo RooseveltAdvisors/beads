@@ -229,6 +229,9 @@ func (w *workspace) env() []string {
 		// "unlinkat …: directory not empty". (The other reason: a test suite
 		// should not ship telemetry.)
 		"BD_DISABLE_METRICS=1",
+		// Fixtures create near-identical titles on purpose; opt out of the
+		// default-on create duplicate check.
+		"BD_CREATE_DEDUP_CHECK=false",
 	}
 	if testDoltPort > 0 {
 		env = append(env, "BEADS_DOLT_PORT="+strconv.Itoa(testDoltPort))

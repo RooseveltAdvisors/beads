@@ -17,6 +17,16 @@ import (
 	"github.com/steveyegge/beads/internal/types"
 )
 
+// clearDedupCheckEnv drops the package-wide BD_CREATE_DEDUP_CHECK=false opt-out
+// (set in TestMain) so these tests see the real default and config handling.
+func clearDedupCheckEnv(t *testing.T) {
+	t.Helper()
+	if v, ok := os.LookupEnv("BD_CREATE_DEDUP_CHECK"); ok {
+		_ = os.Unsetenv("BD_CREATE_DEDUP_CHECK")
+		t.Cleanup(func() { _ = os.Setenv("BD_CREATE_DEDUP_CHECK", v) })
+	}
+}
+
 // TestCreateDedup_FormatDuplicateBlockError verifies Firstmate ruling 5:
 // The error text must name the conflict first, then the two bypass flags,
 // then the config key - in that order, one screen.
@@ -68,6 +78,7 @@ func TestCreateDedup_FormatDuplicateBlockError(t *testing.T) {
 
 // TestCreateDedup_IsDedupCheckEnabled verifies config resolution.
 func TestCreateDedup_IsDedupCheckEnabled(t *testing.T) {
+	clearDedupCheckEnv(t)
 	_ = config.Initialize()
 
 	// Default is true when unset
@@ -98,6 +109,7 @@ func TestCreateDedup_IsDedupCheckEnabled(t *testing.T) {
 // 7. --dry-run shows block without writing
 // 8. Closed bead never blocks
 func TestCreateDedup_CLI_BlockedByDefaultAndBypasses(t *testing.T) {
+	clearDedupCheckEnv(t)
 	bd := buildEmbeddedBD(t)
 	dir, _, _ := bdInit(t, bd, "--prefix", "dd")
 
@@ -176,6 +188,7 @@ func TestCreateDedup_CLI_BlockedByDefaultAndBypasses(t *testing.T) {
 
 // TestCreateDedup_JSONOutput tests structured JSON output on blocked creation.
 func TestCreateDedup_JSONOutput(t *testing.T) {
+	clearDedupCheckEnv(t)
 	bd := buildEmbeddedBD(t)
 	dir, _, _ := bdInit(t, bd, "--prefix", "dj")
 
@@ -214,6 +227,7 @@ func TestCreateDedup_JSONOutput(t *testing.T) {
 // Fail-closed per-item: blocked items are NOT written, unblocked items ARE written,
 // and exits non-zero if any item was blocked.
 func TestCreateDedup_BatchMarkdown(t *testing.T) {
+	clearDedupCheckEnv(t)
 	bd := buildEmbeddedBD(t)
 	dir, _, _ := bdInit(t, bd, "--prefix", "bm")
 
@@ -317,6 +331,7 @@ task
 // Per-item fail-closed: blocked nodes are not written, unblocked nodes are written,
 // and exits non-zero if any item was blocked.
 func TestCreateDedup_BatchGraph(t *testing.T) {
+	clearDedupCheckEnv(t)
 	bd := buildEmbeddedBD(t)
 	dir, _, _ := bdInit(t, bd, "--prefix", "bg")
 
@@ -406,6 +421,7 @@ func TestCreateDedup_BatchGraph(t *testing.T) {
 // Closing a --repeat bead must not spawn an identical child when an active bead already covers the scope.
 // A closed duplicate never blocks recurrence when no active cover exists.
 func TestCreateDedup_RecurrencePrevention(t *testing.T) {
+	clearDedupCheckEnv(t)
 	bd := buildEmbeddedBD(t)
 	dir, _, _ := bdInit(t, bd, "--prefix", "rc")
 
@@ -498,6 +514,7 @@ func bdRunWithFlockRetryBytes(t *testing.T, bd, dir string, args ...string) []by
 // TestCreateDedup_RecurrenceSimilarTitleStillSpawns: a merely similar active
 // bead must not end a recurring series; only an identical title folds it.
 func TestCreateDedup_RecurrenceSimilarTitleStillSpawns(t *testing.T) {
+	clearDedupCheckEnv(t)
 	bd := buildEmbeddedBD(t)
 	dir, _, _ := bdInit(t, bd, "--prefix", "rs")
 
@@ -525,6 +542,7 @@ func TestCreateDedup_RecurrenceSimilarTitleStillSpawns(t *testing.T) {
 // TestCreateDedup_GraphBlockedParentBlocksChildren: children (transitively)
 // of a blocked graph node are blocked too, never created as orphans.
 func TestCreateDedup_GraphBlockedParentBlocksChildren(t *testing.T) {
+	clearDedupCheckEnv(t)
 	bd := buildEmbeddedBD(t)
 	dir, _, _ := bdInit(t, bd, "--prefix", "gp")
 
@@ -604,6 +622,7 @@ func TestCreateDedup_GraphBlockedParentBlocksChildren(t *testing.T) {
 // TestCreateDedup_DryRunUnopenableRepoWarns: a dry-run against a --repo that
 // cannot be opened still renders the preview, skipping the duplicate check.
 func TestCreateDedup_DryRunUnopenableRepoWarns(t *testing.T) {
+	clearDedupCheckEnv(t)
 	bd := buildEmbeddedBD(t)
 	dir, _, _ := bdInit(t, bd, "--prefix", "dr")
 	missing := filepath.Join(t.TempDir(), "not-a-repo")
@@ -627,6 +646,7 @@ func TestCreateDedup_DryRunUnopenableRepoWarns(t *testing.T) {
 // issue exists alongside a just-created one (the concurrent-create window),
 // the new issue gets a comment naming the collision and neither is deleted.
 func TestCreateDedup_PostInsertCollisionComment(t *testing.T) {
+	clearDedupCheckEnv(t)
 	tmpDir := t.TempDir()
 	s := newTestStore(t, filepath.Join(tmpDir, ".beads", "beads.db"))
 	ctx := context.Background()
@@ -665,6 +685,7 @@ func TestCreateDedup_PostInsertCollisionComment(t *testing.T) {
 // that depended on a blocked duplicate keeps that ordering against the active
 // issue it duplicates, instead of silently becoming ready work.
 func TestCreateDedup_GraphEdgeOnBlockedNodeRemapsToConflict(t *testing.T) {
+	clearDedupCheckEnv(t)
 	bd := buildEmbeddedBD(t)
 	dir, _, _ := bdInit(t, bd, "--prefix", "ge")
 
@@ -722,6 +743,7 @@ func TestCreateDedup_GraphEdgeOnBlockedNodeRemapsToConflict(t *testing.T) {
 // TestCreateDedup_RecheckIgnoresSameBatchSiblings: identical titles created
 // together in one batch are not reported as a concurrent-create collision.
 func TestCreateDedup_RecheckIgnoresSameBatchSiblings(t *testing.T) {
+	clearDedupCheckEnv(t)
 	bd := buildEmbeddedBD(t)
 	dir, _, _ := bdInit(t, bd, "--prefix", "sb")
 

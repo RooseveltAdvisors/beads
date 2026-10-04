@@ -149,6 +149,11 @@ func testMainInner(m *testing.M) int {
 	// globally; the freeze tests that need the walk clear it per-run.
 	_ = os.Setenv(migration.EnvFreezeFile, filepath.Join(tmp, "no-such-freeze-marker"))
 
+	// Duplicate prevention blocks near-identical create titles by default;
+	// most suites here create "Thing one"/"Thing two" fixtures on purpose.
+	// The create_dedup tests clear this per-test to exercise the default.
+	_ = os.Setenv("BD_CREATE_DEDUP_CHECK", "false")
+
 	// Also reset viper state that was loaded by main.go's init().
 	config.ResetForTesting()
 

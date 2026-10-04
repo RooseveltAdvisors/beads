@@ -342,6 +342,9 @@ func (w *workspace) runEnv() []string {
 		"BD_DISABLE_METRICS=1",
 		"BD_DISABLE_EVENT_FLUSH=1",
 		"GIT_CONFIG_NOSYSTEM=1",
+		// Scenarios create near-identical titles on purpose; opt the candidate
+		// out of the default-on create duplicate check (the baseline ignores it).
+		"BD_CREATE_DEDUP_CHECK=false",
 	}
 	if testDoltServerPort != 0 {
 		portStr := strconv.Itoa(testDoltServerPort)
