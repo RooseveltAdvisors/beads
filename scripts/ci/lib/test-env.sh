@@ -43,6 +43,11 @@ beads_test_env_enter() {
     export DOLT_ROOT_PATH="$root/dolt-root"
     export GIT_CONFIG_NOSYSTEM=1
     export GIT_CONFIG_GLOBAL="$root/gitconfig"
+    for var in $(compgen -v | grep '^GIT_CONFIG_' || true); do
+        if [[ "$var" != "GIT_CONFIG_NOSYSTEM" && "$var" != "GIT_CONFIG_GLOBAL" ]]; then
+            unset "$var"
+        fi
+    done
     export BEADS_TEST_IGNORE_REPO_CONFIG=1
     if [[ "${BEADS_TEST_ENV_RUN_DOLT:-0}" != "1" ]]; then
         beads_test_env_add_skip "dolt"

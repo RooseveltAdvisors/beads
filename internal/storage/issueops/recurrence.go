@@ -3,10 +3,13 @@ package issueops
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
+	"github.com/steveyegge/beads/internal/dedup"
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/storage/dberrors"
 	"github.com/steveyegge/beads/internal/storage/depid"
@@ -402,7 +405,9 @@ func walkOccurrences(probe *types.Issue, from, now, horizon time.Time) (time.Tim
 }
 
 // SpawnResult reports what a recurrence spawn created. ID is "" when nothing
-// was spawned, and ChangedTables is then empty.
+// was spawned, and ChangedTables is then empty unless the successor was folded
+// into an identically titled active bead: FoldedInto names that bead, which
+// received an audit comment recording the fold.
 //
 // ChangedTables exists because a spawn writes MORE than the issues row: the
 // successor's labels live in their own table, and a close that stages only
@@ -411,16 +416,20 @@ func walkOccurrences(probe *types.Issue, from, now, horizon time.Time) (time.Tim
 // list must union this in. See RecurrenceSpawnTables for the closed set.
 type SpawnResult struct {
 	ID            string
+	FoldedInto    string
 	ChangedTables map[string]bool
 }
 
 // RecurrenceSpawnTables is every table a recurrence spawn can write. It is a
 // fixed set — the successor is one issues row, its audit events, its labels,
-// and the parent-child edge it inherits — so a close path that stages a static
+// and the parent-child edge it inherits, or the fold comment on the active bead
+// it was folded into — so a close path that stages a static
 // list can simply include it. Staging a table a spawn did not touch is free:
 // DOLT_ADD on a clean table stages nothing, and the empty-commit guard already
 // skips a commit with nothing staged.
-func RecurrenceSpawnTables() []string { return []string{"issues", "events", "labels", "dependencies"} }
+func RecurrenceSpawnTables() []string {
+	return []string{"issues", "events", "labels", "dependencies", "comments"}
+}
 
 // SpawnRecurrenceInTx creates the next instance of a recurring bead, and is
 // called from the close path so every close — single, checked, or batched —
@@ -429,7 +438,10 @@ func RecurrenceSpawnTables() []string { return []string{"issues", "events", "lab
 // It returns a zero SpawnResult when nothing was spawned: the bead does not
 // repeat, its series has ended, or it lives on the wisp plane (wisps are
 // scratch state that is garbage-collected, so respawning one would manufacture
-// litter). A genuine write failure IS returned and fails the close, because
+// litter). When an active bead already carries the successor's exact title,
+// the occurrence is folded into it: no successor is written, and the covering
+// bead gets an audit comment so the fold stays visible and recoverable.
+// A genuine write failure IS returned and fails the close, because
 // silently losing the successor is how a recurring bead quietly stops
 // recurring.
 func SpawnRecurrenceInTx(ctx context.Context, tx DBTX, id, actor string) (SpawnResult, error) {
@@ -477,6 +489,25 @@ func SpawnRecurrenceInTx(ctx context.Context, tx DBTX, id, actor string) (SpawnR
 		actor = RecurrenceSpawnActor
 	}
 	successor := nextRecurrenceInstance(issue, next, actor)
+
+	// Recurrence duplicate prevention: closing a --repeat bead must not spawn
+	// an identical child when an active bead already covers the scope.
+	// Only active beads (open, in_progress, blocked) are consulted — historical
+	// closed instances never block subsequent recurrence instances (Ruling 4).
+	coverID, err := findActiveRecurrenceCover(ctx, tx, successor.Title, id)
+	if err != nil {
+		return result, fmt.Errorf("spawn recurrence for %s: check active duplicates: %w", id, err)
+	}
+	if coverID != "" {
+		note := fmt.Sprintf("recurrence %s folded into this active bead at %s", id, now.Format(time.RFC3339))
+		if _, err := addIssueCommentInTx(ctx, tx, coverID, actor, note, now.Truncate(time.Second), true); err != nil {
+			return result, fmt.Errorf("spawn recurrence for %s: record fold into %s: %w", id, coverID, err)
+		}
+		fmt.Fprintf(os.Stderr, "recurrence %s folded into active bead %s (identical title)\n", id, coverID)
+		result.FoldedInto = coverID
+		result.ChangedTables = map[string]bool{"issues": true, "comments": true}
+		return result, nil
+	}
 
 	prefix, err := ReadConfigPrefix(ctx, tx)
 	if err != nil {
@@ -753,4 +784,26 @@ func RunScheduledSweepsInTx(ctx context.Context, tx DBTX) (ScheduledSweepResult,
 	}
 	result.Due = due
 	return result, nil
+}
+
+// findActiveRecurrenceCover returns the ID of an active bead (open,
+// in_progress, blocked) whose normalized title equals title exactly, or "" when
+// none exists. Closed or archived beads are ignored.
+func findActiveRecurrenceCover(ctx context.Context, tx DBTX, title, currentID string) (string, error) {
+	want := dedup.NormalizeTitle(title)
+	if want == "" {
+		return "", nil
+	}
+	var coverID string
+	err := tx.QueryRowContext(ctx, `
+		SELECT id
+		FROM issues
+		WHERE status IN ('open', 'in_progress', 'blocked') AND id != ? AND LOWER(TRIM(title)) = ?
+		ORDER BY id
+		LIMIT 1
+	`, currentID, want).Scan(&coverID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return coverID, err
 }

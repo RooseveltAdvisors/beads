@@ -317,7 +317,17 @@ func createIssuesFromMarkdown(ctx context.Context, in createInput) error {
 	if store == nil {
 		return HandleErrorWithHint("database not initialized", diagHint())
 	}
-	request, err := buildMarkdownBatchRequest(templates, in)
+
+	allowedTemplates, blockedItems, err := filterMarkdownTemplates(ctx, store, templates, in)
+	if err != nil {
+		return HandleErrorRespectJSON("%v", err)
+	}
+
+	if len(blockedItems) > 0 && len(allowedTemplates) == 0 {
+		return reportBlockedBatch(blockedItems, nil, in.jsonOutput)
+	}
+
+	request, err := buildMarkdownBatchRequest(allowedTemplates, in)
 	if err != nil {
 		return err
 	}
@@ -349,6 +359,16 @@ func createIssuesFromMarkdown(ctx context.Context, in createInput) error {
 	}); err != nil {
 		WarnError("failed to commit: %v", err)
 	}
+
+	noteDuplicateCollisions(ctx, store, result.Issues, in.allowDuplicate || in.force)
+
+	if len(blockedItems) > 0 {
+		if !in.jsonOutput {
+			_ = reportMarkdownBatch(result.Issues, in)
+		}
+		return reportBlockedBatch(blockedItems, issueIDs, in.jsonOutput)
+	}
+
 	return reportMarkdownBatch(result.Issues, in)
 }
 

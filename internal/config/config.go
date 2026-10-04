@@ -289,6 +289,7 @@ func Initialize() error {
 
 	// Create command defaults
 	v.SetDefault("create.require-description", false)
+	v.SetDefault("create.dedup-check", true)
 
 	// Mandatory due dates. OFF by default: the invariant is opt-in per
 	// workspace, because a workspace that has never asked for it (including
@@ -741,6 +742,14 @@ func GetStringFromDir(beadsDir, key string) string {
 	default:
 		return fmt.Sprintf("%v", s)
 	}
+}
+
+// IsSet reports whether the key is set in configuration.
+func IsSet(key string) bool {
+	if v == nil {
+		return false
+	}
+	return v.IsSet(key)
 }
 
 // GetBool retrieves a boolean configuration value

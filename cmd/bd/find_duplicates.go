@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"os"
 	"sort"
 	"strings"
-	"unicode"
 
 	"time"
 
@@ -16,6 +14,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/beads/internal/config"
+	"github.com/steveyegge/beads/internal/dedup"
 	"github.com/steveyegge/beads/internal/metrics"
 	"github.com/steveyegge/beads/internal/telemetry"
 	"github.com/steveyegge/beads/internal/types"
@@ -242,16 +241,7 @@ func reportFindDuplicates(ctx context.Context, issues []*types.Issue, method str
 
 // tokenize splits text into lowercase word tokens, removing punctuation.
 func tokenize(text string) map[string]int {
-	tokens := make(map[string]int)
-	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-'
-	})
-	for _, w := range words {
-		if len(w) > 1 { // Skip single chars
-			tokens[w]++
-		}
-	}
-	return tokens
+	return dedup.Tokenize(text)
 }
 
 // issueText returns the combined text content of an issue for comparison.
@@ -265,69 +255,12 @@ func issueText(issue *types.Issue) string {
 
 // jaccardSimilarity computes the Jaccard similarity between two token sets.
 func jaccardSimilarity(a, b map[string]int) float64 {
-	if len(a) == 0 && len(b) == 0 {
-		return 0
-	}
-
-	intersection := 0
-	union := 0
-
-	// Count union from a
-	for token, countA := range a {
-		if countB, ok := b[token]; ok {
-			if countA < countB {
-				intersection += countA
-			} else {
-				intersection += countB
-			}
-			if countA > countB {
-				union += countA
-			} else {
-				union += countB
-			}
-		} else {
-			union += countA
-		}
-	}
-	// Count tokens only in b
-	for token, countB := range b {
-		if _, ok := a[token]; !ok {
-			union += countB
-		}
-	}
-
-	if union == 0 {
-		return 0
-	}
-	return float64(intersection) / float64(union)
+	return dedup.JaccardSimilarity(a, b)
 }
 
 // cosineSimilarity computes the cosine similarity between two token vectors.
 func cosineSimilarity(a, b map[string]int) float64 {
-	if len(a) == 0 || len(b) == 0 {
-		return 0
-	}
-
-	dotProduct := 0.0
-	magA := 0.0
-	magB := 0.0
-
-	for token, countA := range a {
-		fa := float64(countA)
-		magA += fa * fa
-		if countB, ok := b[token]; ok {
-			dotProduct += fa * float64(countB)
-		}
-	}
-	for _, countB := range b {
-		fb := float64(countB)
-		magB += fb * fb
-	}
-
-	if magA == 0 || magB == 0 {
-		return 0
-	}
-	return dotProduct / (math.Sqrt(magA) * math.Sqrt(magB))
+	return dedup.CosineSimilarity(a, b)
 }
 
 // findMechanicalDuplicates finds similar issues using token-based text similarity.
@@ -351,9 +284,7 @@ func findMechanicalDuplicates(issues []*types.Issue, threshold float64) []duplic
 	for i := 0; i < len(items); i++ {
 		for j := i + 1; j < len(items); j++ {
 			// Use average of Jaccard and cosine for better accuracy
-			jaccard := jaccardSimilarity(items[i].tokens, items[j].tokens)
-			cosine := cosineSimilarity(items[i].tokens, items[j].tokens)
-			similarity := (jaccard + cosine) / 2
+			similarity := dedup.TextSimilarity(items[i].tokens, items[j].tokens)
 
 			if similarity >= threshold {
 				pairs = append(pairs, duplicatePair{

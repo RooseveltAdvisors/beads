@@ -112,9 +112,10 @@ type GraphApplyResult struct {
 // GraphApplyOptions carries CLI-level storage options that apply to every node
 // in the graph.
 type GraphApplyOptions struct {
-	Ephemeral bool
-	NoHistory bool
-	Force     bool // --force: allow explicit IDs with foreign prefixes
+	Ephemeral      bool
+	NoHistory      bool
+	Force          bool // --force: allow explicit IDs with foreign prefixes
+	AllowDuplicate bool // --allow-duplicate: bypass duplicate check
 }
 
 func (opts GraphApplyOptions) Validate() error {
@@ -375,13 +376,32 @@ func createIssuesFromGraph(planFile string, dryRun bool, opts GraphApplyOptions)
 		return HandleErrorRespectJSON("invalid graph plan: %v", err)
 	}
 
+	blockedItems, err := filterGraphPlan(rootCtx, store, &plan, opts)
+	if err != nil {
+		return HandleErrorRespectJSON("%v", err)
+	}
+
 	if dryRun {
+		if len(blockedItems) > 0 {
+			if !jsonOutput && len(plan.Nodes) > 0 {
+				_ = emitGraphApplyDryRun(&plan, opts)
+			}
+			return reportBlockedBatch(blockedItems, nil, jsonOutput)
+		}
 		return emitGraphApplyDryRun(&plan, opts)
 	}
 
-	result, err := executeGraphApply(rootCtx, &plan, opts)
-	if err != nil {
-		return HandleErrorRespectJSON("graph create: %v", err)
+	result := &GraphApplyResult{}
+	if len(plan.Nodes) > 0 {
+		result, err = executeGraphApply(rootCtx, &plan, opts)
+		if err != nil {
+			return HandleErrorRespectJSON("graph create: %v", err)
+		}
+	}
+	noteDuplicateCollisions(rootCtx, store, graphCreatedIssues(plan.Nodes, result.IDs), opts.AllowDuplicate || opts.Force)
+
+	if len(blockedItems) > 0 {
+		return reportBlockedGraph(blockedItems, result.IDs, jsonOutput)
 	}
 
 	if jsonOutput {
