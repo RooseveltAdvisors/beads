@@ -3,6 +3,7 @@ package issueops
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -789,26 +790,20 @@ func RunScheduledSweepsInTx(ctx context.Context, tx DBTX) (ScheduledSweepResult,
 // in_progress, blocked) whose normalized title equals title exactly, or "" when
 // none exists. Closed or archived beads are ignored.
 func findActiveRecurrenceCover(ctx context.Context, tx DBTX, title, currentID string) (string, error) {
-	rows, err := tx.QueryContext(ctx, `
-		SELECT id, title
-		FROM issues
-		WHERE status IN ('open', 'in_progress', 'blocked') AND id != ?
-		ORDER BY id
-	`, currentID)
-	if err != nil {
-		return "", err
-	}
-	defer rows.Close()
-
 	want := dedup.NormalizeTitle(title)
-	for rows.Next() {
-		var issueID, issueTitle string
-		if err := rows.Scan(&issueID, &issueTitle); err != nil {
-			return "", err
-		}
-		if want != "" && dedup.NormalizeTitle(issueTitle) == want {
-			return issueID, nil
-		}
+	if want == "" {
+		return "", nil
 	}
-	return "", rows.Err()
+	var coverID string
+	err := tx.QueryRowContext(ctx, `
+		SELECT id
+		FROM issues
+		WHERE status IN ('open', 'in_progress', 'blocked') AND id != ? AND LOWER(TRIM(title)) = ?
+		ORDER BY id
+		LIMIT 1
+	`, currentID, want).Scan(&coverID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return coverID, err
 }

@@ -655,3 +655,74 @@ func TestCreateDedup_PostInsertCollisionComment(t *testing.T) {
 		t.Fatalf("bypass must not add a collision comment, got %d comments", len(after))
 	}
 }
+
+// TestCreateDedup_GraphEdgeOnBlockedNodeRemapsToConflict: a surviving node
+// that depended on a blocked duplicate keeps that ordering against the active
+// issue it duplicates, instead of silently becoming ready work.
+func TestCreateDedup_GraphEdgeOnBlockedNodeRemapsToConflict(t *testing.T) {
+	bd := buildEmbeddedBD(t)
+	dir, _, _ := bdInit(t, bd, "--prefix", "ge")
+
+	bdCreate(t, bd, dir, "Existing auth refresh epic", "--id", "ge-exist")
+
+	plan := `{
+		"nodes": [
+			{"key": "a", "title": "Existing auth refresh epic", "type": "task"},
+			{"key": "b", "title": "Deploy telemetry exporter", "type": "task"}
+		],
+		"edges": [
+			{"from_key": "b", "to_key": "a", "type": "blocks"}
+		]
+	}`
+	planPath := filepath.Join(dir, "plan.json")
+	if err := os.WriteFile(planPath, []byte(plan), 0o600); err != nil {
+		t.Fatalf("write graph plan: %v", err)
+	}
+	cmd := exec.Command(bd, "create", "--json", "--graph", planPath)
+	cmd.Dir = dir
+	cmd.Env = bdEnv(dir)
+	out, err := cmd.Output()
+	if err == nil {
+		t.Fatalf("expected graph create with a blocked node to exit non-zero")
+	}
+	var res struct {
+		Created []string `json:"created"`
+	}
+	if err := json.Unmarshal(out, &res); err != nil || len(res.Created) != 1 {
+		t.Fatalf("expected one created node, got %+v (err %v)\n%s", res.Created, err, out)
+	}
+
+	readyOut := bdRunWithFlockRetryBytes(t, bd, dir, "ready", "--json")
+	if strings.Contains(string(readyOut), res.Created[0]) {
+		t.Fatalf("%s should stay blocked by ge-exist, but is ready:\n%s", res.Created[0], readyOut)
+	}
+}
+
+// TestCreateDedup_RecheckIgnoresSameBatchSiblings: identical titles created
+// together in one batch are not reported as a concurrent-create collision.
+func TestCreateDedup_RecheckIgnoresSameBatchSiblings(t *testing.T) {
+	bd := buildEmbeddedBD(t)
+	dir, _, _ := bdInit(t, bd, "--prefix", "sb")
+
+	plan := `{
+		"nodes": [
+			{"key": "one", "title": "Write regression tests", "type": "task"},
+			{"key": "two", "title": "Write regression tests", "type": "task"}
+		]
+	}`
+	planPath := filepath.Join(dir, "plan.json")
+	if err := os.WriteFile(planPath, []byte(plan), 0o600); err != nil {
+		t.Fatalf("write graph plan: %v", err)
+	}
+	out := bdRunWithFlockRetryBytes(t, bd, dir, "create", "--json", "--graph", planPath)
+	var res GraphApplyResult
+	if err := json.Unmarshal(out, &res); err != nil || len(res.IDs) != 2 {
+		t.Fatalf("expected two created nodes, got %+v (err %v)\n%s", res.IDs, err, out)
+	}
+	for _, id := range res.IDs {
+		comments := bdRunWithFlockRetryBytes(t, bd, dir, "comments", id, "--json")
+		if strings.Contains(string(comments), "duplicate-title collision") {
+			t.Fatalf("same-batch sibling reported as collision on %s:\n%s", id, comments)
+		}
+	}
+}

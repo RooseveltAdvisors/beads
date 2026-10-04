@@ -218,10 +218,12 @@ func reportBlockedBatch(blocked []blockedJSONItem, createdIDs []string, isJSON b
 	return &exitError{Code: 1}
 }
 
-// filterGraphPlan removes graph nodes that duplicate an active issue, every
+// filterGraphPlan removes graph nodes that duplicate an active issue and every
 // node whose parent chain reaches a removed node (so no child is created as an
-// orphan), and every edge that references a removed node. It returns the
-// removed nodes as blocked items.
+// orphan). Edges and inline deps that pointed at a duplicate node are remapped
+// onto the active issue it duplicates, so surviving nodes keep their ordering;
+// those touching a removed child, or left with no new node on either end, are
+// dropped. It returns the removed nodes as blocked items.
 func filterGraphPlan(ctx context.Context, s storage.DoltStorage, plan *GraphApplyPlan, opts GraphApplyOptions) ([]blockedJSONItem, error) {
 	if !isDedupCheckEnabled() || opts.AllowDuplicate || opts.Force {
 		return nil, nil
@@ -293,15 +295,46 @@ func filterGraphPlan(ctx context.Context, s storage.DoltStorage, plan *GraphAppl
 		_, ok := blockedByKey[key]
 		return ok
 	}
+	conflictFor := func(key string) (string, bool) {
+		item, ok := blockedByKey[key]
+		if !ok || key == "" || item.BlockedParent != "" {
+			return "", false
+		}
+		return item.ConflictID, true
+	}
 	var nodes []GraphApplyNode
 	for _, node := range plan.Nodes {
-		if !isBlocked(node.Key) {
-			nodes = append(nodes, node)
+		if isBlocked(node.Key) {
+			continue
 		}
+		var deps []GraphApplyNodeDep
+		for _, dep := range node.Deps {
+			if id, ok := conflictFor(dep.Target); ok {
+				dep.Target = id
+			} else if isBlocked(dep.Target) {
+				continue
+			}
+			deps = append(deps, dep)
+		}
+		node.Deps = deps
+		nodes = append(nodes, node)
 	}
 	var edges []GraphApplyEdge
 	for _, edge := range plan.Edges {
+		remapped := false
+		if id, ok := conflictFor(edge.FromKey); ok {
+			edge.FromKey, edge.FromID, remapped = "", id, true
+		}
+		if id, ok := conflictFor(edge.ToKey); ok {
+			edge.ToKey, edge.ToID, remapped = "", id, true
+		}
+		if id, ok := conflictFor(edge.SpawnerKey); ok {
+			edge.SpawnerKey, edge.SpawnerID = "", id
+		}
 		if isBlocked(edge.FromKey) || isBlocked(edge.ToKey) || isBlocked(edge.SpawnerKey) {
+			continue
+		}
+		if remapped && edge.FromKey == "" && edge.ToKey == "" {
 			continue
 		}
 		edges = append(edges, edge)
@@ -361,10 +394,14 @@ func noteDuplicateCollisions(ctx context.Context, s storage.DoltStorage, created
 		WarnError("duplicate re-check: fetch active issues: %v", err)
 		return
 	}
+	createdIDs := make(map[string]bool, len(created))
+	for _, issue := range created {
+		createdIDs[issue.ID] = true
+	}
 	for _, issue := range created {
 		want := dedup.NormalizeTitle(issue.Title)
 		for _, other := range activeIssues {
-			if other.ID == issue.ID || dedup.NormalizeTitle(other.Title) != want {
+			if createdIDs[other.ID] || dedup.NormalizeTitle(other.Title) != want {
 				continue
 			}
 			text := fmt.Sprintf("duplicate-title collision: active issue %s (created %s) has the same title; "+
