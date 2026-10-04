@@ -152,6 +152,7 @@ func runCreateProxiedSingle(_ *cobra.Command, ctx context.Context, in createInpu
 	created := result.Issue
 	created.Dependencies = nil
 	created.Comments = nil
+	noteDuplicateCollisions(ctx, store, []*types.Issue{created}, in.allowDuplicate || in.force)
 
 	switch {
 	case in.jsonOutput:
@@ -286,6 +287,7 @@ func runCreateProxiedMarkdown(_ *cobra.Command, ctx context.Context, in createIn
 	for _, issue := range result.Issues {
 		issueIDs = append(issueIDs, issue.ID)
 	}
+	noteDuplicateCollisions(ctx, store, result.Issues, in.allowDuplicate || in.force)
 
 	if len(blockedItems) > 0 {
 		if !in.jsonOutput {
@@ -328,6 +330,14 @@ func runCreateProxiedGraph(_ *cobra.Command, ctx context.Context, in createInput
 		return HandleError("proxied-server UOW provider not initialized")
 	}
 
+	blockedItems, err := filterGraphPlan(ctx, store, &plan, in.graphApplyOptions())
+	if err != nil {
+		return HandleErrorRespectJSON("%v", err)
+	}
+	if len(blockedItems) > 0 && len(plan.Nodes) == 0 {
+		return reportBlockedBatch(blockedItems, nil, in.jsonOutput)
+	}
+
 	if in.dryRun {
 		dryUW, err := uowProvider.NewUOW(ctx)
 		if err != nil {
@@ -344,6 +354,12 @@ func runCreateProxiedGraph(_ *cobra.Command, ctx context.Context, in createInput
 		dryUW.Close(ctx)
 		if err != nil {
 			return HandleError("invalid graph plan: %v", err)
+		}
+		if len(blockedItems) > 0 {
+			if !in.jsonOutput {
+				_ = emitGraphApplyDryRun(&plan, in.graphApplyOptions())
+			}
+			return reportBlockedBatch(blockedItems, nil, in.jsonOutput)
 		}
 		if err := emitGraphApplyDryRun(&plan, in.graphApplyOptions()); err != nil {
 			return HandleError("%v", err)
@@ -391,6 +407,11 @@ func runCreateProxiedGraph(_ *cobra.Command, ctx context.Context, in createInput
 	})
 	if err != nil {
 		return HandleError("%v", err)
+	}
+	noteDuplicateCollisions(ctx, store, graphCreatedIssues(plan.Nodes, res), in.allowDuplicate || in.force)
+
+	if len(blockedItems) > 0 {
+		return reportBlockedGraph(blockedItems, res, in.jsonOutput)
 	}
 
 	if in.jsonOutput {

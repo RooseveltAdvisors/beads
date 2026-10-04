@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -342,7 +343,7 @@ func TestCreateDedup_BatchGraph(t *testing.T) {
 		t.Fatalf("expected graph create with duplicate to exit non-zero")
 	}
 	outStr := string(out)
-	if !strings.Contains(outStr, "Blocked 1 duplicate graph node(s)") {
+	if !strings.Contains(outStr, "Blocked 1 duplicate issue(s)") {
 		t.Fatalf("expected blocked graph node message, got:\n%s", outStr)
 	}
 	if !strings.Contains(outStr, "Created 1 issues") {
@@ -439,6 +440,12 @@ func TestCreateDedup_RecurrencePrevention(t *testing.T) {
 			len(allIssues), strings.Join(titles, "\n"))
 	}
 
+	// The fold is recorded on the covering bead so it stays visible.
+	commentsOut := bdRunWithFlockRetryBytes(t, bd, dir, "comments", "rc-active-cover", "--json")
+	if !strings.Contains(string(commentsOut), "recurrence rc-rec1 folded into this active bead at") {
+		t.Fatalf("expected fold audit comment on rc-active-cover, got:\n%s", commentsOut)
+	}
+
 	// 4. Now close the active cover bead as well
 	bdClose(t, bd, dir, "rc-active-cover")
 
@@ -486,4 +493,165 @@ func bdRunWithFlockRetryBytes(t *testing.T, bd, dir string, args ...string) []by
 		return []byte(s[start:])
 	}
 	return bytes.TrimSpace(out)
+}
+
+// TestCreateDedup_RecurrenceSimilarTitleStillSpawns: a merely similar active
+// bead must not end a recurring series; only an identical title folds it.
+func TestCreateDedup_RecurrenceSimilarTitleStillSpawns(t *testing.T) {
+	bd := buildEmbeddedBD(t)
+	dir, _, _ := bdInit(t, bd, "--prefix", "rs")
+
+	bdCreate(t, bd, dir, "Weekly security audit review", "--repeat", "+7d", "--id", "rs-weekly")
+	bdCreate(t, bd, dir, "Security audit review of payment flow", "--id", "rs-payment", "--allow-duplicate")
+
+	bdClose(t, bd, dir, "rs-weekly")
+
+	listOut := bdRunWithFlockRetryBytes(t, bd, dir, "list", "--json")
+	var open []*types.Issue
+	if err := json.Unmarshal(listOut, &open); err != nil {
+		t.Fatalf("failed to parse list output: %v\n%s", err, listOut)
+	}
+	spawned := false
+	for _, iss := range open {
+		if iss.Title == "Weekly security audit review" && iss.ID != "rs-weekly" {
+			spawned = true
+		}
+	}
+	if !spawned {
+		t.Fatalf("expected recurrence successor despite similar active bead, got: %+v", open)
+	}
+}
+
+// TestCreateDedup_GraphBlockedParentBlocksChildren: children (transitively)
+// of a blocked graph node are blocked too, never created as orphans.
+func TestCreateDedup_GraphBlockedParentBlocksChildren(t *testing.T) {
+	bd := buildEmbeddedBD(t)
+	dir, _, _ := bdInit(t, bd, "--prefix", "gp")
+
+	bdCreate(t, bd, dir, "Existing auth refresh epic", "--id", "gp-exist")
+
+	plan := `{
+		"nodes": [
+			{"key": "epic", "title": "Existing auth refresh epic", "type": "epic"},
+			{"key": "child", "title": "Write regression tests", "type": "task", "parent_key": "epic"},
+			{"key": "grandchild", "title": "Seed fixture accounts", "type": "task", "parent_key": "child"},
+			{"key": "other", "title": "Unrelated telemetry exporter", "type": "task"}
+		],
+		"edges": [
+			{"from_key": "other", "to_key": "child", "type": "blocks"}
+		]
+	}`
+	planPath := filepath.Join(dir, "plan.json")
+	if err := os.WriteFile(planPath, []byte(plan), 0o600); err != nil {
+		t.Fatalf("write graph plan: %v", err)
+	}
+
+	cmd := exec.Command(bd, "create", "--json", "--graph", planPath)
+	cmd.Dir = dir
+	cmd.Env = bdEnv(dir)
+	out, err := cmd.Output()
+	if err == nil {
+		t.Fatalf("expected graph create with blocked nodes to exit non-zero")
+	}
+	var res struct {
+		Created []string `json:"created"`
+		Blocked []struct {
+			ID            string `json:"id"`
+			ConflictID    string `json:"conflict_id"`
+			BlockedParent string `json:"blocked_parent"`
+		} `json:"blocked"`
+	}
+	if err := json.Unmarshal(out, &res); err != nil {
+		t.Fatalf("parse JSON: %v\n%s", err, out)
+	}
+	got := map[string]string{}
+	for _, b := range res.Blocked {
+		if b.ConflictID != "gp-exist" {
+			t.Fatalf("blocked %s has conflict %s, want gp-exist", b.ID, b.ConflictID)
+		}
+		got[b.ID] = b.BlockedParent
+	}
+	want := map[string]string{"epic": "", "child": "epic", "grandchild": "child"}
+	if len(got) != len(want) {
+		t.Fatalf("blocked = %+v, want %+v", got, want)
+	}
+	for k, v := range want {
+		if p, ok := got[k]; !ok || p != v {
+			t.Fatalf("blocked = %+v, want %+v", got, want)
+		}
+	}
+	if len(res.Created) != 1 {
+		t.Fatalf("expected only the unrelated node created, got %+v", res.Created)
+	}
+
+	listOut := bdRunWithFlockRetryBytes(t, bd, dir, "list", "--json")
+	var issues []*types.Issue
+	if err := json.Unmarshal(listOut, &issues); err != nil {
+		t.Fatalf("parse list: %v\n%s", err, listOut)
+	}
+	for _, iss := range issues {
+		if iss.Title == "Write regression tests" || iss.Title == "Seed fixture accounts" {
+			t.Fatalf("child of blocked node was created: %s %s", iss.ID, iss.Title)
+		}
+	}
+}
+
+// TestCreateDedup_DryRunUnopenableRepoWarns: a dry-run against a --repo that
+// cannot be opened still renders the preview, skipping the duplicate check.
+func TestCreateDedup_DryRunUnopenableRepoWarns(t *testing.T) {
+	bd := buildEmbeddedBD(t)
+	dir, _, _ := bdInit(t, bd, "--prefix", "dr")
+	missing := filepath.Join(t.TempDir(), "not-a-repo")
+
+	cmd := exec.Command(bd, "create", "--dry-run", "--repo", missing, "Preview only title")
+	cmd.Dir = dir
+	cmd.Env = bdEnv(dir)
+	stdout, stderr, err := runCommandBuffers(t, cmd)
+	if err != nil {
+		t.Fatalf("dry-run with unopenable repo failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "skipping duplicate check") {
+		t.Fatalf("expected skip warning on stderr, got:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Preview only title") {
+		t.Fatalf("expected dry-run preview, got:\n%s", stdout.String())
+	}
+}
+
+// TestCreateDedup_PostInsertCollisionComment: when an identical-title active
+// issue exists alongside a just-created one (the concurrent-create window),
+// the new issue gets a comment naming the collision and neither is deleted.
+func TestCreateDedup_PostInsertCollisionComment(t *testing.T) {
+	tmpDir := t.TempDir()
+	s := newTestStore(t, filepath.Join(tmpDir, ".beads", "beads.db"))
+	ctx := context.Background()
+
+	first := &types.Issue{Title: "Rotate signing keys", Priority: 2, IssueType: types.TypeTask, Status: types.StatusOpen}
+	second := &types.Issue{Title: "rotate signing keys ", Priority: 2, IssueType: types.TypeTask, Status: types.StatusOpen}
+	for _, iss := range []*types.Issue{first, second} {
+		if err := s.CreateIssue(ctx, iss, "seat"); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+	}
+
+	noteDuplicateCollisions(ctx, s, []*types.Issue{second}, false)
+
+	comments, err := s.GetIssueComments(ctx, second.ID)
+	if err != nil {
+		t.Fatalf("get comments: %v", err)
+	}
+	if len(comments) != 1 || !strings.Contains(comments[0].Text, first.ID) ||
+		!strings.Contains(comments[0].Text, "unique constraint") {
+		t.Fatalf("expected one collision comment naming %s, got %+v", first.ID, comments)
+	}
+	for _, id := range []string{first.ID, second.ID} {
+		if _, err := s.GetIssue(ctx, id); err != nil {
+			t.Fatalf("issue %s missing after re-check: %v", id, err)
+		}
+	}
+
+	noteDuplicateCollisions(ctx, s, []*types.Issue{second}, true)
+	if after, _ := s.GetIssueComments(ctx, second.ID); len(after) != 1 {
+		t.Fatalf("bypass must not add a collision comment, got %d comments", len(after))
+	}
 }

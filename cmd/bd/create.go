@@ -463,7 +463,11 @@ var createCmd = &cobra.Command{
 			var err error
 			parentLookupStore, err = openDryRunTargetStore(rootCtx, repoPath)
 			if err != nil {
-				return HandleError("%v", err)
+				if parentID != "" {
+					return HandleError("%v", err)
+				}
+				WarnError("skipping duplicate check: %v", err)
+				return renderDryRun()
 			}
 			defer func() { _ = parentLookupStore.Close() }()
 		}
@@ -644,6 +648,8 @@ var createCmd = &cobra.Command{
 				}
 			}
 		}
+
+		noteDuplicateCollisions(rootCtx, store, []*types.Issue{created}, allowDuplicate || forceCreate)
 
 		if repoPath != "." && targetStore != nil {
 			if err := commitPendingIfEmbedded(ctx, targetStore, actor, doltAutoCommitParams{

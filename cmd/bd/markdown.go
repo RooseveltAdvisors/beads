@@ -360,6 +360,8 @@ func createIssuesFromMarkdown(ctx context.Context, in createInput) error {
 		WarnError("failed to commit: %v", err)
 	}
 
+	noteDuplicateCollisions(ctx, store, result.Issues, in.allowDuplicate || in.force)
+
 	if len(blockedItems) > 0 {
 		if !in.jsonOutput {
 			_ = reportMarkdownBatch(result.Issues, in)

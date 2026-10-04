@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/steveyegge/beads/internal/config"
 	"github.com/steveyegge/beads/internal/dedup"
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/types"
+	"github.com/steveyegge/beads/issueops"
 )
 
 // isDedupCheckEnabled reports whether duplicate checking is enabled via config.
@@ -107,6 +110,7 @@ type blockedJSONItem struct {
 	ConflictID    string  `json:"conflict_id"`
 	ConflictTitle string  `json:"conflict_title"`
 	Similarity    float64 `json:"similarity"`
+	BlockedParent string  `json:"blocked_parent,omitempty"`
 }
 
 // checkDuplicateSingle runs duplicate detection for a single issue creation.
@@ -202,9 +206,188 @@ func reportBlockedBatch(blocked []blockedJSONItem, createdIDs []string, isJSON b
 	}
 	fmt.Fprintf(os.Stderr, "Blocked %d duplicate issue(s):\n", len(blocked))
 	for _, b := range blocked {
+		if b.BlockedParent != "" {
+			fmt.Fprintf(os.Stderr, "  %s skipped: parent %s blocked as duplicate of %s\n",
+				b.ID, b.BlockedParent, b.ConflictID)
+			continue
+		}
 		pct := int(math.Round(b.Similarity * 100))
 		fmt.Fprintf(os.Stderr, "  %s conflicts with %s (%s, %d%% similar)\n",
 			b.ID, b.ConflictID, b.ConflictTitle, pct)
 	}
 	return &exitError{Code: 1}
+}
+
+// filterGraphPlan removes graph nodes that duplicate an active issue, every
+// node whose parent chain reaches a removed node (so no child is created as an
+// orphan), and every edge that references a removed node. It returns the
+// removed nodes as blocked items.
+func filterGraphPlan(ctx context.Context, s storage.DoltStorage, plan *GraphApplyPlan, opts GraphApplyOptions) ([]blockedJSONItem, error) {
+	if !isDedupCheckEnabled() || opts.AllowDuplicate || opts.Force {
+		return nil, nil
+	}
+	if s == nil && uowProvider == nil {
+		return nil, nil
+	}
+	activeIssues, err := queryActiveIssues(ctx, s)
+	if err != nil {
+		return nil, fmt.Errorf("duplicate check: fetch active issues: %w", err)
+	}
+	if len(activeIssues) == 0 {
+		return nil, nil
+	}
+	label := func(node GraphApplyNode) string {
+		if node.ID != "" {
+			return node.ID
+		}
+		return node.Key
+	}
+	matcher := dedup.NewMatcher(activeIssues)
+	var blocked []blockedJSONItem
+	blockedByKey := make(map[string]blockedJSONItem)
+	for _, node := range plan.Nodes {
+		if conflict := matcher.FindConflict(node.Title); conflict != nil {
+			item := blockedJSONItem{
+				ID:            label(node),
+				ConflictID:    conflict.ConflictIssue.ID,
+				ConflictTitle: conflict.ConflictIssue.Title,
+				Similarity:    conflict.Similarity,
+			}
+			blocked = append(blocked, item)
+			blockedByKey[node.Key] = item
+		}
+	}
+	if len(blocked) == 0 {
+		return nil, nil
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, node := range plan.Nodes {
+			if _, done := blockedByKey[node.Key]; done {
+				continue
+			}
+			parentKey := node.effectiveParentKey()
+			if parentKey == "" {
+				continue
+			}
+			parent, ok := blockedByKey[parentKey]
+			if !ok {
+				continue
+			}
+			item := blockedJSONItem{
+				ID:            label(node),
+				ConflictID:    parent.ConflictID,
+				ConflictTitle: parent.ConflictTitle,
+				Similarity:    parent.Similarity,
+				BlockedParent: parent.ID,
+			}
+			blocked = append(blocked, item)
+			blockedByKey[node.Key] = item
+			changed = true
+		}
+	}
+	isBlocked := func(key string) bool {
+		if key == "" {
+			return false
+		}
+		_, ok := blockedByKey[key]
+		return ok
+	}
+	var nodes []GraphApplyNode
+	for _, node := range plan.Nodes {
+		if !isBlocked(node.Key) {
+			nodes = append(nodes, node)
+		}
+	}
+	var edges []GraphApplyEdge
+	for _, edge := range plan.Edges {
+		if isBlocked(edge.FromKey) || isBlocked(edge.ToKey) || isBlocked(edge.SpawnerKey) {
+			continue
+		}
+		edges = append(edges, edge)
+	}
+	plan.Nodes = nodes
+	plan.Edges = edges
+	return blocked, nil
+}
+
+// reportBlockedGraph prints the nodes a graph apply did create (human mode)
+// and then reports the blocked nodes through reportBlockedBatch.
+func reportBlockedGraph(blocked []blockedJSONItem, ids map[string]string, isJSON bool) error {
+	keys := make([]string, 0, len(ids))
+	for key := range ids {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	createdIDs := make([]string, 0, len(keys))
+	for _, key := range keys {
+		createdIDs = append(createdIDs, ids[key])
+	}
+	if !isJSON && len(keys) > 0 {
+		fmt.Printf("Created %d issues\n", len(keys))
+		for _, key := range keys {
+			fmt.Printf("  %s -> %s\n", key, ids[key])
+		}
+	}
+	return reportBlockedBatch(blocked, createdIDs, isJSON)
+}
+
+// graphCreatedIssues pairs each created graph node's ID with its title for
+// the post-insert re-check.
+func graphCreatedIssues(nodes []GraphApplyNode, ids map[string]string) []*types.Issue {
+	issues := make([]*types.Issue, 0, len(ids))
+	for _, node := range nodes {
+		if id, ok := ids[node.Key]; ok {
+			issues = append(issues, &types.Issue{ID: id, Title: node.Title})
+		}
+	}
+	return issues
+}
+
+// noteDuplicateCollisions is the post-insert re-check for the window the
+// pre-create check cannot close: another seat creating the same title between
+// that check's read and this create's write. Each created issue whose exact
+// title matches another active issue gets a comment naming the collision.
+// Neither side is deleted.
+func noteDuplicateCollisions(ctx context.Context, s storage.DoltStorage, created []*types.Issue, bypass bool) {
+	if !isDedupCheckEnabled() || bypass || len(created) == 0 {
+		return
+	}
+	if s == nil && uowProvider == nil {
+		return
+	}
+	activeIssues, err := queryActiveIssues(ctx, s)
+	if err != nil {
+		WarnError("duplicate re-check: fetch active issues: %v", err)
+		return
+	}
+	for _, issue := range created {
+		want := dedup.NormalizeTitle(issue.Title)
+		for _, other := range activeIssues {
+			if other.ID == issue.ID || dedup.NormalizeTitle(other.Title) != want {
+				continue
+			}
+			text := fmt.Sprintf("duplicate-title collision: active issue %s (created %s) has the same title; "+
+				"this issue was written past the pre-create duplicate check, likely by a concurrent create. "+
+				"Neither issue was deleted. A DB-level unique constraint would be the true fix (out of scope here).",
+				other.ID, other.CreatedAt.UTC().Format(time.RFC3339))
+			if err := addCollisionComment(ctx, s, issue.ID, text); err != nil {
+				WarnError("duplicate re-check: comment on %s: %v", issue.ID, err)
+			}
+			break
+		}
+	}
+}
+
+func addCollisionComment(ctx context.Context, s storage.DoltStorage, issueID, text string) error {
+	if s != nil {
+		_, err := addCommentDirect(ctx, s, issueID, actor, text)
+		return err
+	}
+	commenter, err := proxiedCommenter()
+	if err != nil {
+		return err
+	}
+	_, err = commenter.AddComment(ctx, issueops.AddCommentRequest{Author: actor, IssueID: issueID, Text: text})
+	return err
 }

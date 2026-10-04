@@ -212,11 +212,16 @@ func IsContainment(a, b map[string]int) bool {
 	return bInA
 }
 
+// NormalizeTitle lowercases and trims a title for exact-equality comparison.
+func NormalizeTitle(title string) string {
+	return strings.TrimSpace(strings.ToLower(title))
+}
+
 // IsDuplicate compares two issue titles and reports whether they are duplicates,
 // returning (isDuplicate, similarityScore, reason).
 func IsDuplicate(titleA, titleB string) (bool, float64, string) {
-	normA := strings.TrimSpace(strings.ToLower(titleA))
-	normB := strings.TrimSpace(strings.ToLower(titleB))
+	normA := NormalizeTitle(titleA)
+	normB := NormalizeTitle(titleB)
 	if normA == "" || normB == "" {
 		return false, 0, ""
 	}
@@ -301,7 +306,7 @@ func NewMatcher(activeIssues []*types.Issue) *Matcher {
 		if issue.Status == types.StatusClosed || issue.Status == types.StatusPinned {
 			continue
 		}
-		norm := strings.TrimSpace(strings.ToLower(issue.Title))
+		norm := NormalizeTitle(issue.Title)
 		tokens := Tokenize(issue.Title)
 		domain := ExtractDomainTokens(tokens)
 		entries = append(entries, ActiveIssueEntry{
@@ -320,7 +325,7 @@ func (m *Matcher) FindConflict(title string) *ConflictResult {
 	if m == nil || len(m.entries) == 0 {
 		return nil
 	}
-	normTitle := strings.TrimSpace(strings.ToLower(title))
+	normTitle := NormalizeTitle(title)
 	if normTitle == "" {
 		return nil
 	}
