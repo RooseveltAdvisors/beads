@@ -15,6 +15,8 @@ def pytest_configure(config):
 
     # Set test mode flag
     os.environ["BEADS_TEST_MODE"] = "1"
+    # Disable create.dedup-check during tests so sequential test issue titles are not blocked
+    os.environ["BD_CREATE_DEDUP_CHECK"] = "false"
 
     # Get the project root (where .git exists)
     current_dir = Path(__file__).parent.absolute()

@@ -104,6 +104,10 @@ async def bd_client(bd_executable, temp_workspace, monkeypatch, bd_init_isolatio
     if process.returncode != 0:
         pytest.fail(f"Failed to initialize test database: {stderr.decode()}")
 
+    config_file = beads_dir / "config.yaml"
+    with open(config_file, "a") as f:
+        f.write("\ncreate:\n  dedup-check: false\n")
+
     yield client
 
 

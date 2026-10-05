@@ -54,6 +54,9 @@ async def temp_db(bd_executable):
 
     # Return the .beads directory path (not the db file)
     beads_dir = os.path.join(temp_dir, ".beads")
+    config_file = os.path.join(beads_dir, "config.yaml")
+    with open(config_file, "a") as f:
+        f.write("\ncreate:\n  dedup-check: false\n")
 
     yield beads_dir
 
