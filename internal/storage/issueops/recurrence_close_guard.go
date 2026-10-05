@@ -16,8 +16,9 @@ import (
 // playbook told the same agent to `bd close <id>`.
 //
 // Prose cannot hold that line against an agent reading two contradictory
-// instructions, so the close itself refuses: a heartbeat below the cadence
-// floor stays open, and the due sweep re-fires it with no row cost.
+// instructions, so the close itself refuses for EVERY recurring bead, whatever
+// its cadence: the bead stays open, and the due sweep re-fires it with no row
+// cost.
 //
 // Deliberate escapes only:
 //   - end the series first: bd update <id> --repeat "" --reason "..."
@@ -30,14 +31,15 @@ const (
 	RecurrenceCloseGuardKey = "recurrence.close_guard"
 )
 
-// RecurrenceCloseGuardEnabled reports whether this workspace gates spawns by
-// cadence.
+// RecurrenceCloseGuardEnabled reports whether this workspace refuses
+// recurrence spawns. An unset key (including a library consumer that never
+// called config.Initialize) reads as the default, true.
 func RecurrenceCloseGuardEnabled() bool {
-	return config.GetBool(RecurrenceCloseGuardKey)
+	return !config.IsSet(RecurrenceCloseGuardKey) || config.GetBool(RecurrenceCloseGuardKey)
 }
 
-// ValidateRecurrenceSpawn refuses a successor that would fire faster than the
-// cadence floor. SpawnRecurrenceInTx calls it, so every path that can end a
+// ValidateRecurrenceSpawn refuses the successor of every recurring bead; there
+// is no cadence floor. SpawnRecurrenceInTx calls it, so every path that can end a
 // recurring bead meets it in one place: bd close, the store close,
 // update --status closed (the crossing spawn), and molecule steps.
 func ValidateRecurrenceSpawn(issue *types.Issue) error {

@@ -485,9 +485,9 @@ func SpawnRecurrenceInTx(ctx context.Context, tx DBTX, id, actor string) (SpawnR
 		return result, nil // series exhausted: repeat_end reached
 	}
 
-	// Structural close guard: refuse a successor that would fire faster than
-	// the cadence floor. The error aborts the close/update that triggered the
-	// spawn, so the heartbeat stays open and the sweep re-fires it instead of
+	// Structural close guard: refuse the successor of every recurring bead,
+	// whatever its cadence. The error aborts the close/update that triggered
+	// the spawn, so the bead stays open and the sweep re-fires it instead of
 	// filing one identical row per fire (measured 144/day at */10). One seam
 	// for every close path; see recurrence_close_guard.go.
 	if err := ValidateRecurrenceSpawn(issue); err != nil {

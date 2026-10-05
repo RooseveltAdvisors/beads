@@ -35,6 +35,18 @@ func TestRecurrenceCloseGuardDefaultsOn(t *testing.T) {
 	}
 }
 
+func TestRecurrenceCloseGuardOnWithoutConfigInitialize(t *testing.T) {
+	config.ResetForTesting()
+	t.Cleanup(config.ResetForTesting)
+
+	if !RecurrenceCloseGuardEnabled() {
+		t.Fatal("RecurrenceCloseGuardEnabled() = false without config.Initialize, want true")
+	}
+	if err := ValidateRecurrenceSpawn(&types.Issue{ID: "bd-lib", RepeatPattern: "*/10 * * * *"}); err == nil {
+		t.Fatal("ValidateRecurrenceSpawn() = nil without config.Initialize, want refusal")
+	}
+}
+
 func TestValidateRecurrenceSpawn_NilOrNonRecurring(t *testing.T) {
 	withRecurrenceCloseGuard(t, true)
 
