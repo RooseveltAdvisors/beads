@@ -93,6 +93,26 @@ func (i *Issue) NextOccurrence(after time.Time) (next time.Time, ok bool, err er
 	return next, true, nil
 }
 
+// RepeatPeriod measures the gap between the next two occurrences from now.
+// It prices a close-spawn cadence: every close of a recurring bead files a
+// new row (issueops.SpawnRecurrenceInTx), so the period is the reciprocal of
+// that row cost - 10m means 144 rows a day. ok is false when the series has
+// no next occurrence (not recurring, or repeat_end already reached).
+func (i *Issue) RepeatPeriod(now time.Time) (time.Duration, bool) {
+	t1, ok, err := i.NextOccurrence(now)
+	if err != nil || !ok {
+		return 0, false
+	}
+	t2, ok, err := i.NextOccurrence(t1.Add(time.Second))
+	if err != nil || !ok {
+		return 0, false
+	}
+	if d := t2.Sub(t1); d > 0 {
+		return d, true
+	}
+	return 0, false
+}
+
 // ValidateRecurrence checks the recurrence fields are internally coherent.
 // It is called from ValidateWithCustom, so every create and update path that
 // validates an issue rejects an unparseable pattern or inverted bounds rather

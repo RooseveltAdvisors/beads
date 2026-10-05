@@ -305,6 +305,14 @@ func Initialize() error {
 	// ship false so adopters opt in. Scope is assignee-set only (issueops).
 	v.SetDefault("comment.progress_required", true)
 
+	// Recurrence close guard (issueops.ValidateRecurrenceSpawn). House default
+	// ON: closing a recurring bead files a NEW row per occurrence, so a
+	// sub-hourly heartbeat closes into identical history rows (measured
+	// 144/day at */10, seat billing-learn 2026-10-05). Prose in a bead cannot
+	// hold that line against an agent; the close itself must. Escape: end the
+	// series first (bd update <id> --repeat "") or set this key false.
+	v.SetDefault("recurrence.close_guard", true)
+
 	// Quiet assigned in_progress without close → stale-claim notify (0 = off).
 	v.SetDefault("comment.stale_claim_after", "12h")
 

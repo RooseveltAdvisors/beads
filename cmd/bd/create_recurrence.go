@@ -70,19 +70,12 @@ func gatherRecurrenceFlags(cmd *cobra.Command) (recurrenceFlags, error) {
 // recurring bead files a NEW row for the successor (SpawnRecurrenceInTx), so a
 // sub-hourly heartbeat files identical history rows all day while an open one
 // is re-fired by the due sweep for free. Measured 2026-10-05: a */10 chain
-// filed 53 beads in 9 hours (seat billing-learn).
+// filed 53 beads in 9 hours (seat billing-learn). The measurement lives on
+// types.Issue so the close guard (issueops.ValidateRecurrenceSpawn) prices the
+// same cadence the same way.
 func repeatPeriod(pattern string) (time.Duration, bool) {
 	probe := &types.Issue{RepeatPattern: pattern}
-	now := time.Now().UTC()
-	t1, ok, err := probe.NextOccurrence(now)
-	if err != nil || !ok {
-		return 0, false
-	}
-	t2, ok, err := probe.NextOccurrence(t1.Add(time.Second))
-	if err != nil || !ok {
-		return 0, false
-	}
-	return t2.Sub(t1), true
+	return probe.RepeatPeriod(time.Now().UTC())
 }
 
 // warnSubHourlyRepeat states the row cost on stderr, where the author reads

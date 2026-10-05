@@ -212,6 +212,9 @@ func TestEmbeddedRecurrenceSpawnOnClose(t *testing.T) {
 
 	bd := buildEmbeddedBD(t)
 	dir, _, _ := bdInit(t, bd, "--prefix", "rs")
+	if _, err := bdRunWithFlockRetry(t, bd, dir, "config", "set", "recurrence.close_guard", "false"); err != nil {
+		t.Fatalf("failed to disable recurrence.close_guard: %v", err)
+	}
 
 	t.Run("closing_a_recurring_bead_files_the_next_instance", func(t *testing.T) {
 		const title = "Water the plants"
