@@ -38,7 +38,11 @@ env:
 jobs:
   guard:
     name: Notify guard (exact pin only)
-    runs-on: [self-hosted, gpu]
+    # bd-clock marks the box that owns this clock's unit and binaries. Two
+    # runners carry `gpu` (beads-agt10 has no bd-due-sweep unit), and an install
+    # on the wrong host silently leaves this box stale - which is how the deploy
+    # lane failed twice on 10-04/10-05.
+    runs-on: [self-hosted, gpu, bd-clock]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -47,11 +51,20 @@ jobs:
 
   deploy:
     name: Rebuild + install clock binary
-    runs-on: [self-hosted, gpu]
+    runs-on: [self-hosted, gpu, bd-clock]
     needs: guard
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+
+      - name: This host owns the clock
+        run: |
+          set -euo pipefail
+          # Prove ownership BEFORE building or writing anything: the unit must
+          # point at the binary this job installs. On a host without the unit
+          # this fails fast instead of installing a binary nobody runs.
+          grep -E '^Environment=BD_DUE_SWEEP_BD=(%h|/home/jon)/\.local/libexec/bd-due-sweep-bd$' \
+            /home/jon/.config/systemd/user/bd-due-sweep.service.d/override.conf
 
       - name: Check Go toolchain
         run: go version
@@ -72,11 +85,6 @@ jobs:
         run: |
           set -euo pipefail
           "$CLOCK_BIN" --version
-
-          # The unit must still run THIS path: a build that nobody's unit
-          # points at is the stale-binary failure mode in reverse.
-          grep -E '^Environment=BD_DUE_SWEEP_BD=(%h|/home/jon)/\.local/libexec/bd-due-sweep-bd$' \
-            /home/jon/.config/systemd/user/bd-due-sweep.service.d/override.conf
 
           cd /opt/ra/firstmate
 
@@ -105,7 +113,7 @@ jobs:
   # code that is already running in production.
   release-cut:
     name: Cut release (after merged deploy)
-    runs-on: [self-hosted, gpu]
+    runs-on: [self-hosted, gpu, bd-clock]
     needs: deploy
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
