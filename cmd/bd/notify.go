@@ -598,8 +598,8 @@ func beadNotifyBody(id string) string {
 		return ""
 	}
 	body := strings.TrimSpace(issue.Description)
-	// The due playbook says "close it in beads"; for a cadence the close guard
-	// refuses, that advice is wrong, so append the generated rule next to it.
+	// The due playbook says "close it in beads"; for a recurring bead the close
+	// guard refuses, that advice is wrong, so append the generated rule next to it.
 	if hint := issueops.RecurrenceCloseHint(issue); hint != "" {
 		if body != "" {
 			body += "\n\n"
