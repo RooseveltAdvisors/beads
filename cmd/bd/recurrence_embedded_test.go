@@ -212,6 +212,9 @@ func TestEmbeddedRecurrenceSpawnOnClose(t *testing.T) {
 
 	bd := buildEmbeddedBD(t)
 	dir, _, _ := bdInit(t, bd, "--prefix", "rs")
+	if _, err := bdRunWithFlockRetry(t, bd, dir, "config", "set", "recurrence.close_guard", "false"); err != nil {
+		t.Fatalf("failed to disable recurrence.close_guard: %v", err)
+	}
 
 	t.Run("closing_a_recurring_bead_files_the_next_instance", func(t *testing.T) {
 		const title = "Water the plants"
@@ -734,4 +737,70 @@ func TestEmbeddedRecurrenceSurvivesExportImport(t *testing.T) {
 	if got.RepeatEnd == nil || got.RepeatEnd.Year() != 2029 {
 		t.Errorf("imported repeat_end = %v, want 2029", got.RepeatEnd)
 	}
+}
+
+func TestEmbeddedRecurrenceCloseGuard(t *testing.T) {
+	if os.Getenv("BEADS_TEST_EMBEDDED_DOLT") != "1" {
+		t.Skip("set BEADS_TEST_EMBEDDED_DOLT=1 to run embedded dolt integration tests")
+	}
+	t.Parallel()
+
+	bd := buildEmbeddedBD(t)
+	dir, _, _ := bdInit(t, bd, "--prefix", "cg")
+
+	assertStillOpenAlone := func(t *testing.T, id, title string) {
+		t.Helper()
+		if got := bdShow(t, bd, dir, id); got.Status != types.StatusOpen {
+			t.Errorf("status after refused close = %q, want open", got.Status)
+		}
+		if matched := bdIssuesByTitle(t, bd, dir, title); len(matched) != 1 {
+			t.Errorf("found %d beads titled %q, want no successor row", len(matched), title)
+		}
+	}
+
+	t.Run("close_is_refused_and_names_both_escapes", func(t *testing.T) {
+		const title = "Ten-minute heartbeat"
+		issue := bdCreate(t, bd, dir, title, "--type", "chore", "--repeat", "*/10 * * * *")
+		out := bdCloseFail(t, bd, dir, issue.ID, "--reason", "done")
+		for _, want := range []string{"recurrence.close_guard", "--repeat \"\"", "--force does not bypass", "bd config set recurrence.close_guard false"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("refusal does not mention %q:\n%s", want, out)
+			}
+		}
+		assertStillOpenAlone(t, issue.ID, title)
+	})
+
+	t.Run("force_does_not_bypass", func(t *testing.T) {
+		const title = "Forced heartbeat"
+		issue := bdCreate(t, bd, dir, title, "--type", "chore", "--repeat", "*/10 * * * *")
+		bdCloseFail(t, bd, dir, issue.ID, "--force", "--reason", "done")
+		assertStillOpenAlone(t, issue.ID, title)
+	})
+
+	t.Run("status_update_into_closed_is_refused", func(t *testing.T) {
+		const title = "Heartbeat closed by update"
+		issue := bdCreate(t, bd, dir, title, "--type", "chore", "--repeat", "*/10 * * * *")
+		bdUpdateFail(t, bd, dir, issue.ID, "--status", "closed")
+		assertStillOpenAlone(t, issue.ID, title)
+	})
+
+	t.Run("two_hour_cadence_is_refused_too", func(t *testing.T) {
+		const title = "Two-hour check"
+		issue := bdCreate(t, bd, dir, title, "--type", "chore", "--repeat", "+2h")
+		bdCloseFail(t, bd, dir, issue.ID, "--reason", "done")
+		assertStillOpenAlone(t, issue.ID, title)
+	})
+
+	t.Run("ending_the_series_then_close_succeeds", func(t *testing.T) {
+		const title = "Series being retired"
+		issue := bdCreate(t, bd, dir, title, "--type", "chore", "--repeat", "*/10 * * * *")
+		bdUpdate(t, bd, dir, issue.ID, "--repeat", "")
+		bdClose(t, bd, dir, issue.ID)
+		if got := bdShow(t, bd, dir, issue.ID); got.Status != types.StatusClosed {
+			t.Errorf("status = %q, want closed", got.Status)
+		}
+		if matched := bdIssuesByTitle(t, bd, dir, title); len(matched) != 1 {
+			t.Errorf("found %d beads titled %q, want no successor", len(matched), title)
+		}
+	})
 }

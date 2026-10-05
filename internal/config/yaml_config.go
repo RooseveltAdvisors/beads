@@ -72,6 +72,9 @@ var YamlOnlyKeys = map[string]bool{
 	"comment.progress_required": true,
 	"comment.stale_claim_after": true,
 
+	// Recurrence close guard (see issueops.ValidateRecurrenceSpawn)
+	"recurrence.close_guard": true,
+
 	// Prime memory-injection caps (read at session start, possibly before
 	// the database is reachable, so they must live in yaml)
 	"prime.max-memories":     true,

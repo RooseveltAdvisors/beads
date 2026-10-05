@@ -567,8 +567,9 @@ async def beads_update_issue(
     repeat: Annotated[
         str | None,
         "Recurrence rule: an interval (+1d, +2w, +1m) or a 5-field cron expression "
-        '("0 9 * * 1"). Closing the bead then spawns the next instance. An empty '
-        "string stops the series; the bd CLI validates the grammar",
+        '("0 9 * * 1"). bd refuses to close a recurring bead while '
+        "recurrence.close_guard is on (the default); with it off, closing spawns the "
+        "next instance. An empty string stops the series; the bd CLI validates the grammar",
     ] = None,
 ) -> Issue | list[Issue]:
     """Update an existing issue.

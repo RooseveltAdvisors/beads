@@ -478,7 +478,7 @@ type ApplyCreateItem struct {
 	// RepeatEnd RFC 3339. Last occurrence of a recurring bead; the series stops once the next occurrence would fall after it. Absent means unbounded. Requires `repeat_pattern`.
 	RepeatEnd *time.Time `json:"repeat_end,omitempty"`
 
-	// RepeatPattern Recurrence rule: an interval (`+1d`, `+2w`, `+1m`, `+1y`) or a five-field cron expression (`0 9 * * 1`, "minute hour day-of-month month day-of-week"). Closing a recurring bead spawns its next instance. Absent or empty means the bead does not repeat.
+	// RepeatPattern Recurrence rule: an interval (`+1d`, `+2w`, `+1m`, `+1y`) or a five-field cron expression (`0 9 * * 1`, "minute hour day-of-month month day-of-week"). Closing a recurring bead is refused (recurrence.close_guard) unless the series is ended first (empty repeat_pattern) or the workspace disables the guard; with the guard off, closing spawns the next instance. Absent or empty means the bead does not repeat.
 	RepeatPattern *string `json:"repeat_pattern,omitempty"`
 
 	// RepeatStart RFC 3339. Earliest occurrence of a recurring bead. Absent means unbounded. Requires `repeat_pattern`.
@@ -1127,7 +1127,7 @@ type CreateIssueRequest struct {
 	// RepeatEnd RFC 3339. Last occurrence of a recurring bead; the series stops once the next occurrence would fall after it. Absent means unbounded. Requires `repeat_pattern`.
 	RepeatEnd *time.Time `json:"repeat_end,omitempty"`
 
-	// RepeatPattern Recurrence rule: an interval (`+1d`, `+2w`, `+1m`, `+1y`) or a five-field cron expression (`0 9 * * 1`, "minute hour day-of-month month day-of-week"). Closing a recurring bead spawns its next instance. Absent or empty means the bead does not repeat.
+	// RepeatPattern Recurrence rule: an interval (`+1d`, `+2w`, `+1m`, `+1y`) or a five-field cron expression (`0 9 * * 1`, "minute hour day-of-month month day-of-week"). Closing a recurring bead is refused (recurrence.close_guard) unless the series is ended first (empty repeat_pattern) or the workspace disables the guard; with the guard off, closing spawns the next instance. Absent or empty means the bead does not repeat.
 	RepeatPattern *string `json:"repeat_pattern,omitempty"`
 
 	// RepeatStart RFC 3339. Earliest occurrence of a recurring bead. Absent means unbounded. Requires `repeat_pattern`.

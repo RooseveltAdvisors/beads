@@ -597,7 +597,16 @@ func beadNotifyBody(id string) string {
 	if err != nil || issue == nil {
 		return ""
 	}
-	return strings.TrimSpace(issue.Description)
+	body := strings.TrimSpace(issue.Description)
+	// The due playbook says "close it in beads"; for a recurring bead the close
+	// guard refuses, that advice is wrong, so append the generated rule next to it.
+	if hint := issueops.RecurrenceCloseHint(issue); hint != "" {
+		if body != "" {
+			body += "\n\n"
+		}
+		body += hint
+	}
+	return body
 }
 
 // enqueueDueSweepNotifies writes seat-addressed outbox rows for a sweep report.

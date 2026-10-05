@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/steveyegge/beads/internal/config"
 	"github.com/steveyegge/beads/internal/types"
 	publicops "github.com/steveyegge/beads/issueops"
 )
@@ -17,6 +18,11 @@ import (
 // treat a status crossing into closed as a close: a series that silently
 // stops on this leg never recurs at all, whatever the embedded backend does.
 func TestIssueOperationsUpdateCarriesRecurrenceAndSpawnsOnClose(t *testing.T) {
+	config.ResetForTesting()
+	require.NoError(t, config.Initialize())
+	config.Set("recurrence.close_guard", false)
+	t.Cleanup(config.ResetForTesting)
+
 	ctx := context.Background()
 	provider := newUOWRoleFixtureProvider(t, ctx, "uwr")
 	source, ok := provider.(IssueLifecycleSource)

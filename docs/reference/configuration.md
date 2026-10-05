@@ -88,7 +88,7 @@ The full namespaces routed to YAML are:
 
 Plus these individual keys:
 
-`no-db`, `json`, `db`, `actor`, `identity`, `no-push`, `no-git-ops`, `agent.profile`, `create.require-description`, `create.dedup-check`, `due.required`, `import.auto`, `import.path`, `prime.max-memories`, `prime.max-memory-chars`, and the secret keys `github.token`, `gitlab.token`, `jira.api_token`, `ado.pat`, `linear.api_key`, `linear.oauth_client_id`, `linear.oauth_client_secret`.
+`no-db`, `json`, `db`, `actor`, `identity`, `no-push`, `no-git-ops`, `agent.profile`, `create.require-description`, `create.dedup-check`, `due.required`, `import.auto`, `import.path`, `prime.max-memories`, `prime.max-memory-chars`, `recurrence.close_guard`, and the secret keys `github.token`, `gitlab.token`, `jira.api_token`, `ado.pat`, `linear.api_key`, `linear.oauth_client_id`, `linear.oauth_client_secret`.
 
 Any key whose name contains `api_key`, `api-key`, `secret`, `token`, or `password` is treated as a secret: it is refused on git-tracked `config.yaml` files unless you pass `--force-git-tracked`. Prefer exporting the value as an environment variable instead (e.g. `LINEAR_API_KEY`).
 
@@ -116,6 +116,7 @@ Any key whose name contains `api_key`, `api-key`, `secret`, `token`, or `passwor
 | `git.no-gpg-sign` | — | `BD_GIT_NO_GPG_SIGN` | `false` | Disable GPG signing for beads commits |
 | `create.require-description` | — | `BD_CREATE_REQUIRE_DESCRIPTION` | `false` | Require description on `bd create` |
 | `create.dedup-check` | — | `BD_CREATE_DEDUP_CHECK` | `true` | Block `bd create` (including markdown and graph batches) when an open, in-progress, or blocked issue has a near-identical title; bypass per call with `--allow-duplicate` or `--force` |
+| `recurrence.close_guard` | — | `BD_RECURRENCE_CLOSE_GUARD` | `true` | Refuse to close any recurring bead (`bd close`, `--force` included, and `bd update --status closed`), because each close files a new row. End the series with `bd update <id> --repeat ""` first, or set this to `false` to let closes spawn the next instance |
 | `due.required` | — | `BD_DUE_REQUIRED` | `false` | Require a due date on new work (opt-in; see [below](#mandatory-due-dates)) |
 | `validation.on-create` | — | `BD_VALIDATION_ON_CREATE` | `none` | Template validation: `none`, `warn`, `error` |
 | `validation.on-close` | — | `BD_VALIDATION_ON_CLOSE` | `none` | Template validation on close |

@@ -424,6 +424,9 @@ func TestCreateDedup_RecurrencePrevention(t *testing.T) {
 	clearDedupCheckEnv(t)
 	bd := buildEmbeddedBD(t)
 	dir, _, _ := bdInit(t, bd, "--prefix", "rc")
+	if _, err := bdRunWithFlockRetry(t, bd, dir, "config", "set", "recurrence.close_guard", "false"); err != nil {
+		t.Fatalf("failed to disable recurrence.close_guard: %v", err)
+	}
 
 	// 1. Create a recurring bead
 	recurring := bdCreate(t, bd, dir, "Daily database backup verification", "--repeat", "+1d", "--id", "rc-rec1")
@@ -517,6 +520,9 @@ func TestCreateDedup_RecurrenceSimilarTitleStillSpawns(t *testing.T) {
 	clearDedupCheckEnv(t)
 	bd := buildEmbeddedBD(t)
 	dir, _, _ := bdInit(t, bd, "--prefix", "rs")
+	if _, err := bdRunWithFlockRetry(t, bd, dir, "config", "set", "recurrence.close_guard", "false"); err != nil {
+		t.Fatalf("failed to disable recurrence.close_guard: %v", err)
+	}
 
 	bdCreate(t, bd, dir, "Weekly security audit review", "--repeat", "+7d", "--id", "rs-weekly")
 	bdCreate(t, bd, dir, "Security audit review of payment flow", "--id", "rs-payment", "--allow-duplicate")
