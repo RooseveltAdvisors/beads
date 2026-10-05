@@ -1,6 +1,9 @@
 package main
 
 import (
+	"fmt"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -54,11 +57,49 @@ func gatherRecurrenceFlags(cmd *cobra.Command) (recurrenceFlags, error) {
 	if _, err := timeparsing.ParseRepeat(out.pattern); err != nil {
 		return out, HandleError("invalid --repeat pattern %q: %v\n  Interval: +1d, +2w, +1m, +1y\n  Cron:     \"0 9 * * 1\" (min hour day-of-month month day-of-week)", out.pattern, err)
 	}
+	warnSubHourlyRepeat(out.pattern)
 	if out.start != nil && out.end != nil && out.end.Before(*out.start) {
 		return out, HandleError("--repeat-end (%s) is before --repeat-start (%s)",
 			out.end.Format(time.RFC3339), out.start.Format(time.RFC3339))
 	}
 	return out, nil
+}
+
+// repeatPeriod returns the gap between two consecutive occurrences of a
+// pattern. It prices a close-spawn cadence at authoring time: closing a
+// recurring bead files a NEW row for the successor (SpawnRecurrenceInTx), so a
+// sub-hourly heartbeat files identical history rows all day while an open one
+// is re-fired by the due sweep for free. Measured 2026-10-05: a */10 chain
+// filed 53 beads in 9 hours (seat billing-learn).
+func repeatPeriod(pattern string) (time.Duration, bool) {
+	probe := &types.Issue{RepeatPattern: pattern}
+	now := time.Now().UTC()
+	t1, ok, err := probe.NextOccurrence(now)
+	if err != nil || !ok {
+		return 0, false
+	}
+	t2, ok, err := probe.NextOccurrence(t1.Add(time.Second))
+	if err != nil || !ok {
+		return 0, false
+	}
+	return t2.Sub(t1), true
+}
+
+// warnSubHourlyRepeat states the row cost on stderr, where the author reads
+// it, and names the row-free alternative. Warning only: a close-spawn cadence
+// is legal, and refusing it would break heartbeat series that already work.
+func warnSubHourlyRepeat(pattern string) {
+	period, ok := repeatPeriod(pattern)
+	if !ok || period <= 0 || period >= time.Hour {
+		return
+	}
+	// Concatenation, not Fprintf: gosec taint flags user input reaching a
+	// format function even as an argument (G705), and nothing here needs a format.
+	fmt.Fprintln(os.Stderr, //nolint:gosec // G705: stderr, not a browser context
+		"warning: --repeat "+strconv.Quote(pattern)+" runs about every "+period.Round(time.Minute).String()+
+			", and closing a recurring bead files a new row each time (about "+
+			strconv.Itoa(int((24*time.Hour)/period))+
+			" identical beads/day). Keep the bead OPEN and comment per fire so the due sweep re-fires it without spawning, or use a period of at least 1h.")
 }
 
 // registerRecurrenceFlags adds the recurrence flags to a create-shaped command.
@@ -117,6 +158,7 @@ func applyRecurrenceUpdateFlags(cmd *cobra.Command, fields map[string]any) error
 			if _, err := timeparsing.ParseRepeat(pattern); err != nil {
 				return HandleErrorRespectJSON("invalid --repeat pattern %q: %v\n  Interval: +1d, +2w, +1m, +1y\n  Cron:     \"0 9 * * 1\" (min hour day-of-month month day-of-week)", pattern, err)
 			}
+			warnSubHourlyRepeat(pattern)
 		}
 		fields["repeat_pattern"] = pattern
 	}
