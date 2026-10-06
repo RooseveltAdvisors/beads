@@ -294,13 +294,21 @@ func TestGetCommentActorTabLabel(t *testing.T) {
 	if got := getActorWithGit(); got == "portal AMD biller" {
 		t.Fatalf("getActorWithGit() must keep the git chain, got the tab label %q", got)
 	}
-	actor = "from-flag"
-	if got := getCommentActor(); got != "from-flag" {
-		t.Fatalf("--actor must win, got %q", got)
+	// A pre-filled global actor (as the store-open path leaves it) must NOT
+	// outrank the tab label: that pre-fill is a git/env resolution, not a flag.
+	actor = "arcs-fm"
+	if got := getCommentActor(); got != "portal AMD biller" {
+		t.Fatalf("tab label must outrank the pre-resolved actor, got %q", got)
 	}
+
+	// An explicit --actor is a per-command override and still wins.
+	prevExplicit := actorExplicit
+	actorExplicit = true
+	actor = "from-flag"
+	got := getCommentActor()
+	actorExplicit = prevExplicit
 	actor = ""
-	_ = os.Setenv("BEADS_ACTOR", "from-env")
-	if got := getCommentActor(); got != "from-env" {
-		t.Fatalf("BEADS_ACTOR must win over the tab label, got %q", got)
+	if got != "from-flag" {
+		t.Fatalf("explicit --actor must win, got %q", got)
 	}
 }
