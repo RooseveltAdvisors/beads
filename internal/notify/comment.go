@@ -12,6 +12,12 @@ func ResolveActor() string {
 	if a := strings.TrimSpace(os.Getenv("BEADS_ACTOR")); a != "" {
 		return a
 	}
+	// Inside a herdr pane the captain-named tab label is the identity: it says
+	// what this agent is for, where git user.name only says which clone it runs
+	// in. Unlabeled tabs and non-herdr callers fall through to git.
+	if a := HerdrTabActor(); a != "" {
+		return a
+	}
 	if out, err := exec.Command("git", "config", "user.name").Output(); err == nil {
 		if gitUser := strings.TrimSpace(string(out)); gitUser != "" {
 			return gitUser

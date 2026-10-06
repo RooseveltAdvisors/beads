@@ -206,7 +206,7 @@ Examples:
 
 		author, _ := cmd.Flags().GetString("author")
 		if author == "" {
-			author = getActorWithGit()
+			author = getCommentActor()
 		}
 
 		// Dispatched after the text is resolved so both backends read the
@@ -310,7 +310,7 @@ var commentsDeleteCmd = &cobra.Command{
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		CheckReadonly("comment delete")
-		actor := getActorWithGit()
+		actor := getCommentActor()
 		if usesProxiedServer() {
 			return runCommentsDeleteProxiedServer(rootCtx, args[0], args[1], actor)
 		}

@@ -33,6 +33,7 @@ import (
 	"github.com/steveyegge/beads/internal/metrics"
 	"github.com/steveyegge/beads/internal/migration"
 	"github.com/steveyegge/beads/internal/molecules"
+	"github.com/steveyegge/beads/internal/notify"
 	"github.com/steveyegge/beads/internal/remotecache"
 	"github.com/steveyegge/beads/internal/routing"
 	"github.com/steveyegge/beads/internal/storage"
@@ -783,6 +784,20 @@ func resolveConfiguredActor() string {
 // This provides a sensible default for developers: their git identity is used unless
 // explicitly overridden
 func getActorWithGit() string {
+	return resolveActorIdentity(false)
+}
+
+// getCommentActor is who a COMMENT speaks as: the same chain, except that
+// inside a herdr pane the captain-named TAB LABEL wins over git identity
+// (bead wiseman-1fie: a real comment from the "portal AMD biller" tab was
+// attributed to git user.name arcs-fm and its notification was suppressed as
+// a self-comment). Explicit --actor / BEADS_ACTOR / BD_ACTOR still win, and
+// self-comment suppression (actor == assignee) keys off this identity.
+func getCommentActor() string {
+	return resolveActorIdentity(true)
+}
+
+func resolveActorIdentity(withTabLabel bool) string {
 	// If actor is already set (from --actor flag), use it
 	if actor != "" {
 		return actor
@@ -796,6 +811,15 @@ func getActorWithGit() string {
 	// Check BD_ACTOR env var (deprecated alias, kept for backwards compatibility)
 	if bdActor := os.Getenv("BD_ACTOR"); bdActor != "" {
 		return bdActor
+	}
+
+	// Herdr tab label: the captain names tabs for purpose, so an agent inside a
+	// named tab speaks as that label. Only consulted for comment-family commands
+	// and only when no explicit override was given.
+	if withTabLabel {
+		if tabActor := notify.HerdrTabActor(); tabActor != "" {
+			return tabActor
+		}
 	}
 
 	// Try git config user.name - the natural default for a git-native tool

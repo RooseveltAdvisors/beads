@@ -65,6 +65,15 @@ func TestMain(m *testing.M) {
 func testMainInner(m *testing.M) int {
 	origWD, _ := os.Getwd()
 
+	// Never inherit the calling agent's herdr identity: the comment-actor chain
+	// reads HERDR_TAB_ID/HERDR_SESSION, so a suite launched from inside a named
+	// tab would attribute comments (and actor assertions) to that tab.
+	for _, key := range []string{
+		"HERDR_PANE_ID", "HERDR_SESSION", "HERDR_TAB_ID", "HERDR_ENV", "HERDR_SOCKET_PATH", "HERDR_BIN",
+	} {
+		_ = os.Unsetenv(key)
+	}
+
 	// Isolate config discovery from the repo's tracked `.beads/config.yaml`.
 	// Many tests expect default config values; running from within this repo would
 	// cause config.Initialize() to walk up from CWD and load `.beads/config.yaml`,

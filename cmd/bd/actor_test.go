@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -245,5 +246,61 @@ func TestGetActorWithGit_PriorityOrder(t *testing.T) {
 	result = getActorWithGit()
 	if result != "from-bd-actor" {
 		t.Errorf("Expected BD_ACTOR to be used as fallback, got %q", result)
+	}
+}
+
+// TestGetCommentActorTabLabel locks the comment-actor rule: inside a herdr
+// tab named by the captain, comments speak as that label (bead wiseman-1fie:
+// a real comment was attributed to git user.name and its ping was suppressed
+// as a self-comment), while the plain audit chain keeps the git identity and
+// explicit --actor / BEADS_ACTOR still win.
+func TestGetCommentActorTabLabel(t *testing.T) {
+	orig := actor
+	defer func() { actor = orig }()
+
+	keys := []string{"HERDR_SESSION", "HERDR_TAB_ID", "HERDR_BIN", "BEADS_ACTOR", "BD_ACTOR"}
+	saved := map[string]*string{}
+	for _, k := range keys {
+		if v, ok := os.LookupEnv(k); ok {
+			cp := v
+			saved[k] = &cp
+		} else {
+			saved[k] = nil
+		}
+		_ = os.Unsetenv(k)
+	}
+	defer func() {
+		for k, v := range saved {
+			if v == nil {
+				_ = os.Unsetenv(k)
+			} else {
+				_ = os.Setenv(k, *v)
+			}
+		}
+	}()
+
+	stub := filepath.Join(t.TempDir(), "herdr")
+	stubScript := "#!/usr/bin/env bash\ncat <<'JSON'\n{\"result\":{\"tabs\":[{\"tab_id\":\"w1:t9\",\"label\":\"portal AMD biller\"}]}}\nJSON\n"
+	if err := os.WriteFile(stub, []byte(stubScript), 0o755); err != nil {
+		t.Fatalf("write fake herdr: %v", err)
+	}
+	_ = os.Setenv("HERDR_BIN", stub)
+	_ = os.Setenv("HERDR_SESSION", "wiseman")
+	_ = os.Setenv("HERDR_TAB_ID", "w1:t9")
+
+	if got := getCommentActor(); got != "portal AMD biller" {
+		t.Fatalf("getCommentActor() inside a named tab = %q, want the tab label", got)
+	}
+	if got := getActorWithGit(); got == "portal AMD biller" {
+		t.Fatalf("getActorWithGit() must keep the git chain, got the tab label %q", got)
+	}
+	actor = "from-flag"
+	if got := getCommentActor(); got != "from-flag" {
+		t.Fatalf("--actor must win, got %q", got)
+	}
+	actor = ""
+	_ = os.Setenv("BEADS_ACTOR", "from-env")
+	if got := getCommentActor(); got != "from-env" {
+		t.Fatalf("BEADS_ACTOR must win over the tab label, got %q", got)
 	}
 }

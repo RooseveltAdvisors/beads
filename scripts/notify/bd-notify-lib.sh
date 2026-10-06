@@ -6,8 +6,10 @@
 #
 # Model
 # -----
-# seats      beads assignee names (e.g. "arcs-fm", "wiseman"). Agents should run
-#            bd with BEADS_ACTOR=<their seat> so self-comments never self-notify.
+# seats      beads assignee names (e.g. "arcs-fm", "wiseman"). The speaker
+#            (actor) is resolved by bd: --actor, BEADS_ACTOR, then the herdr
+#            tab label, then git user.name. Self-comments (actor == assignee)
+#            never self-notify; set BEADS_ACTOR only to override on purpose.
 # pins       .beads/notify/pins.json : seat -> {session, pane_id, agent_session_id, harness, ...}
 #            This is the file bd itself drains against ("bd notify drain").
 #            Pins are written explicitly (bd-notify-pin set) and matched
