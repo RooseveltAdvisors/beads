@@ -1,6 +1,6 @@
 # Error Handling Guidelines
 
-Last reviewed: 2026-07-07
+Last reviewed: 2026-10-06
 
 Freshness source: `cmd/bd/*.go`, especially command error exits and JSON error
 helpers in `cmd/bd/errors.go`.
