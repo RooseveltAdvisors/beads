@@ -33,6 +33,7 @@ import (
 	"github.com/steveyegge/beads/internal/metrics"
 	"github.com/steveyegge/beads/internal/migration"
 	"github.com/steveyegge/beads/internal/molecules"
+	"github.com/steveyegge/beads/internal/notify"
 	"github.com/steveyegge/beads/internal/remotecache"
 	"github.com/steveyegge/beads/internal/routing"
 	"github.com/steveyegge/beads/internal/storage"
@@ -101,6 +102,10 @@ var (
 
 	// Dolt auto-commit policy (flag/config). Values: off | on
 	doltAutoCommit string
+	// actorExplicit records that --actor was passed on THIS command line. The
+	// store-open path pre-fills the global actor with the git identity, so
+	// resolveActorIdentity cannot infer an explicit flag from actor != "".
+	actorExplicit bool
 
 	// commandDidWrite is set when a command performs a write that should trigger
 	// auto-flush. Used to decide whether to auto-commit Dolt after the command completes.
@@ -725,7 +730,8 @@ func refreshBoundCommandConfig(cmd *cobra.Command) {
 	if !root.PersistentFlags().Changed("readonly") {
 		readonlyMode = config.GetBool("readonly")
 	}
-	if !root.PersistentFlags().Changed("actor") {
+	actorExplicit = root.PersistentFlags().Changed("actor")
+	if !actorExplicit {
 		actor = resolveConfiguredActor()
 	}
 	if !root.PersistentFlags().Changed("dolt-auto-commit") {
@@ -778,38 +784,57 @@ func resolveConfiguredActor() string {
 	return config.GetString("actor")
 }
 
-// getActorWithGit returns the actor for audit trails with git config fallback.
-// Priority: --actor flag > BEADS_ACTOR env > BD_ACTOR env (deprecated) > git config user.name > $USER > "unknown"
-// This provides a sensible default for developers: their git identity is used unless
-// explicitly overridden
+// getActorWithGit returns the actor for audit trails (create/close/audit rows).
+// Priority: --actor flag > herdr tab label is NOT consulted here > BEADS_ACTOR
+// > BD_ACTOR (deprecated) > git config user.name > $USER > "unknown".
+// This provides a sensible default for developers: their git identity is used
+// unless explicitly overridden.
 func getActorWithGit() string {
-	// If actor is already set (from --actor flag), use it
-	if actor != "" {
+	return resolveActorIdentity(false)
+}
+
+// getCommentActor is who a COMMENT speaks as: the same chain, except that
+// inside a herdr pane the captain-named TAB LABEL outranks the clone identity
+// (wiseman-1fie: a real comment from the "portal AMD biller" tab was filed as
+// git user.name arcs-fm, and because that equals the bead's assignee the ping
+// was suppressed as a self-comment). An explicit --actor still wins, because
+// that is a per-command override rather than an ambient identity.
+func getCommentActor() string {
+	return resolveActorIdentity(true)
+}
+
+// resolveActorIdentity orders who is speaking. The store-open path pre-fills
+// the global actor (flag > BEADS_ACTOR > BD_ACTOR > git > user) before any
+// command runs, so "actor != \"\"" is NOT evidence of an explicit flag - only
+// the flag's Changed bit is. Comment commands additionally prefer the herdr
+// tab label, because the captain names tabs for purpose ("portal AMD biller",
+// "THE-FM") and a clone-wide git identity hides which agent spoke.
+func resolveActorIdentity(withTabLabel bool) string {
+	if actorExplicit && strings.TrimSpace(actor) != "" {
 		return actor
 	}
-
-	// Check BEADS_ACTOR env var (primary env override)
+	if withTabLabel {
+		if tabActor := notify.HerdrTabActor(); tabActor != "" {
+			return tabActor
+		}
+	}
+	if a := strings.TrimSpace(actor); a != "" {
+		return a
+	}
 	if beadsActor := os.Getenv("BEADS_ACTOR"); beadsActor != "" {
 		return beadsActor
 	}
-
-	// Check BD_ACTOR env var (deprecated alias, kept for backwards compatibility)
 	if bdActor := os.Getenv("BD_ACTOR"); bdActor != "" {
 		return bdActor
 	}
-
-	// Try git config user.name - the natural default for a git-native tool
 	if out, err := exec.Command("git", "config", "user.name").Output(); err == nil {
 		if gitUser := strings.TrimSpace(string(out)); gitUser != "" {
 			return gitUser
 		}
 	}
-
-	// Fall back to system username
 	if user := os.Getenv("USER"); user != "" {
 		return user
 	}
-
 	return "unknown"
 }
 
@@ -1099,9 +1124,10 @@ var rootCmd = &cobra.Command{
 				WasSet bool
 			}{dbPath, true}
 		}
-		if !cmd.Root().PersistentFlags().Changed("actor") && actor == "" {
+		actorExplicit = cmd.Root().PersistentFlags().Changed("actor")
+		if !actorExplicit && actor == "" {
 			actor = resolveConfiguredActor()
-		} else if cmd.Root().PersistentFlags().Changed("actor") {
+		} else if actorExplicit {
 			flagOverrides["actor"] = struct {
 				Value  interface{}
 				WasSet bool

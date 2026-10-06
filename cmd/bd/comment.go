@@ -89,7 +89,7 @@ To list comments on an issue, use the plural form: bd comments <id>`,
 			return HandleErrorRespectJSON("%v", err)
 		}
 
-		author := getActorWithGit()
+		author := getCommentActor()
 
 		// Dispatched after the text is resolved so both backends read the
 		// same sources and report the same conflicts.

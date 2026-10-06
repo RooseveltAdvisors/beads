@@ -75,10 +75,11 @@ echo "Test 1: Usage on missing arguments"
 out="$("$REPO_DIR/scripts/notify/bd-comment-notify" 2>&1 || true)"
 assert_match "prints usage on empty args" "Usage" "$out"
 
-# 2. Test self-comment skip
-echo "Test 2: Self-comment skipping"
+# 2. The self/unassigned skip belongs to bd; the wrapper must not guess actors
+echo "Test 2: self-comment decision is bd's, not the wrapper's"
 out="$(BEADS_ACTOR=arcs-fm "$REPO_DIR/scripts/notify/bd-comment-notify" wiseman-c88 "Automated self-comment test" 2>&1 || true)"
-assert_match "skips ping on self-comment" "self-comment by assignee 'arcs-fm'; no ping needed" "$out"
+assert_eq "wrapper no longer prints a self-comment suppression guess" "0" "$(grep -c 'self-comment by assignee' <<<"$out")"
+assert_match "wrapper still flushes the assignee queue" "assignee 'arcs-fm' notified" "$out"
 
 # 3. Test non-assignee comment triggers notify
 echo "Test 3: Non-assignee comment notifications"

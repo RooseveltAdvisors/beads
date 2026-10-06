@@ -26,7 +26,7 @@ bd notify drain --seat <assignee> [--exec transport]
 - **Seat** = `assignee` (empty → `unassigned`)
 - **Outbox** = workspace-local under `.beads/notify/`
 - **Transports** = native Go herdr delivery (default), or custom `--exec`
-- **Attribution & Self-Comment Skip** = actor from `BEADS_ACTOR` env, else `git config user.name`. Self-comments (actor == assignee) never enqueue outbox rows.
+- **Attribution & Self-Comment Skip** = actor from `--actor`, else `BEADS_ACTOR`, else the **herdr tab label** (the captain names tabs for purpose, e.g. `portal AMD biller`), else `git config user.name`. Self-comments (actor == assignee) never enqueue outbox rows.
 - **No special seats** in beads or contrib scripts
 
 ## Removed anti-patterns
@@ -91,7 +91,7 @@ JSON drain rows include `delivery_mode` (`follow_up`, `steer`, or `hold_until_id
 
 Actor identity is resolved in priority order:
 1. `--actor` CLI flag
-2. `BEADS_ACTOR` environment variable (e.g. `export BEADS_ACTOR=arcs-fm`)
+2. `BEADS_ACTOR` environment variable (e.g. `export BEADS_ACTOR=arcs-fm`); unset it to fall back to the herdr tab label inside a named tab
 3. `git config user.name`
 4. `$USER`
 
