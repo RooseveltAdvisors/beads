@@ -242,11 +242,27 @@ func hydrateSummaryLabels(ctx context.Context, tx DBTX, tables FilterTables, sum
 	return nil
 }
 
+// searchPlanes lists the table planes a search under filter may actually read,
+// so the ID/prose classification is settled ONCE against all of them and every
+// leg of the search runs the same verdict. Issues comes first: it always
+// exists, so the cheap plane answers before the optional one is touched.
+func searchPlanes(filter types.IssueFilter) []FilterTables {
+	if filter.SkipWisps {
+		return []FilterTables{IssuesFilterTables}
+	}
+	return []FilterTables{IssuesFilterTables, WispsFilterTables}
+}
+
 // searchInTx is the shared wisp-merge wrapper. Ephemeral routing, the
 // empty-wisps probe, the issues+wisps queries, and overlap detection live
 // here once. Both SearchIssuesInTx and SearchIssueIDsInTx use this body —
 // future projections pick up improvements (e.g., the empty-probe) for free.
 func searchInTx[T any](ctx context.Context, tx DBTX, query string, filter types.IssueFilter, proj searchProjection[T]) ([]T, error) {
+	filter, err := ResolveIDQuery(ctx, tx, query, filter, searchPlanes(filter)...)
+	if err != nil {
+		return nil, fmt.Errorf("search issues: %w", err)
+	}
+
 	// Route ephemeral-only queries to wisps table.
 	if filter.Ephemeral != nil && *filter.Ephemeral {
 		results, err := searchTableInTxT(ctx, tx, query, filter, WispsFilterTables, proj)

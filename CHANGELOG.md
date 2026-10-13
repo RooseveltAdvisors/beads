@@ -2709,16 +2709,58 @@ which dumps the entire release history.)
   ID, title and external ref only, so naming a bead does not bury it under
   the beads that merely cite it in their bodies.
 
-  KNOWN LIMITATION: the ID heuristic reads ANY hyphenated, space-free term as
-  an ID, so `bd search use-after-free` (likewise `race-condition`,
-  `rate-limit`) is an ID query and does not scan descriptions. Such a query is
-  retried as free text only when it returns no rows at all, so one bead
-  carrying the term in its title suppresses every description-only match. When
-  a hyphenated term needs description coverage, reach for `bd list
-  --desc-contains "<term>"`: on `bd search` the single-field filters
-  (`--desc-contains`, `--notes-contains`, `--external-contains`) are AND-ed
-  with the query, so they narrow its matches instead of widening them to
-  descriptions.
+- **`bd search` now decides ID-vs-prose from the database, not from a hyphen.**
+  A query used to be read as an issue ID whenever it was hyphenated and
+  space-free, so ordinary terms — `use-after-free`, `race-condition`,
+  `rate-limit` — took the ID predicate and never reached descriptions. A query
+  is now an ID only when it NAMES A BEAD: it has the shape of an issue ID (a
+  prefix, then the last hyphen, then a hyphen-free identifier) AND that prefix
+  is one the target database actually uses, checked against the stored issues
+  at query time. Everything else is free text and does search descriptions.
+
+  The database is the gate, not the spelling of the prefix. `bd init` defaults
+  the issue prefix to the directory name, so hyphenated, underscored, long and
+  uppercase prefixes are ordinary — `claude-config-a3f8e9` and `bd_001-a3f8e9`
+  are ID queries in the workspaces that use those prefixes, and prose in the
+  ones that do not.
+
+  The corollary, since it surprises: a term is an ID query whenever EVERYTHING
+  BEFORE ITS LAST HYPHEN is a prefix the database uses — not merely its first
+  segment. `bd search bd-cli` in a `bd-`prefixed database will not find a bead
+  that only mentions "bd-cli" in its body, and neither will `bd search
+  beads-vscode-plugin` in a `beads-vscode-`prefixed one; `bd list
+  --desc-contains` will.
+
+  Matching is case-SENSITIVE end to end. The store probe that classifies the
+  query and the id comparison that answers it are both raw, so they always
+  agree: in a database minted from `~/code/MyProject`, `bd search
+  MyProject-a3f8e9` is an ID query and returns that bead alone, while `bd search
+  myproject-a3f8e9` is prose and may return every bead citing the ID instead.
+  The `--id-prefix` filter is likewise unchanged and case-SENSITIVE.
+
+  This replaces, rather than extends, the empty-result free-text retry that
+  shipped with the change above: that retry fired only when a query matched
+  nothing at all, so a single title hit still hid every description-only
+  match. It is gone, and nothing stands in its place — the classification is
+  the whole mechanism.
+
+  The classification is settled ONCE per search and carried into every leg, so
+  the issues plane and the wisps plane can never answer differently for one
+  query. A probe that fails for any reason other than "no such prefix" now
+  fails the search instead of silently downgrading an ID lookup to prose.
+
+  Free text now also spans `external_ref`, which was previously reachable only
+  as a side effect of the ID misclassification.
+
+  BEHAVIOUR CHANGE, INTENDED: an ID whose prefix the database does not use — a
+  foreign ID, or one spelled in the wrong case — is indistinguishable from prose
+  and is searched as free text. The id column is part of the free-text
+  predicate, so such an ID is still found by its ID text when the case matches,
+  alongside any bead that cites it. A multi-hyphen ID is NOT automatically prose:
+  a wisp, proto or molecule ID such as `bd-wisp-0laki` splits at its last hyphen
+  into the prefix `bd-wisp`, which the database does use, so it stays an ID
+  query and is NOT returned alongside the beads that cite it.
+
 - **Server-mode issue mutations no longer revert concurrent writers' committed
   rows** ([#5740](https://github.com/gastownhall/beads/pull/5740)). The
   issue-mutation path ran `DOLT_ADD`/`DOLT_COMMIT` inside its still-open SQL

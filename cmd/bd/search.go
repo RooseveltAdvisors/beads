@@ -8,7 +8,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/beads/internal/metrics"
 	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/sqlbuild"
 	"github.com/steveyegge/beads/internal/types"
 	"github.com/steveyegge/beads/internal/utils"
 	"github.com/steveyegge/beads/internal/validation"
@@ -21,24 +20,42 @@ var searchCmd = &cobra.Command{
 	Short:   "Search issues by text query",
 	Long: `Search issues across title, description, and ID (all statuses, including closed).
 
-Free-text queries search titles and descriptions.
+Free-text queries search titles, descriptions, IDs and external refs.
 
-A hyphenated, space-free query is treated as ID-like. That covers real IDs
-("bd-123", "hq-319") and ordinary terms alike ("use-after-free",
-"race-condition", "rate-limit"). ID-like queries match ID, title and external
-ref only and never scan descriptions, so naming a bead returns that bead
-rather than every bead that cites it.
+A query is treated as an ID only when it NAMES A BEAD: it has the shape of an
+issue ID (a prefix, then the last hyphen, then an identifier with no further
+hyphen) AND that prefix is one this database actually uses. The database is the
+gate, not the spelling: hyphenated, underscored, long and uppercase prefixes
+("claude-config-a3f8e9", "bd_001-a3f8e9") are all ID queries where those
+prefixes exist. Matching is case-SENSITIVE throughout: only the exact-cased
+spelling is read as an ID, so in a "MyProject" database "MyProject-a3f8e9" is an
+ID query while "myproject-a3f8e9" is prose and may come back alongside every
+bead that cites that ID.
 
-An ID-like query is retried as free text ONLY when it returns no rows at all
-— including when active filters (--status, --assignee, --label,
---created-after) excluded the named bead. One title or external-ref hit
-suppresses the retry, so a description-only match for "use-after-free" is
-missed whenever any other bead carries that term in its title.
+Terms that merely look ID-shaped ("use-after-free", "race-condition",
+"rate-limit") name no prefix any database uses, so they are free text and do
+search descriptions — UNLESS everything before the term's LAST hyphen is a
+prefix this database uses. In a "bd"-prefixed database "bd-cli" is an ID query
+and therefore does NOT scan descriptions, even though it was meant as prose; in
+a "beads-vscode"-prefixed one so is "beads-vscode-plugin". Reach for
+bd list --desc-contains when a term collides with the local prefix.
+
+An ID query matches ID, title and external ref, and deliberately not
+descriptions, so naming a bead returns that bead rather than every bead that
+cites it in its body.
+
+An ID whose prefix this database does not use — a foreign ID, or one spelled in
+the wrong case — is indistinguishable from prose and is searched as free text;
+the id column is part of the free-text predicate, so it is still found by its ID
+text when the case matches, alongside anything that cites it.
+
+A wisp, proto or molecule ID ("bd-wisp-0laki") is NOT prose: everything before
+its last hyphen ("bd-wisp") is a prefix the database uses, so it is an ID query
+like any other.
 
 --desc-contains, --notes-contains and --external-contains are AND-ed with the
-query here, so they NARROW its matches; --desc-contains cannot widen an ID-like
-query to descriptions, and this command always requires a query. The
-unconditional description search is: bd list --desc-contains "<term>".
+query here, so they NARROW its matches, and this command always requires a
+query. The unconditional description search is: bd list --desc-contains "<term>".
 Use --status open (etc.) to narrow; closed issues are included by default
 so "was this already filed/fixed?" cannot silently answer no. Matches
 beyond --limit are dropped status-blind, so when hunting live work in a
@@ -270,13 +287,6 @@ Examples:
 		if err != nil {
 			return HandleError("%v", err)
 		}
-		if needsFreeTextRetry(query, len(issues)) {
-			filter.FreeTextQuery = true
-			issues, err = store.SearchIssues(ctx, query, filter)
-			if err != nil {
-				return HandleError("%v", err)
-			}
-		}
 
 		// Apply sorting
 		workapi.SortIssues(issues, sortBy, reverse)
@@ -378,16 +388,6 @@ func outputSearchResults(issues []*types.Issue, query string, longFormat bool) {
 				assigneeStr, labelsStr, issue.Title)
 		}
 	}
-}
-
-// needsFreeTextRetry reports whether an ID-like query that matched nothing
-// should be retried under the free-text predicate. LooksLikeIssueID accepts any
-// hyphenated space-free token, so ordinary search terms such as "use-after-free"
-// are classified as IDs and would otherwise never reach description text. The
-// retry is bounded to the empty-result case, so a query that names a real bead
-// is never diluted by beads that merely cite it.
-func needsFreeTextRetry(query string, found int) bool {
-	return found == 0 && sqlbuild.LooksLikeIssueID(query)
 }
 
 func init() {

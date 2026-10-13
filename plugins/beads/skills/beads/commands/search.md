@@ -22,10 +22,13 @@ The search command finds issues where your query appears in **any** of:
 - Issue title
 - Issue description
 - Issue ID (supports partial matching)
+- Issue external ref
 
 Unlike `bd list`, which requires you to specify which field to search, `bd search` automatically searches all text fields, making it faster and more intuitive for exploratory searches.
 
-**Caveat — hyphenated terms.** Free-text queries search titles and descriptions, but a hyphenated, space-free term (e.g. `use-after-free`, `race-condition`) is treated as an ID-like query and searches titles, IDs and external refs only. It is retried as free text only when it matches nothing at all, so a single title hit hides every description-only match. Use `bd list --desc-contains "<term>"` for an unconditional description search.
+**ID queries vs free text.** A query is treated as an ID only when it names a bead: it has the shape of an issue ID (a prefix, then the last hyphen, then a hyphen-free identifier) AND that prefix is one this database actually uses. The database is the gate, not the spelling — hyphenated, underscored, long and uppercase prefixes (`claude-config-a3f8e9`, `bd_001-a3f8e9`) are ID queries wherever those prefixes exist. Matching is case-SENSITIVE: in a `MyProject` database only `MyProject-a3f8e9` is an ID query, while `myproject-a3f8e9` is prose. An ID query matches ID, title and external ref — not descriptions — so naming a bead returns that bead rather than every bead citing it.
+
+Hyphenated terms (`use-after-free`, `race-condition`, `rate-limit`) are free text and do search descriptions — **unless everything before the term's LAST hyphen is a prefix this database uses**. In a `bd`-prefixed database `bd-cli` is an ID query and so does NOT scan descriptions, even when it was meant as prose; in a `beads-vscode`-prefixed one so is `beads-vscode-plugin`. Use `bd list --desc-contains` for those. A wisp, proto or molecule ID (`bd-wisp-0laki`) is likewise an ID query, since `bd-wisp` is a prefix the database uses. An ID whose prefix this database does not use — a foreign ID, or one spelled in the wrong case — is searched as free text, which still matches it by its ID text when the case matches, alongside anything citing it.
 
 ## Filters
 

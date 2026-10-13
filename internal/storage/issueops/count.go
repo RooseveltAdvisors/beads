@@ -14,6 +14,11 @@ import (
 // SkipWisps=true counts the durable issues table only, and otherwise the
 // wisps count is merged in (GH#4387).
 func CountIssuesInTx(ctx context.Context, tx DBTX, query string, filter types.IssueFilter) (int, error) {
+	filter, err := ResolveIDQuery(ctx, tx, query, filter, searchPlanes(filter)...)
+	if err != nil {
+		return 0, fmt.Errorf("count issues: %w", err)
+	}
+
 	if filter.Ephemeral != nil && *filter.Ephemeral {
 		wispCount, err := countTableInTx(ctx, tx, query, filter, WispsFilterTables)
 		if err != nil && !missingOptionalWispTable(err) {

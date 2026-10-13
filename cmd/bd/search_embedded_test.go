@@ -111,9 +111,8 @@ func TestEmbeddedSearchQueryStatusAssigneeLabels(t *testing.T) {
 	})
 
 	t.Run("search_hyphenated_description_term", func(t *testing.T) {
-		// A hyphenated space-free term is classified ID-like, so the narrow ID
-		// predicate matches nothing; the bead is reachable only because an
-		// empty ID-like result is retried as free text.
+		// A hyphenated term whose prefix no bead in this store uses is free
+		// text, so it is matched against description bodies.
 		results := bdSearchJSON(t, bd, dir, "use-after-free")
 		found := false
 		for _, r := range results {
@@ -522,21 +521,16 @@ func TestEmbeddedSearchConcurrent(t *testing.T) {
 	}
 }
 
-// TestEmbeddedSearchHyphenatedTermKnownLimitation documents a KNOWN LIMITATION,
-// not desired behaviour. LooksLikeIssueID classifies any hyphenated, space-free
-// token as an issue ID, so "use-after-free" takes the ID-like predicate (ID,
-// title, external ref) and never scans descriptions. The empty-result free-text
-// retry rescues such a term only while NOTHING matches at all; a single title
-// hit suppresses the retry and the description-only bead stays invisible.
+// TestEmbeddedSearchHyphenatedTermFindsDescriptions pins the fix for the hole
+// three rounds of patching could not close. "use-after-free" has the SHAPE of
+// an issue ID, but no bead in this store carries a "use-" prefix, so it is
+// classified as free text and searched against descriptions as well as titles.
 //
-// TestEmbeddedSearch/search_hyphenated_description_term covers the zero-hit path
-// where the retry does fire. This case covers the hole beside it, so the
-// limitation is tested and visible rather than silent.
-//
-// EXPECTED TO FAIL LOUDLY when LooksLikeIssueID is fixed to stop misreading
-// ordinary hyphenated terms as issue IDs. At that point delete this test and
-// assert that both beads come back.
-func TestEmbeddedSearchHyphenatedTermKnownLimitation(t *testing.T) {
+// The case that matters is the one with a title hit BESIDE the
+// description-only bead: the deleted empty-result retry rescued a hyphenated
+// term only while nothing at all matched, so a single title hit suppressed
+// every description-only match. Both beads must come back.
+func TestEmbeddedSearchHyphenatedTermFindsDescriptions(t *testing.T) {
 	if os.Getenv("BEADS_TEST_EMBEDDED_DOLT") != "1" {
 		t.Skip("set BEADS_TEST_EMBEDDED_DOLT=1 to run embedded dolt integration tests")
 	}
@@ -560,8 +554,7 @@ func TestEmbeddedSearchHyphenatedTermKnownLimitation(t *testing.T) {
 	if !ids[titleHit.ID] {
 		t.Errorf("expected the title match %s for %q, got %v", titleHit.ID, "use-after-free", results)
 	}
-	if ids[descOnly.ID] {
-		t.Fatalf("%s now matches on description text: LooksLikeIssueID no longer misreads %q as an issue ID. "+
-			"Delete this known-limitation test and assert full description coverage instead.", descOnly.ID, "use-after-free")
+	if !ids[descOnly.ID] {
+		t.Errorf("expected the description-only match %s for %q, got %v", descOnly.ID, "use-after-free", results)
 	}
 }

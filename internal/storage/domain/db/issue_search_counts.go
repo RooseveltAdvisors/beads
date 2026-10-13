@@ -20,6 +20,11 @@ func (r *issueSQLRepositoryImpl) searchAcrossIssuesAndWispsWithCounts(ctx contex
 		return domain.SearchCountsPage{}, fmt.Errorf("search issues with counts: wisp dependency probe: %w", err)
 	}
 
+	filter, err = r.resolveIDQuery(ctx, query, filter)
+	if err != nil {
+		return domain.SearchCountsPage{}, fmt.Errorf("search issues with counts: %w", err)
+	}
+
 	if filter.Ephemeral != nil && *filter.Ephemeral {
 		empty, probeErr := r.wispsTableEmptyOrMissing(ctx)
 		if probeErr != nil {

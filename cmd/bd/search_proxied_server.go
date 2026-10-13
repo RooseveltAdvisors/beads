@@ -206,13 +206,6 @@ func runSearchProxiedServer(cmd *cobra.Command, ctx context.Context, args []stri
 		if err != nil {
 			return HandleErrorRespectJSON("%v", err)
 		}
-		if needsFreeTextRetry(query, len(page.Items)) {
-			filter.FreeTextQuery = true
-			page, err = uw.IssueUseCase().SearchIssuesWithCounts(ctx, query, filter)
-			if err != nil {
-				return HandleErrorRespectJSON("%v", err)
-			}
-		}
 		items := page.Items
 		workapi.SortIssuesWithCounts(items, sortBy, reverse)
 		if items == nil {
@@ -224,13 +217,6 @@ func runSearchProxiedServer(cmd *cobra.Command, ctx context.Context, args []stri
 	page, err := uw.IssueUseCase().SearchIssues(ctx, query, filter)
 	if err != nil {
 		return HandleErrorRespectJSON("%v", err)
-	}
-	if needsFreeTextRetry(query, len(page.Items)) {
-		filter.FreeTextQuery = true
-		page, err = uw.IssueUseCase().SearchIssues(ctx, query, filter)
-		if err != nil {
-			return HandleErrorRespectJSON("%v", err)
-		}
 	}
 	issues := page.Items
 	workapi.SortIssues(issues, sortBy, reverse)

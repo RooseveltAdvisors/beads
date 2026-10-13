@@ -67,13 +67,35 @@ func BuildIssueFilterClauses(query string, filter types.IssueFilter, tables Filt
 
 	if query != "" {
 		lowerQuery := strings.ToLower(query)
-		if LooksLikeIssueID(query) && !filter.FreeTextQuery {
+		if filter.IDQuery {
+			// The query NAMES a bead: match it, not every bead that cites it.
+			// Descriptions are deliberately out of this branch — including them
+			// buries the named bead under its citers, past the SQL LIMIT.
+			//
+			// THE id COMPARISONS ARE RAW ON BOTH SIDES, so this clause answers
+			// the same question issueops.storeUsesIDPrefix asked to get here.
+			// That probe binds the prefix raw, and `=`/LIKE are case-sensitive
+			// on both backends (Dolt's binary table collation, SQLite's PRAGMA
+			// case_sensitive_like), so only the exact-cased spelling reaches
+			// this branch at all. Folding id here would make the gate and the
+			// clause disagree: the other spelling would fall to free text and
+			// come back diluted with every bead that merely cites the id, which
+			// is the failure this branch exists to prevent. title and
+			// external_ref stay folded — they are prose columns, not the
+			// classified token.
 			whereClauses = append(whereClauses, "(id = ? OR id LIKE ? OR LOWER(title) LIKE ? OR LOWER(external_ref) LIKE ?)")
-			args = append(args, lowerQuery, lowerQuery+"%", "%"+lowerQuery+"%", "%"+lowerQuery+"%")
+			args = append(args, query, query+"%", "%"+lowerQuery+"%", "%"+lowerQuery+"%")
 		} else {
-			whereClauses = append(whereClauses, "(LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR id LIKE ?)")
+			// Free text spans every text column an issue is findable by, so
+			// nothing is reachable ONLY by being misread as an ID. External refs
+			// ("JIRA-1234") are ID-SHAPED but are never issue-id prefixes, so
+			// this branch is the only one that can ever match them. id is
+			// compared raw here for the same reason as the branch above: it is
+			// the same column under the same case-sensitive collation, and the
+			// two branches must not disagree about what matches an id.
+			whereClauses = append(whereClauses, "(LOWER(title) LIKE ? OR LOWER(description) LIKE ? OR id LIKE ? OR LOWER(external_ref) LIKE ?)")
 			pattern := "%" + lowerQuery + "%"
-			args = append(args, pattern, pattern, pattern)
+			args = append(args, pattern, pattern, "%"+query+"%", pattern)
 		}
 	}
 
@@ -397,19 +419,53 @@ func globToLikePattern(pattern string) string {
 	return b.String()
 }
 
-// LooksLikeIssueID returns true if the query string looks like a beads issue ID.
-func LooksLikeIssueID(query string) bool {
-	idx := strings.Index(query, "-")
-	if idx <= 0 || idx >= len(query)-1 {
-		return false
+// maxIssueIDLength bounds the query length IssueIDShape will consider. A real
+// issue ID is a prefix plus a short hash; anything longer is prose.
+const maxIssueIDLength = 64
+
+// IssueIDShape reports whether query has the SHAPE of a beads issue ID and, if
+// so, returns the candidate prefix — everything before the LAST hyphen,
+// verbatim.
+//
+// SHAPE IS NOT CLASSIFICATION, AND THE SHAPE DOES NOT GUESS THE PREFIX. A
+// workspace's issue prefix is whatever it configured: `bd init` defaults it to
+// the directory name, normalization emits underscore forms such as `bd_001`,
+// and `bd doctor` accepts up to 20 characters of [a-zA-Z][a-zA-Z0-9_-]* — so
+// `claude-config-a3f8e9`, `bd_001-a3f8e9` and `bead-me-up-a3f8e9` are all real
+// IDs. Pinning the prefix to a character class or a length here would decide
+// ID-vs-prose by guesswork and leave the store probe unreachable for every
+// workspace outside the guess. Only the tail is pinned, and only enough to
+// place the split: the store decides the rest.
+//
+// The shape is therefore: a non-empty prefix of [A-Za-z0-9_-], the last hyphen,
+// then a non-empty identifier tail of alphanumerics and dots (dots carry
+// hierarchical child IDs such as bd-a3f8e9.1.2). The tail is HYPHEN-FREE, which
+// is what makes the last hyphen the separator. "race-condition" and
+// "use-after-free" pass this shape and are still prose — issueops.ResolveIDQuery
+// asks the store whether any bead carries a "race" or "use-after" prefix, and
+// it is the only thing that may set IssueFilter.IDQuery.
+//
+// The prefix is returned VERBATIM, never case-folded: LIKE is case-sensitive on
+// both backends, so a lowercased prefix would guarantee a probe miss for every
+// uppercase prefix.
+func IssueIDShape(query string) (string, bool) {
+	if query == "" || len(query) > maxIssueIDLength {
+		return "", false
 	}
-	if strings.Contains(query, " ") {
-		return false
+	idx := strings.LastIndex(query, "-")
+	if idx <= 0 || idx == len(query)-1 {
+		return "", false
 	}
-	for _, c := range query {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-' || c == '.') {
-			return false
+	prefix, tail := query[:idx], query[idx+1:]
+	for _, c := range prefix {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c == '-') {
+			return "", false
 		}
 	}
-	return true
+	for _, c := range tail {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.') {
+			return "", false
+		}
+	}
+	return prefix, true
 }
