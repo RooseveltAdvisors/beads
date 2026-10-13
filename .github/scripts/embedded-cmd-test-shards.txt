@@ -132,7 +132,7 @@
 
 100 54 TestEmbeddedSearchConcurrent
 
-100 55 TestEmbeddedSearchHyphenatedTermKnownLimitation
+100 55 TestEmbeddedSearchHyphenatedTermFindsDescriptions
 100 55 TestEmbeddedUndefer
 
 100 56 TestEmbeddedDepNoCycleCheck
