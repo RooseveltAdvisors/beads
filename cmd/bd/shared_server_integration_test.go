@@ -115,10 +115,6 @@ func TestSharedServerConcurrent(t *testing.T) {
 		"BEADS_TEST_MODE=1",
 		"BD_DISABLE_METRICS=1",
 		"BD_DISABLE_EVENT_FLUSH=1",
-		// Hermetic to the house create.dedup-check (beads #37): this suite
-		// creates same-titled rows on purpose, and a dedup conflict is not the
-		// behavior under test here.
-		"BD_CREATE_DEDUP_CHECK=0",
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_ASKPASS=",
 		"SSH_ASKPASS=",
@@ -142,6 +138,11 @@ func TestSharedServerConcurrent(t *testing.T) {
 	// small BEADS_TEST_SS_DIRS at ~8s per init. Larger manual runs queue
 	// numDirs inits behind one gate, so raise the bound to match rather
 	// than reintroduce client-side serialization.
+	// The concurrency suite creates same-titled rows on purpose; the house
+	// create.dedup-check (beads #37) would turn those into conflict payloads,
+	// and a dedup conflict is not the behavior under test here. Only this
+	// suite's clients run with it off - the dedup tests keep it on.
+	concurrentEnv := append(append([]string{}, baseEnv...), "BD_CREATE_DEDUP_CHECK=0")
 	initEnv := baseEnv
 	if perInit := 15 * time.Second; time.Duration(numDirs)*perInit > initGateWaitDefault {
 		bound := time.Duration(numDirs) * perInit
@@ -230,7 +231,7 @@ func TestSharedServerConcurrent(t *testing.T) {
 				tag:    fmt.Sprintf("c%d", c),
 				binary: bdBinary,
 				dir:    p.dir,
-				env:    baseEnv,
+				env:    concurrentEnv,
 				ctx:    egCtx,
 				t:      t,
 			}

@@ -666,7 +666,7 @@ func TestParityCreateJSONShape(t *testing.T) {
 	assertKeySet(t, obj, []string{
 		"id", "title", "description", "status", "priority", "issue_type",
 		"assignee", "created_at", "created_by", "updated_at", "labels",
-		"owner", "schema_version",
+		"owner", "schema_version", "due_source",
 	})
 	if obj["owner"] != parityOwnerEmail {
 		t.Errorf("owner = %v, want %q from the git identity", obj["owner"], parityOwnerEmail)
