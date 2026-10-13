@@ -1,12 +1,13 @@
-# Deploy the bd binary that drives the notify clock.
+# Deploy the fleet bd binary and cut releases.
 #
-# The clock (bd-due-sweep.service) runs a pinned copy at
-# ~/.local/libexec/bd-due-sweep-bd. Nothing rebuilt that copy, so the
-# 2026-09-13 build survived three later notify fixes and routed a daily wake
-# with fuzzy seat scoring to a random lookalike pane (wiseman-y67). A pinned
-# binary nothing rebuilds is a frozen binary, so: rebuild from main, install
-# atomically, verify against the live outbox and schema, every push that can
-# change the binary - plus daily, so drift cannot accumulate silently.
+# History: this lane used to rebuild the clock's pinned copy at
+# ~/.local/libexec/bd-due-sweep-bd, because a frozen 2026-09-13 build survived
+# three notify fixes and routed a daily wake with fuzzy seat scoring to a
+# random lookalike pane (wiseman-y67). The clock itself is gone now (deleted
+# 2026-10-12 by captain order). What remains is the lesson and the work:
+# rebuild from main, install atomically to ~/.local/bin/bd, verify against the
+# live schema, every push that can change the binary - plus daily, so drift
+# cannot accumulate silently.
 name: Deploy notify clock
 
 on:
@@ -33,15 +34,16 @@ permissions:
 env:
   BD_DISABLE_METRICS: "1"
   BD_DISABLE_EVENT_FLUSH: "1"
-  CLOCK_BIN: /home/jon/.local/libexec/bd-due-sweep-bd
+  INSTALL_BIN: /home/jon/.local/bin/bd
 
 jobs:
   guard:
     name: Notify guard (exact pin only)
-    # bd-clock marks the box that owns this clock's unit and binaries. Two
-    # runners carry `gpu` (beads-agt10 has no bd-due-sweep unit), and an install
-    # on the wrong host silently leaves this box stale - which is how the deploy
-    # lane failed twice on 10-04/10-05.
+    # bd-clock marks the box this lane installs to. Two runners carry `gpu`,
+    # and an install on the wrong host silently leaves this box stale - which
+    # is how the deploy lane failed twice on 10-04/10-05. The clock this label
+    # once named is gone (deleted 2026-10-12); the label still pins installs
+    # to this host.
     runs-on: [self-hosted, gpu, bd-clock]
     timeout-minutes: 10
     steps:
@@ -50,21 +52,12 @@ jobs:
         run: ./scripts/notify/test_beads_notify_e2e.sh
 
   deploy:
-    name: Rebuild + install clock binary
+    name: Rebuild + install bd binary
     runs-on: [self-hosted, gpu, bd-clock]
     needs: guard
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
-
-      - name: This host owns the clock
-        run: |
-          set -euo pipefail
-          # Prove ownership BEFORE building or writing anything: the unit must
-          # point at the binary this job installs. On a host without the unit
-          # this fails fast instead of installing a binary nobody runs.
-          grep -E '^Environment=BD_DUE_SWEEP_BD=(%h|/home/jon)/\.local/libexec/bd-due-sweep-bd$' \
-            /home/jon/.config/systemd/user/bd-due-sweep.service.d/override.conf
 
       - name: Check Go toolchain
         run: go version
@@ -77,33 +70,29 @@ jobs:
       - name: Install (atomic, keep previous)
         run: |
           set -euo pipefail
-          mkdir -p "$(dirname "$CLOCK_BIN")"
-          [ -f "$CLOCK_BIN" ] && cp -f "$CLOCK_BIN" "$CLOCK_BIN.prev" || true
-          install -m 0755 "$RUNNER_TEMP/bd" "$CLOCK_BIN"
+          mkdir -p "$(dirname "$INSTALL_BIN")"
+          [ -f "$INSTALL_BIN" ] && cp -f "$INSTALL_BIN" "$INSTALL_BIN.prev" || true
+          install -m 0755 "$RUNNER_TEMP/bd" "$INSTALL_BIN"
 
-      - name: Verify installed binary against the live clock
+      - name: Verify installed binary against the live workspace
         run: |
           set -euo pipefail
-          "$CLOCK_BIN" --version
+          "$INSTALL_BIN" --version
 
           cd /opt/ra/firstmate
 
           # Schema must be current. Pending migrations gate writes on a
           # remote-backed DB, so a skew here means the clock silently stops
           # enqueueing and nobody hears about it.
-          "$CLOCK_BIN" migrate schema --json
-
-          # The notify outbox must be readable and drainable in print mode:
-          # same code path as delivery, no herdr submit, no acks.
-          "$CLOCK_BIN" notify drain --all --print --no-ack >/dev/null
+          "$INSTALL_BIN" migrate schema --json
 
       - name: Roll back on failure
         if: failure()
         run: |
           set -uo pipefail
-          if [ -f "$CLOCK_BIN.prev" ]; then
-            install -m 0755 "$CLOCK_BIN.prev" "$CLOCK_BIN"
-            echo "rolled back to previous clock binary: $("$CLOCK_BIN" --version)" >&2
+          if [ -f "$INSTALL_BIN.prev" ]; then
+            install -m 0755 "$INSTALL_BIN.prev" "$INSTALL_BIN"
+            echo "rolled back to previous bd binary: $("$INSTALL_BIN" --version)" >&2
           fi
 
   # The release cut rides the same train as the clock deploy: a merge to main
