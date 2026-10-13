@@ -1,4 +1,0 @@
-CREATE TABLE IF NOT EXISTS config (
-    `key` VARCHAR(255) PRIMARY KEY,
-    value TEXT NOT NULL
-);

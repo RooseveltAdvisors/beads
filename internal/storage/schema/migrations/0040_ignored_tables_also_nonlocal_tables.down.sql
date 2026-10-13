@@ -1,1 +1,0 @@
--- Migration 0040 down: revert wisps from nonlocal back to dolt-ignored.

@@ -1,2 +1,0 @@
-ALTER TABLE events MODIFY old_value LONGTEXT;
-ALTER TABLE events MODIFY new_value LONGTEXT;

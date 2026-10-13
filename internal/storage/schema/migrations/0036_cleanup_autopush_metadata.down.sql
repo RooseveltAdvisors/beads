@@ -1,2 +1,0 @@
--- Reverse migration 0036: not reversible. The deleted dolt_auto_push_* rows
--- were machine-local and aren't preserved anywhere. Intentional no-op.
