@@ -115,6 +115,10 @@ func TestSharedServerConcurrent(t *testing.T) {
 		"BEADS_TEST_MODE=1",
 		"BD_DISABLE_METRICS=1",
 		"BD_DISABLE_EVENT_FLUSH=1",
+		// Hermetic to the house create.dedup-check (beads #37): this suite
+		// creates same-titled rows on purpose, and a dedup conflict is not the
+		// behavior under test here.
+		"BD_CREATE_DEDUP_CHECK=0",
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_ASKPASS=",
 		"SSH_ASKPASS=",
