@@ -423,7 +423,7 @@ jobs:
     # run and any fork or Dependabot PR stay on GitHub-hosted runners. This
     # job reads no repository code and holds no secret value (see below), so
     # Blacksmith sees nothing sensitive either way.
-    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) && 'blacksmith-2vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) && 'ubuntu-latest' || 'ubuntu-latest' }}
     timeout-minutes: 5
     outputs:
       enabled: ${{ steps.decide.outputs.enabled }}
@@ -606,7 +606,7 @@ jobs:
     # secrets either, below. See "rbe-west Pre-warm",
     # engdocs/CI_REQUIRED_CHECK_TOPOLOGY.md.
     if: ${{ needs.rbe.outputs.mode == 'remote' }}
-    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'blacksmith-2vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'ubuntu-latest' || 'ubuntu-latest' }}
     timeout-minutes: 5
     # Job-level, not step-level: the only continue-on-error in this workflow
     # (TestBazelWorkflowSecretsAndFailureSurface and
@@ -777,7 +777,7 @@ jobs:
     # parallelizes across the client's cores. Analysis-only, seeded runner
     # cache (ga-vnycm2.8): 38.3s on 2 vCPU, 25.6s on 4, 16.3s on 8.
     needs: rbe
-    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
+    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'ubuntu-latest' || 'ubuntu-24.04' }}
     # Remote execution goes to rbe-west (instance "oss", the Blacksmith-backed
     # worker pool shared with gascity). Skipped only in mode skip (same-repo
     # runs while RBE_WEST_WORKERS is unset).
@@ -1067,7 +1067,7 @@ jobs:
     name: pure-Go and js/wasm
     # Same runner and skip rule as bazel-test.
     needs: rbe
-    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
+    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'ubuntu-latest' || 'ubuntu-24.04' }}
     if: ${{ needs.rbe.outputs.mode != 'skip' }}
     timeout-minutes: 90
     outputs:
@@ -1294,7 +1294,7 @@ jobs:
   bazel-release-cross:
     name: release cross-compile
     needs: rbe
-    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'ubuntu-latest' || 'ubuntu-latest' }}
     if: ${{ needs.rbe.outputs.mode != 'skip' }}
     timeout-minutes: 90
     outputs:
@@ -1388,7 +1388,7 @@ jobs:
     # The runs-on expression is the shared one: Blacksmith in mode remote,
     # GitHub-hosted in the fork modes (a client only).
     needs: rbe
-    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'ubuntu-latest' || 'ubuntu-latest' }}
     if: ${{ needs.rbe.outputs.enabled == 'true' }}
     timeout-minutes: 60
     outputs:
@@ -1570,7 +1570,7 @@ jobs:
     # A caller may turn it off with integration: "off"; pr.yml and
     # bazel-farm.yml pass "on".
     needs: rbe
-    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
+    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'ubuntu-latest' || 'ubuntu-24.04' }}
     if: ${{ (needs.rbe.outputs.enabled == 'true' || needs.rbe.outputs.mode == 'cache') && inputs.integration != 'off' }}
     # F5 S2 Variant A added the "Nogo: integration library files" step after
     # `test`; +5 over the previous 85 keeps it headroom without exceeding
@@ -1747,7 +1747,7 @@ jobs:
     name: dolt-server lane
     # Same runner and skip rule as bazel-test.
     needs: rbe
-    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
+    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'ubuntu-latest' || 'ubuntu-24.04' }}
     if: ${{ needs.rbe.outputs.mode != 'skip' }}
     timeout-minutes: 90
     outputs:
@@ -1888,7 +1888,7 @@ jobs:
     # This lane is the tier's only PR run (pr-risk.yml's legacy jobs are
     # retired) and pr.yml's gate requires it to have run here and passed.
     needs: rbe
-    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'ubuntu-latest' || 'ubuntu-latest' }}
     if: ${{ needs.rbe.outputs.enabled == 'true' }}
     timeout-minutes: 30
     outputs:
@@ -2063,7 +2063,7 @@ jobs:
   bazel-dolt-race:
     name: dolt-race
     needs: rbe
-    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'ubuntu-latest' || 'ubuntu-latest' }}
     if: ${{ needs.rbe.outputs.mode == 'remote' && (github.event_name == 'pull_request' || github.event_name == 'merge_group') }}
     # At least every step's timeout-minutes plus 5 (and the test step's plus
     # 10): a hung step then fails the job (continue-on-error) before GitHub
@@ -2221,7 +2221,7 @@ jobs:
     # This lane is the tier's only PR run (pr-risk.yml's legacy jobs are
     # retired) and pr.yml's gate requires it to have run here and passed.
     needs: rbe
-    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'ubuntu-latest' || 'ubuntu-latest' }}
     if: ${{ needs.rbe.outputs.enabled == 'true' && inputs.integration != 'off' }}
     timeout-minutes: 30
     outputs:
@@ -2393,7 +2393,7 @@ jobs:
   bazel-cmd-dolt:
     name: cmd/bd Dolt-server tier
     needs: rbe
-    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
+    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'ubuntu-latest' || 'ubuntu-24.04' }}
     if: ${{ (needs.rbe.outputs.enabled == 'true' || needs.rbe.outputs.mode == 'cache') && inputs.integration != 'off' }}
     timeout-minutes: 85
     continue-on-error: true
@@ -2537,7 +2537,7 @@ jobs:
     # dominated by per-test `bd init` fixture setup, which is CPU-bound.
     # Was 4 vCPU / -n 8 (tools/f3 timing, 2026-10: ~2.7-3x on 4 CPUs);
     # revert to that if the A/B does not save at least 15s.
-    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'ubuntu-latest' || 'ubuntu-latest' }}
     if: ${{ inputs.package-gates == 'on' }}
     timeout-minutes: 30
     outputs:
@@ -2659,7 +2659,7 @@ jobs:
   package-npm:
     name: Package Gate (npm)
     needs: rbe
-    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    runs-on: ${{ needs.rbe.outputs.mode == 'remote' && 'ubuntu-latest' || 'ubuntu-latest' }}
     if: ${{ inputs.package-gates == 'on' }}
     timeout-minutes: 30
     outputs:
@@ -2790,7 +2790,7 @@ jobs:
     name: repo contents cache seed
     needs: rbe
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.rbe.outputs.mode == 'remote' && needs.rbe.outputs.rrc != 'off' }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
@@ -2840,7 +2840,7 @@ jobs:
     name: repo contents cache verify
     needs: rbe
     if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && needs.rbe.outputs.mode == 'remote' && needs.rbe.outputs.rrc != 'off' }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
       contents: read
