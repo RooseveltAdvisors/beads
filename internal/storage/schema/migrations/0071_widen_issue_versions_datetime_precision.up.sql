@@ -42,7 +42,7 @@
 -- replay harness requires this of every migration >= 0046), and a missing
 -- table makes the probe yield NULL, which takes the SELECT 1 branch. Needs
 -- a CLI-bundle direct-DDL override
--- (cliMigration0069WidenIssueVersionsDatetimePrecision in
+-- (cliMigration0071WidenIssueVersionsDatetimePrecision in
 -- cli_migrations.go), the same dolthub/dolt#11345 escape hatch 0067 and 0068
 -- use, guarded by TestBundleMigrationsWithPreparedALTERAreOverriddenOrJustified.
 --

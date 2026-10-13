@@ -33,13 +33,13 @@ import (
 // any store accumulates real history") -- a second migration once
 // removed_at gets a writer, instead of one now while the table is still
 // empty and the ALTER is free.
-const migration0069Up = "0069_widen_issue_versions_datetime_precision.up.sql"
-const migration0069Down = "0069_widen_issue_versions_datetime_precision.down.sql"
+const migration0071Up = "0071_widen_issue_versions_datetime_precision.up.sql"
+const migration0071Down = "0071_widen_issue_versions_datetime_precision.down.sql"
 
 const migration0069ChangeAtDatetimeGuard = "@issue_versions_change_at_needs_widen"
 const migration0069RemovedAtDatetimeGuard = "@issue_versions_removed_at_needs_widen"
 
-// TestLatestVersionIncludesMigration0069 pins the real next free slot this
+// TestLatestVersionIncludesMigration0071 pins the real next free slot this
 // migration claims, superseding 0068's own version of this test
 // (LatestVersion() moved from 68 to 69 the moment this migration file was
 // added). Deliberately a hardcoded literal for the same reason 0067's and
@@ -47,24 +47,25 @@ const migration0069RemovedAtDatetimeGuard = "@issue_versions_removed_at_needs_wi
 // unrelated migration landing first) should still be caught by this test
 // failing to explain why 69 is datetime-precision-shaped, which the CLI test
 // below checks.
-func TestLatestVersionIncludesMigration0069(t *testing.T) {
-	// 69 is upstream's ceiling; the house migration pair (0070
-	// recurrence columns, 0071 due_missed) extends past it.
+func TestLatestVersionIncludesMigration0071(t *testing.T) {
+	// The house pair owns 0067-0069 (recurrence columns, due_missed,
+	// versioned beads); upstream's own 0068/0069 landed here as 0070/0071,
+	// so 71 is the ceiling after the sync.
 	const want = 71
 	if got := LatestVersion(); got != want {
 		t.Fatalf("LatestVersion() = %d, want %d (issue_versions change_at/removed_at DATETIME(6) migration slot claimed by be-hs42e.8, plus the house 0070/0071 pair)", got, want)
 	}
 }
 
-// TestMigration0069WidensChangeAtAndRemovedAtPrecision is the pure-Go,
+// TestMigration0071WidensChangeAtAndRemovedAtPrecision is the pure-Go,
 // DB-independent half of the pin, mirroring
 // TestMigration0068AddsAttributionStatus's shape: it checks the frozen
 // migration bytes and the CLI-bundle override text directly, no `dolt`
 // binary required.
-func TestMigration0069WidensChangeAtAndRemovedAtPrecision(t *testing.T) {
-	upSQL, err := MigrationSQL(migration0069Up)
+func TestMigration0071WidensChangeAtAndRemovedAtPrecision(t *testing.T) {
+	upSQL, err := MigrationSQL(migration0071Up)
 	if err != nil {
-		t.Fatalf("MigrationSQL(%s) error = %v, want the migration file to exist", migration0069Up, err)
+		t.Fatalf("MigrationSQL(%s) error = %v, want the migration file to exist", migration0071Up, err)
 	}
 	for _, want := range []string{
 		"ALTER TABLE issue_versions MODIFY COLUMN change_at DATETIME(6) NOT NULL",
@@ -81,16 +82,16 @@ func TestMigration0069WidensChangeAtAndRemovedAtPrecision(t *testing.T) {
 		t.Error("0069 up migration must keep its guarded PREPARE blocks -- they are what make a raw .up.sql replay onto an already-widened store a no-op, and Dolt accepts no unprepared conditional MODIFY COLUMN")
 	}
 
-	bundle := cliCompatibleMigrationSQL(migration0069Up, upSQL)
+	bundle := cliCompatibleMigrationSQL(migration0071Up, upSQL)
 	for _, want := range []string{
 		"ALTER TABLE issue_versions MODIFY COLUMN change_at DATETIME(6) NOT NULL;",
 		"ALTER TABLE issue_versions MODIFY COLUMN removed_at DATETIME(6);",
 	} {
 		if !strings.Contains(bundle, want) {
-			t.Errorf("0069's CLI bundle substitute (cliMigration0069WidenIssueVersionsDatetimePrecision) missing direct DDL %q -- without it a fresh CLI-built database keeps precision-0 change_at/removed_at while the runtime migration path widens them", want)
+			t.Errorf("0069's CLI bundle substitute (cliMigration0071WidenIssueVersionsDatetimePrecision) missing direct DDL %q -- without it a fresh CLI-built database keeps precision-0 change_at/removed_at while the runtime migration path widens them", want)
 		}
 	}
-	if cliSubstituteAssumesWispTables(migration0069Up) {
+	if cliSubstituteAssumesWispTables(migration0071Up) {
 		t.Error("0069's CLI substitute touches only issue_versions, which has no wisps-side counterpart table — it must not be listed in cliSubstituteAssumesWispTables")
 	}
 
@@ -98,9 +99,9 @@ func TestMigration0069WidensChangeAtAndRemovedAtPrecision(t *testing.T) {
 	// migrations/*.up.sql is //go:embed'd -- see mainSource.files), so like
 	// TestMigration0068AddsAttributionStatus's own down check, this reads
 	// straight from disk by package-relative path.
-	downBytes, err := os.ReadFile("migrations/" + migration0069Down)
+	downBytes, err := os.ReadFile("migrations/" + migration0071Down)
 	if err != nil {
-		t.Fatalf("read %s: %v, want the migration file to exist", migration0069Down, err)
+		t.Fatalf("read %s: %v, want the migration file to exist", migration0071Down, err)
 	}
 	downSQL := string(downBytes)
 	for _, want := range []string{

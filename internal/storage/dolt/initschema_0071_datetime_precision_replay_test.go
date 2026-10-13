@@ -30,8 +30,8 @@ func TestMigration0069WidensPrecisionZeroStoreAsRawSQL(t *testing.T) {
 	ctx, cancel := testContext(t)
 	defer cancel()
 
-	const upFile = "../schema/migrations/0069_widen_issue_versions_datetime_precision.up.sql"
-	const downFile = "../schema/migrations/0069_widen_issue_versions_datetime_precision.down.sql"
+	const upFile = "../schema/migrations/0071_widen_issue_versions_datetime_precision.up.sql"
+	const downFile = "../schema/migrations/0071_widen_issue_versions_datetime_precision.down.sql"
 
 	requireColumnType(ctx, t, store, "issue_versions", "change_at", "datetime(6)")
 	requireColumnType(ctx, t, store, "issue_versions", "removed_at", "datetime(6)")

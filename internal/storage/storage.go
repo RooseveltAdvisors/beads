@@ -964,7 +964,7 @@ type EventsJournalConfigurer interface {
 // collide on merge — and TryAutoResolveMergeConflicts
 // (versioncontrolops/mergesettle.go) fails the pull for a table it does not
 // know. Enabling versioned history is therefore safe only with a SINGLE
-// writer per store until migration 0068 steps 1-3 (UUID version_id primary
+// writer per store until migration 0070 steps 1-3 (UUID version_id primary
 // key, ordinal demoted to an index) land; those steps follow as their own
 // PR. "Single writer" means one writer at a time per store, not merely one
 // clone: MAX(revision)+1 is not a safe allocator for two concurrent

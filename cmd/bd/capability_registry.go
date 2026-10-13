@@ -75,11 +75,11 @@ const (
 // S3 has no entry: it landed, and its rows carry Reason=design rather than a
 // tracking item.
 const (
-	trackVersionCtl  = "proxied-parity S4 (dolt commit/push/pull/remote)"
-	trackSync        = "proxied-parity S5 (bd sync)"
-	trackDegradation = "proxied-parity S6 (doctor, config show, degradations)"
+	trackVersionCtl   = "proxied-parity S4 (dolt commit/push/pull/remote)"
+	trackSync         = "proxied-parity S5 (bd sync)"
+	trackDegradation  = "proxied-parity S6 (doctor, config show, degradations)"
 	trackHouseCustoms = "repro-844 (house customs audit: lands each proxied dual or rules it out)"
-	trackLongTail    = "proxied-parity S7 (long-tail policy pass)"
+	trackLongTail     = "proxied-parity S7 (long-tail policy pass)"
 )
 
 // capabilityRow is one command-path policy row. ArgSet is the sorted set of

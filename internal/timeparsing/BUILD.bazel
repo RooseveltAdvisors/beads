@@ -2,7 +2,10 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "timeparsing",
-    srcs = ["parser.go"],
+    srcs = [
+        "parser.go",
+        "repeat.go",
+    ],
     importpath = "github.com/steveyegge/beads/internal/timeparsing",
     visibility = ["//:__subpackages__"],
     deps = [
@@ -17,6 +20,7 @@ go_test(
     srcs = [
         "duration_test.go",
         "nlp_test.go",
+        "repeat_test.go",
     ],
     embed = [":timeparsing"],
 )

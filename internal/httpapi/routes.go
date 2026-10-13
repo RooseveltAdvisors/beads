@@ -983,7 +983,7 @@ func (r route) specPathOf() string {
 // (checkProjectStamp): a stamped client reads it to know the refusal is available
 // rather than silently dropped by an older server.
 const (
-	CapIssuesCreateRepeat        = "issues.create.repeat"
+	CapIssuesCreateRepeat         = "issues.create.repeat"
 	CapIssuesUpdateDueClearReason = "issues.update.dueClearReason"
 )
 

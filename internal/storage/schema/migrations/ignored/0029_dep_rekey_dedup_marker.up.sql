@@ -1,4 +1,4 @@
--- Ignored migration 0026: clone-local marker that forces one dependency-id
+-- Ignored migration 0029: clone-local marker that forces one dependency-id
 -- re-key pass with the duplicate-edge merge (gastownhall/beads#5268).
 --
 -- rekeyDependencyIDs (internal/storage/schema/dep_id_backfill.go) converges the

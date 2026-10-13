@@ -132,7 +132,7 @@ wired through it yet (above).
 The issues row shape is projected positionally in several places and mirrored
 onto `wisps`, so a new column is never one edit. The guard tests below fail
 until every leg agrees, which is the intended way to find the list — but
-knowing it up front turns a day of red CI into one pass. Migration 0067
+knowing it up front turns a day of red CI into one pass. Migration 0069
 (`repeat_pattern` / `repeat_start` / `repeat_end` / `due_source`) is the
 worked example; 0060 (`storage_class`) is the earlier one.
 
@@ -179,7 +179,7 @@ and `internal/storage/issueops/search_lite_merge_test.go` both pin a column
 count and a full-width row.
 
 **A SYSTEM-MAINTAINED column skips most of this.** If one subsystem is the
-column's only writer and no caller may set it — migration 0068 (`due_missed`,
+column's only writer and no caller may set it — migration 0070 (`due_missed`,
 written only by the due sweep) is the worked example — then the Write paths,
 Wire request schemas and CLI sections above do not apply at all: no `bd create`
 or `bd update` flag, no `GraphApplyNode` entry, no `IsAllowedUpdateField` or

@@ -25,8 +25,8 @@ import (
 // hash for an already-released version.
 
 const (
-	frozenMainThrough    = 66
-	frozenIgnoredThrough = 26
+	frozenMainThrough    = 69
+	frozenIgnoredThrough = 29
 )
 
 var frozenMigrationHashes = map[string]string{
@@ -96,6 +96,9 @@ var frozenMigrationHashes = map[string]string{
 	"0064_create_events_journal.up.sql":                    "25ea9ad8e849dc7e32e7c5850631bedc63a5c5da3bdc58ccb2762fd7a6c758fc",
 	"0065_widen_wisp_comments_text.up.sql":                 "c7341bb977daff92e073db2579e63058cef88d43f1e09b13fa153a772caac2a6",
 	"0066_add_events_journal_actor.up.sql":                 "a524d42ba0eced9350edbf6402dc2952957ff8f75a896bc8339c4cbc8596c793",
+	"0067_add_recurrence_columns.up.sql":                   "a19e056768d37f5af047cc0a25c3455d9bef2a70fa852bdba19fbc455296c308",
+	"0068_add_due_missed.up.sql":                           "325b072a5a0b215ce208eb5d98b6dd76cd27e0e4fb5c4e69c69096c7f738dd1c",
+	"0069_add_versioned_beads_schema.up.sql":               "44403ea9f89245af318d9d854a600f78f8380c09697ad9d6c444b3bf287d1f4c",
 }
 
 var frozenIgnoredMigrationHashes = map[string]string{
@@ -124,7 +127,10 @@ var frozenIgnoredMigrationHashes = map[string]string{
 	"0023_repair_events_journal_shape.up.sql":             "d0edd83ca4cfbc46bd17799c6497a70c8c011d130d08a00c71daf792ee1dcd51",
 	"0024_widen_wisp_comments_text.up.sql":                "69a96330e00643dfeddc4bf6ae9bf3b743a3cfddd86f16dc7b8912758b1b570d",
 	"0025_add_events_journal_actor.up.sql":                "c81ca9edc80c25f6ab4f92d05d6ea412a780b108d1ed83745027440e9723dceb",
-	"0026_dep_rekey_dedup_marker.up.sql":                  "dc5c1b9a74e42184451796068ecba1ca11d8ebd0fe7e8c4bd4900d0cfee30446",
+	"0026_add_wisp_recurrence_columns.up.sql":             "29678348f1980d23bb9347725d43ab35cedf25f760a3919ac29f6d9d1a1ed718",
+	"0027_add_wisp_due_missed.up.sql":                     "9ed0a344365245aadf3e5e4387c37abbabaa7b37e58db2b0014710f740dd8d46",
+	"0028_add_wisps_current_revision.up.sql":              "1fb8331d5f84c6b32c55f3e4beb993ab0e22832e938edbf04a9afaf5164fe82c",
+	"0029_dep_rekey_dedup_marker.up.sql":                  "5ec2d9c78483641f57212a92c997eae7426f47c6a5c9a13fabf77e307c021dcb",
 }
 
 func verifyFrozenMigrations(t *testing.T, fsys fs.FS, dir string, frozen map[string]string, frozenThrough int) {

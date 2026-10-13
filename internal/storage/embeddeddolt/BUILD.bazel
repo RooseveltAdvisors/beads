@@ -24,6 +24,7 @@ go_library(
         "dependencies.go",
         "dependency_editor.go",
         "detection.go",
+        "due_sweep.go",
         "edgereader.go",
         "federation.go",
         "get_issue.go",
@@ -143,6 +144,7 @@ go_test(
         "detection_test.go",
         "dirty_tables_gate_test.go",
         "dualwrite_history_contract_test.go",
+        "due_clear_gate_test.go",
         "edge_reader_contract_test.go",
         "events_since_test.go",
         "expected_revision_contract_test.go",
@@ -242,6 +244,7 @@ go_test(
     deps = [
         "//:beads",
         "//backend/conformance",
+        "//internal/config",
         "//internal/debug",
         "//internal/eventsjournal",
         "//internal/hooks",

@@ -35,7 +35,7 @@ import (
 // extension). Keeping the guard in the SQL rather than in the Go runtime path
 // is what makes the file idempotent for callers that execute its bytes
 // directly, which is the shape
-// TestMigration0067ReplaysIdempotentlyAsRawSQLThroughPR4107Harness
+// TestMigration0069ReplaysIdempotentlyAsRawSQLThroughPR4107Harness
 // exercises.
 func TestSchemaInitReplaysMigration0067WhenBookkeepingRowMissing(t *testing.T) {
 	skipIfNoDolt(t)
@@ -107,7 +107,7 @@ func TestSchemaInitReplaysMigration0067WhenBookkeepingRowMissing(t *testing.T) {
 	assertSchemaVersionAtLeast(ctx, t, db, latest)
 }
 
-// TestMigration0067ReplaysIdempotentlyAsRawSQLThroughPR4107Harness is the
+// TestMigration0069ReplaysIdempotentlyAsRawSQLThroughPR4107Harness is the
 // raw-SQL half of the same guarantee, and the half no Go-side guard can
 // provide.
 //
@@ -127,7 +127,7 @@ func TestSchemaInitReplaysMigration0067WhenBookkeepingRowMissing(t *testing.T) {
 // exists" check while resetting every row to the DEFAULT. Phase 1 writes no
 // revisions, so the seeded value below is the only way to see that
 // difference from here.
-func TestMigration0067ReplaysIdempotentlyAsRawSQLThroughPR4107Harness(t *testing.T) {
+func TestMigration0069ReplaysIdempotentlyAsRawSQLThroughPR4107Harness(t *testing.T) {
 	store, cleanup := setupTestStore(t)
 	defer cleanup()
 

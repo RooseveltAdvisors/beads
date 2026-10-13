@@ -1,4 +1,4 @@
--- Migration 0067: Phase 1 schema for versioned beads (be-hs42e / gastownhall/beads#6132,
+-- Migration 0069: Phase 1 schema for versioned beads (be-hs42e / gastownhall/beads#6132,
 -- this slice: be-hs42e.2 / #6134).
 --
 -- Purely additive: a per-issue version log (issue_versions), a store-global
@@ -42,7 +42,7 @@
 --
 -- A PREPARE'd ADD COLUMN silently vanishes under the CLI-bundle path on a
 -- pre-2.3 Dolt CLI (dolthub/dolt#11345; see cli_prepared_ddl.go), so the
--- fresh bundle gets a direct-DDL override -- cliMigration0067AddVersionedBeadsSchema
+-- fresh bundle gets a direct-DDL override -- cliMigration0069AddVersionedBeadsSchema
 -- in cli_migrations.go, the same escape hatch 0060/0065/0066 use, guarded by
 -- TestBundleMigrationsWithPreparedALTERAreOverriddenOrJustified.
 --

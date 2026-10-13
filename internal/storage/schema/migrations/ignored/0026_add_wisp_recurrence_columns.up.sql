@@ -1,4 +1,4 @@
--- Ignored migration 0030: ensure the recurrence columns exist on wisps for
+-- Ignored migration 0026: ensure the recurrence columns exist on wisps for
 -- every clone.
 --
 -- Synced migration 0067 added repeat_pattern/repeat_start/repeat_end/

@@ -1,4 +1,4 @@
--- Ignored migration 0031: ensure due_missed exists on wisps for every clone.
+-- Ignored migration 0027: ensure due_missed exists on wisps for every clone.
 --
 -- Synced migration 0068 added due_missed to wisps — but wisps is dolt-ignored
 -- (migration 0019), so its schema is clone-local, and a workspace that

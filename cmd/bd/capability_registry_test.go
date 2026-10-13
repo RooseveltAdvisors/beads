@@ -274,12 +274,12 @@ func TestProxyCapabilityRegistryReasonsAreAssignedIndividually(t *testing.T) {
 		// Reviewed 2026-10-12 during the upstream sync (repro-5at): the notify
 		// mailbox is clone-local state under .beads/notify/, so these five are
 		// design refusals, not backlog.
-		"notify ack":        true,
-		"notify drain":      true,
-		"notify pending":    true,
-		"notify resolve":    true,
-		"notify seats":      true,
-		"branch": true, "diff": true, "flatten": true,
+		"notify ack":     true,
+		"notify drain":   true,
+		"notify pending": true,
+		"notify resolve": true,
+		"notify seats":   true,
+		"branch":         true, "diff": true, "flatten": true,
 		"conflicts": true, "conflicts list": true, "conflicts show": true, "conflicts resolve": true,
 		"vc": true, "vc merge": true, "vc commit": true, "vc status": true,
 		"federation": true, "federation sync": true, "federation status": true,

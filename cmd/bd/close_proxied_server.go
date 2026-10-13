@@ -144,9 +144,9 @@ func runCloseProxiedServer(cmd *cobra.Command, ctx context.Context, args []strin
 			return HandleErrorRespectJSON("%v", cerr)
 		}
 		result, err = closer.CloseBatch(ctx, issueops.CloseBatchRequest{
-			Actor:     currentActor(),
-			Items:     pre.items,
-			Session:   in.session,
+			Actor:          currentActor(),
+			Items:          pre.items,
+			Session:        in.session,
 			Force:          in.force,
 			ForceNoComment: in.forceNoComment,
 			ClaimNext:      closeClaimNextRequest(in.claimNext, in.continueOn),

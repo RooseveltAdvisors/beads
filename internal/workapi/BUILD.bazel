@@ -8,6 +8,7 @@ go_library(
         "delete.go",
         "detail.go",
         "doc.go",
+        "due.go",
         "list.go",
         "list_comments.go",
         "metadata.go",

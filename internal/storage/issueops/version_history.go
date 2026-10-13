@@ -14,7 +14,7 @@ import (
 
 // Dual-write issue-version history records every accepted issue mutation as a
 // row in issue_versions, written in the SAME transaction as the mutation
-// itself (see internal/storage/schema/migrations/0067_add_versioned_beads_schema.up.sql).
+// itself (see internal/storage/schema/migrations/0069_add_versioned_beads_schema.up.sql).
 // Activation mirrors the durable events journal (journal.go): a per-instance
 // flag (storage.VersionedHistoryConfigurer) is bound to a concrete
 // transaction via ScopeVersionedHistoryTransaction immediately after
@@ -42,7 +42,7 @@ import (
 // issue_versions.revision are per-store ordinals, minted as MAX(revision)+1
 // inside the writing transaction: two disconnected clones can both hold
 // revision 8 for the same issue, each describing a different state. The
-// only durable address of a version is version_id (migration 0068 steps
+// only durable address of a version is version_id (migration 0070 steps
 // 1-3, not yet landed). The HTTP API's RowVersion/Revision is a
 // compare-and-set token, never an address; Phase 3's read surface returns
 // version_id, never the ordinal.
@@ -52,7 +52,7 @@ import (
 // the same ordinal for the same issue collide on merge, and
 // TryAutoResolveMergeConflicts (internal/storage/versioncontrolops/mergesettle.go) fails the
 // pull for a table it does not know. Enabling versioned history is therefore
-// safe only with a SINGLE writer per store until migration 0068 steps 1-3
+// safe only with a SINGLE writer per store until migration 0070 steps 1-3
 // (UUID version_id primary key, ordinal demoted to an index) land; those
 // steps follow as their own PR.
 //
@@ -128,7 +128,7 @@ func VersionedHistoryStagedTables() []string {
 	return []string{"issue_versions", "store_epoch", "issues"}
 }
 
-// issue_versions.attribution_status is a NOT NULL column (migration 0068
+// issue_versions.attribution_status is a NOT NULL column (migration 0070
 // step 6) whose vocabulary aligns to BDP's carried-attribution status
 // (gastownhall/bdp#18, merged 2026-09-07): status ∈ {claimed, unknown}. A
 // status is an assertion about the actor the mutation arrived with —
@@ -230,7 +230,7 @@ func RecordVersionInTx(ctx context.Context, tx DBTX, issueID, actor string) erro
 
 	// durable_state is the RFC 8785 (JCS) canonical form of the marshaled
 	// issue, stored as bytes -- issue_versions.durable_state is a LONGBLOB
-	// (migration 0068 step 7), not a JSON column. The invariant that buys,
+	// (migration 0070 step 7), not a JSON column. The invariant that buys,
 	// the one donnabox asked for on #6358 item 4: sha256(stored bytes) is a
 	// stable content token, because the bytes read back are exactly the
 	// bytes the writer produced. A Dolt JSON column could not provide that.

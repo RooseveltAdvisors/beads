@@ -3,7 +3,7 @@ package issueops
 import "testing"
 
 // These tests pin the derivation rule for issue_versions.attribution_status,
-// the NOT NULL column migration 0068 step 6 adds. Its vocabulary is BDP's
+// the NOT NULL column migration 0070 step 6 adds. Its vocabulary is BDP's
 // carried-attribution status (gastownhall/bdp#18, merged 2026-09-07): exactly
 // two values, "claimed" and "unknown". "imported" is provenance, not an
 // assertion, and is not a status — it returns as a separate provenance marker

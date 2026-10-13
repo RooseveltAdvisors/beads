@@ -1,4 +1,4 @@
--- Migration 0068: Phase 2 dual-write schema for versioned beads (be-hs42e.3
+-- Migration 0070: Phase 2 dual-write schema for versioned beads (be-hs42e.3
 -- / gastownhall/beads#6135), step 6 of design section 16.3 (be-dt74u
 -- amendment, be-hs42e.3's design field), plus step 7 -- the durable_state
 -- LONGBLOB retype added at review, which has its own header further down.
@@ -47,7 +47,7 @@
 -- ADD COLUMN, so an INFORMATION_SCHEMA probe + PREPARE is the only
 -- replay-safe shape) -- makes a raw-SQL replay of this file a clean no-op on
 -- an already-migrated store. Needs a CLI-bundle direct-DDL override
--- (cliMigration0068AddAttributionStatus in cli_migrations.go), the same
+-- (cliMigration0070AddAttributionStatus in cli_migrations.go), the same
 -- dolthub/dolt#11345 escape hatch 0067 uses, guarded by
 -- TestBundleMigrationsWithPreparedALTERAreOverriddenOrJustified.
 --
@@ -91,7 +91,7 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 -- LONGBLOB, and a raw-SQL replay onto an already-migrated store is a clean
 -- no-op (a missing column makes the probe yield NULL, and the IF takes the
 -- SELECT 1 branch, the same way 0067's table-exists guards no-op). The
--- CLI-bundle override (cliMigration0068AddAttributionStatus) carries the
+-- CLI-bundle override (cliMigration0070AddAttributionStatus) carries the
 -- direct MODIFY for the same pre-2.3 CLI reason as step 6.
 SET @issue_versions_ds_needs_retype = (
     SELECT IF(DATA_TYPE <> 'longblob', 1, 0)

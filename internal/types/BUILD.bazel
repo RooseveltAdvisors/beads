@@ -7,11 +7,13 @@ go_library(
         "id_generator.go",
         "non_completing_close.go",
         "orphans.go",
+        "recurrence.go",
         "storage_ext.go",
         "types.go",
     ],
     importpath = "github.com/steveyegge/beads/internal/types",
     visibility = ["//:__subpackages__"],
+    deps = ["//internal/timeparsing"],
 )
 
 go_test(
@@ -22,6 +24,7 @@ go_test(
         "id_generator_test.go",
         "issue_summary_test.go",
         "non_completing_close_test.go",
+        "recurrence_test.go",
         "storage_class_test.go",
         "types_test.go",
     ],

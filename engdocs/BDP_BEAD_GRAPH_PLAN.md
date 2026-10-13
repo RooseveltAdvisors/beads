@@ -153,7 +153,7 @@ below describe that date, not current readiness.
 | BDP #20 Transactional | published PR head `5c3f3b10a2edbb77d914b7260cdf035008fc34c7`; reviewed local correction `0166ff8ef57c481f9ee8fb1223f728f12f9c75f4` (unpushed; no fetchable source pin) | Open draft at the published head. The local correction contains the reviewed G1–G5 HTTP clarification; it is not the remote PR head or a merged dependency. Shared Read HTTP implementation and fresh observations remain a gate before #20 lands. |
 | Jim #6147 Phase 0 | `9c4e7a8f1959582f07db3b87641cb33863fda860` | Open; snapshot shows 117 successful, two skipped and two failed checks (PR Core and CI Gate / Required). Nil-hook contract scaffolding is not graph CAS or History realization; these failures are not automatically P0 blockers. |
 | Jim #6304 Phase 1 | source `162a47703bb702d43e3192c79b6b802cf650d31d`, merge `2bb1e20de0f0072d7600656ea3cb7f606929dcc6` | Merged 2026-09-08, including 0067. Its historical head had 119 successful and one skipped checks. |
-| Jim #6358 Phase 2 | `5fdfb92fe544c9a83feb098e83f2ccdd87b896c8` | Open; snapshot shows 121 successful and two skipped checks, with both CI Gate / Required checks successful. This is its own check evidence, not graph conformance. Migration 0068 remains reserved; graph P1 rechecks its actual slot. |
+| Jim #6358 Phase 2 | `5fdfb92fe544c9a83feb098e83f2ccdd87b896c8` | Open; snapshot shows 121 successful and two skipped checks, with both CI Gate / Required checks successful. This is its own check evidence, not graph conformance. Migration 0070 remains reserved; graph P1 rechecks its actual slot. |
 
 ### Current dependency refresh (2026-09-12)
 

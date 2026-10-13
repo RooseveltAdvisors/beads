@@ -135,9 +135,9 @@ func closeDirectBatches(items []closeDirectItem) []closeDirectBatch {
 // hands out ONE claim however many stores the ids spanned.
 func closeDirectRequest(ctx context.Context, batch closeDirectBatch, session string, force, forceNoComment bool, claimStore storage.DoltStorage, claimNext *issueops.ReadyRequest) issueops.CloseBatchRequest {
 	request := issueops.CloseBatchRequest{
-		Actor:   currentActor(),
-		Items:   make([]issueops.BatchCloseItem, 0, len(batch.items)),
-		Session: session,
+		Actor:          currentActor(),
+		Items:          make([]issueops.BatchCloseItem, 0, len(batch.items)),
+		Session:        session,
 		Force:          force,
 		ForceNoComment: forceNoComment,
 		// bd closes a molecule's root when its last step closes; the library

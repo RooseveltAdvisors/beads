@@ -24,8 +24,8 @@ import (
 // content-derived token hashes. The writer now stores the RFC 8785 (JCS)
 // canonical bytes; the table is empty in this era, so no data converts.
 
-const migration0068Up = "0068_add_attribution_status.up.sql"
-const migration0068Down = "0068_add_attribution_status.down.sql"
+const migration0070Up = "0070_add_attribution_status.up.sql"
+const migration0070Down = "0070_add_attribution_status.down.sql"
 
 // TestMigration0068AddsAttributionStatus is a pure-Go, DB-independent check
 // of the frozen migration bytes themselves — it runs even where no `dolt`
@@ -41,9 +41,9 @@ const migration0068Down = "0068_add_attribution_status.down.sql"
 // (TestBundleMigrationsWithPreparedALTERAreOverriddenOrJustified and
 // TestAllMigrationsSQLUsesDirectDDLForKnownCLIIncompatibilities).
 func TestMigration0068AddsAttributionStatus(t *testing.T) {
-	upSQL, err := MigrationSQL(migration0068Up)
+	upSQL, err := MigrationSQL(migration0070Up)
 	if err != nil {
-		t.Fatalf("MigrationSQL(%s) error = %v, want the migration file to exist", migration0068Up, err)
+		t.Fatalf("MigrationSQL(%s) error = %v, want the migration file to exist", migration0070Up, err)
 	}
 	for _, want := range []string{
 		"ALTER TABLE issue_versions ADD COLUMN attribution_status VARCHAR(20) NOT NULL",
@@ -61,7 +61,7 @@ func TestMigration0068AddsAttributionStatus(t *testing.T) {
 		}
 	}
 	if !strings.Contains(strings.ToUpper(upSQL), "PREPARE STMT FROM @SQL") {
-		t.Error("0068 up migration must keep its guarded PREPARE block — it is what makes a raw .up.sql replay onto an already-migrated store a no-op, and Dolt accepts no unprepared conditional ADD COLUMN. Unwrapping it also invalidates cliMigration0068AddAttributionStatus.")
+		t.Error("0068 up migration must keep its guarded PREPARE block — it is what makes a raw .up.sql replay onto an already-migrated store a no-op, and Dolt accepts no unprepared conditional ADD COLUMN. Unwrapping it also invalidates cliMigration0070AddAttributionStatus.")
 	}
 	// The bundle override is what keeps the PREPARE above off the pre-2.3
 	// CLI path. Assert it directly rather than trusting the two schema_test
@@ -73,11 +73,11 @@ func TestMigration0068AddsAttributionStatus(t *testing.T) {
 		// runtime has LONGBLOB.
 		"ALTER TABLE issue_versions MODIFY COLUMN durable_state LONGBLOB;",
 	} {
-		if !strings.Contains(cliCompatibleMigrationSQL(migration0068Up, upSQL), want) {
+		if !strings.Contains(cliCompatibleMigrationSQL(migration0070Up, upSQL), want) {
 			t.Errorf("0068's CLI bundle substitute missing direct DDL %q", want)
 		}
 	}
-	if cliSubstituteAssumesWispTables(migration0068Up) {
+	if cliSubstituteAssumesWispTables(migration0070Up) {
 		t.Error("0068's CLI substitute touches only issue_versions, which has no wisps-side counterpart table — it must not be listed in cliSubstituteAssumesWispTables")
 	}
 
@@ -85,9 +85,9 @@ func TestMigration0068AddsAttributionStatus(t *testing.T) {
 	// is //go:embed'd — see mainSource.files), so unlike the up side above,
 	// this reads straight from disk by package-relative path, matching
 	// TestMigration0067AddsVersionedBeadsSchema's precedent.
-	downBytes, err := os.ReadFile("migrations/" + migration0068Down)
+	downBytes, err := os.ReadFile("migrations/" + migration0070Down)
 	if err != nil {
-		t.Fatalf("read %s: %v, want the migration file to exist", migration0068Down, err)
+		t.Fatalf("read %s: %v, want the migration file to exist", migration0070Down, err)
 	}
 	downSQL := string(downBytes)
 	for _, want := range []string{

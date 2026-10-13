@@ -129,6 +129,8 @@ var versionedEntryPoints = []string{
 	"AddLabelInTx",
 	"RemoveLabelInTx",
 	"WakeExpiredDefersInTx",
+	"SweepDueBeadsInTx",
+	"SpawnRecurrenceInTx",
 	// the public lifecycle surface (roles/facade wave). These delegate to the
 	// leaves above; listing them pins the delegation so a role that grows its
 	// own DML cannot quietly stop versioning.
@@ -156,12 +158,20 @@ var versionedEntryPoints = []string{
 var versionExemptions = map[string]string{
 	// comments — a separate table, not part of durable_state (GetIssueInTx
 	// hydrates labels, not comments), so a comment write versions nothing.
-	"AddIssueCommentInTx":    "comments are not in durable_state",
-	"ImportIssueCommentInTx": "comments are not in durable_state",
-	"ExecuteAddComment":      "comments are not in durable_state",
-	"AddCommentEventInTx":    "comments are not in durable_state",
-	"PersistComments":        "constituent comment write of a create; comments are not in durable_state",
-	"InsertDerivedComment":   "raw comment insert; comments are not in durable_state",
+	"AddIssueCommentInTx":               "comments are not in durable_state",
+	"ImportIssueCommentInTx":            "comments are not in durable_state",
+	"ExecuteAddComment":                 "comments are not in durable_state",
+	"AddCommentEventInTx":               "comments are not in durable_state",
+	"PersistComments":                   "constituent comment write of a create; comments are not in durable_state",
+	"InsertDerivedComment":              "raw comment insert; comments are not in durable_state",
+	"ExecuteDeleteComment":              "comments are not in durable_state",
+	"DeleteIssueCommentInTx":            "comments are not in durable_state",
+	"RecordFullEventWithCommentInTable": "comment and event journal write; not durable_state",
+
+	// comment-driven anchor activity - the same shape AddCommentEventInTx
+	// performs, which is exempt above. It moves last_touched, never the
+	// durable issue state a version records.
+	"TouchIssueActivityInTx": "comment-driven anchor activity; last_touched is not durable_state",
 
 	// is_blocked — derived readiness state, recomputed from the graph, never
 	// a mutation of the bead in its own right.

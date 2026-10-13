@@ -17,10 +17,10 @@ import (
 // itself: shape, emptiness, and that old, unmodified callers of `issues`
 // are unaffected.
 
-const migration0067Up = "0067_add_versioned_beads_schema.up.sql"
-const migration0067Down = "0067_add_versioned_beads_schema.down.sql"
+const migration0069Up = "0069_add_versioned_beads_schema.up.sql"
+const migration0069Down = "0069_add_versioned_beads_schema.down.sql"
 
-// TestMigration0067AddsVersionedBeadsSchema is a pure-Go, DB-independent
+// TestMigration0069AddsVersionedBeadsSchema is a pure-Go, DB-independent
 // check of the frozen migration bytes themselves — it runs even where no
 // `dolt` binary is available.
 //
@@ -42,10 +42,10 @@ const migration0067Down = "0067_add_versioned_beads_schema.down.sql"
 // TestAllMigrationsSQLUsesDirectDDLForKnownCLIIncompatibilities both police.
 // The assertion below is the local anchor for that pairing: if someone ever
 // unwraps these PREPAREs, the override silently becomes a lie.
-func TestMigration0067AddsVersionedBeadsSchema(t *testing.T) {
-	upSQL, err := MigrationSQL(migration0067Up)
+func TestMigration0069AddsVersionedBeadsSchema(t *testing.T) {
+	upSQL, err := MigrationSQL(migration0069Up)
 	if err != nil {
-		t.Fatalf("MigrationSQL(%s) error = %v, want the migration file to exist", migration0067Up, err)
+		t.Fatalf("MigrationSQL(%s) error = %v, want the migration file to exist", migration0069Up, err)
 	}
 	for _, want := range []string{
 		"CREATE TABLE IF NOT EXISTS issue_versions",
@@ -65,7 +65,7 @@ func TestMigration0067AddsVersionedBeadsSchema(t *testing.T) {
 		// materialized the clone-local wisp tables no-ops instead of
 		// aborting the whole batch. No test executes that arm against an
 		// absent wisps table — the full-chain test seeds bounded at v46 and
-		// 0047's repair recreates wisps before 0067's frozen text runs — so
+		// 0047's repair recreates wisps before 0069's frozen text runs — so
 		// this string pin is the only thing standing between dropping the
 		// sub-guard and a still-green suite. It has to be the TABLES probe:
 		// the file's other TABLE_NAME = 'wisps' occurrence is the COLUMNS
@@ -74,11 +74,11 @@ func TestMigration0067AddsVersionedBeadsSchema(t *testing.T) {
 		"WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'wisps') > 0",
 	} {
 		if !strings.Contains(upSQL, want) {
-			t.Errorf("0067 up migration missing %q\nfull SQL:\n%s", want, upSQL)
+			t.Errorf("0069 up migration missing %q\nfull SQL:\n%s", want, upSQL)
 		}
 	}
 	if !strings.Contains(strings.ToUpper(upSQL), "PREPARE STMT FROM @SQL") {
-		t.Error("0067 up migration must keep its guarded PREPARE blocks — they are what make a raw .up.sql replay onto an already-migrated store a no-op (pr4107_corruption_test.go's harness bypasses every Go-side guard), and Dolt accepts no unprepared conditional ADD COLUMN. Unwrapping them also invalidates cliMigration0067AddVersionedBeadsSchema.")
+		t.Error("0069 up migration must keep its guarded PREPARE blocks — they are what make a raw .up.sql replay onto an already-migrated store a no-op (pr4107_corruption_test.go's harness bypasses every Go-side guard), and Dolt accepts no unprepared conditional ADD COLUMN. Unwrapping them also invalidates cliMigration0069AddVersionedBeadsSchema.")
 	}
 	// The bundle override is what keeps the PREPARE above off the pre-2.3
 	// CLI path. Assert it directly rather than trusting the two schema_test
@@ -87,24 +87,24 @@ func TestMigration0067AddsVersionedBeadsSchema(t *testing.T) {
 		"ALTER TABLE issues ADD COLUMN current_revision BIGINT NOT NULL DEFAULT 1;",
 		"ALTER TABLE wisps ADD COLUMN current_revision BIGINT NOT NULL DEFAULT 1;",
 	} {
-		if !strings.Contains(cliCompatibleMigrationSQL(migration0067Up, upSQL), want) {
+		if !strings.Contains(cliCompatibleMigrationSQL(migration0069Up, upSQL), want) {
 			t.Errorf("0067's CLI bundle substitute missing direct DDL %q", want)
 		}
 	}
-	if !cliSubstituteAssumesWispTables(migration0067Up) {
+	if !cliSubstituteAssumesWispTables(migration0069Up) {
 		t.Error("0067's CLI substitute ALTERs wisps unguarded, so it must be listed in cliSubstituteAssumesWispTables — a replay over a clone that never synced the wisp tables has to fall back to the frozen source text")
 	}
 	if strings.Contains(upSQL, "INSERT INTO store_epoch") || strings.Contains(upSQL, "INSERT IGNORE INTO store_epoch") {
-		t.Error("0067 up migration must not seed store_epoch — every new table starts empty in Phase 1 (no reads/writes of the new surfaces until Phase 2)")
+		t.Error("0069 up migration must not seed store_epoch — every new table starts empty in Phase 1 (no reads/writes of the new surfaces until Phase 2)")
 	}
 
 	// down.sql files are not part of the embedded FS (only migrations/*.up.sql
 	// is //go:embed'd — see mainSource.files), so unlike the up side above,
 	// this reads straight from disk by package-relative path, matching
 	// TestMigration0035HandlesLegacyWispDependenciesShape's precedent.
-	downBytes, err := os.ReadFile("migrations/" + migration0067Down)
+	downBytes, err := os.ReadFile("migrations/" + migration0069Down)
 	if err != nil {
-		t.Fatalf("read %s: %v, want the migration file to exist", migration0067Down, err)
+		t.Fatalf("read %s: %v, want the migration file to exist", migration0069Down, err)
 	}
 	downSQL := string(downBytes)
 	for _, want := range []string{
@@ -131,7 +131,7 @@ func TestMigration0067AddsVersionedBeadsSchema(t *testing.T) {
 	}
 }
 
-// TestMigration0067AddsVersionedBeadsSchemaThroughDoltCLI applies the full
+// TestMigration0069AddsVersionedBeadsSchemaThroughDoltCLI applies the full
 // migration bundle through a real `dolt` binary (skipped without one — see
 // testutil.RequireDoltBinary) and checks the shape acceptance criteria a
 // pure-Go SQL-text check cannot: actual column types/nullability as Dolt
@@ -140,7 +140,7 @@ func TestMigration0067AddsVersionedBeadsSchema(t *testing.T) {
 // old-shaped INSERT/SELECT against `issues` that has never heard of
 // current_revision still behaves unchanged, because the column is
 // NOT NULL DEFAULT 1 rather than a value old callers must supply.
-func TestMigration0067AddsVersionedBeadsSchemaThroughDoltCLI(t *testing.T) {
+func TestMigration0069AddsVersionedBeadsSchemaThroughDoltCLI(t *testing.T) {
 	testutil.RequireDoltBinary(t)
 
 	dir := t.TempDir()

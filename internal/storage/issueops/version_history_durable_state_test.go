@@ -17,7 +17,7 @@ import (
 //
 // Why this matters (donnabox on gastownhall/beads#6358 item 4): the token
 // the design derives from durable_state (#5898, sha256-jcs) is only stable if
-// the bytes hashed are the bytes stored. Migration 0068 step 7 makes the
+// the bytes hashed are the bytes stored. Migration 0070 step 7 makes the
 // column a LONGBLOB so storage keeps bytes verbatim; this test covers the
 // other half, that the writer's bytes are the canonical ones in the first
 // place, so the token is a function of content and not of whatever
