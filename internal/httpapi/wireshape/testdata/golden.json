@@ -290,6 +290,26 @@
     },
     {
       "schema": "ApplyCreateItem",
+      "member": "repeat_end",
+      "type": "string",
+      "format": "date-time",
+      "required": false
+    },
+    {
+      "schema": "ApplyCreateItem",
+      "member": "repeat_pattern",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "ApplyCreateItem",
+      "member": "repeat_start",
+      "type": "string",
+      "format": "date-time",
+      "required": false
+    },
+    {
+      "schema": "ApplyCreateItem",
       "member": "sender",
       "type": "string",
       "required": false
@@ -561,6 +581,28 @@
     },
     {
       "schema": "ApplyPatchBody",
+      "member": "repeat_end",
+      "type": "string",
+      "format": "date-time",
+      "required": false,
+      "nullable": true
+    },
+    {
+      "schema": "ApplyPatchBody",
+      "member": "repeat_pattern",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "ApplyPatchBody",
+      "member": "repeat_start",
+      "type": "string",
+      "format": "date-time",
+      "required": false,
+      "nullable": true
+    },
+    {
+      "schema": "ApplyPatchBody",
       "member": "status",
       "type": "string",
       "required": false
@@ -568,6 +610,12 @@
     {
       "schema": "ApplyPatchBody",
       "member": "title",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "ApplyUpdateItem",
+      "member": "due_clear_reason",
       "type": "string",
       "required": false
     },
@@ -1648,6 +1696,26 @@
     },
     {
       "schema": "CreateIssueRequest",
+      "member": "repeat_end",
+      "type": "string",
+      "format": "date-time",
+      "required": false
+    },
+    {
+      "schema": "CreateIssueRequest",
+      "member": "repeat_pattern",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "CreateIssueRequest",
+      "member": "repeat_start",
+      "type": "string",
+      "format": "date-time",
+      "required": false
+    },
+    {
+      "schema": "CreateIssueRequest",
       "member": "sender",
       "type": "string",
       "required": false
@@ -2104,6 +2172,18 @@
     },
     {
       "schema": "Issue",
+      "member": "due_missed",
+      "type": "integer",
+      "required": false
+    },
+    {
+      "schema": "Issue",
+      "member": "due_source",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "Issue",
       "member": "ephemeral",
       "type": "boolean",
       "required": false
@@ -2230,6 +2310,26 @@
       "member": "priority",
       "type": "integer",
       "required": true
+    },
+    {
+      "schema": "Issue",
+      "member": "repeat_end",
+      "type": "string",
+      "format": "date-time",
+      "required": false
+    },
+    {
+      "schema": "Issue",
+      "member": "repeat_pattern",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "Issue",
+      "member": "repeat_start",
+      "type": "string",
+      "format": "date-time",
+      "required": false
     },
     {
       "schema": "Issue",
@@ -2529,6 +2629,18 @@
     },
     {
       "schema": "IssueDetails",
+      "member": "due_missed",
+      "type": "integer",
+      "required": false
+    },
+    {
+      "schema": "IssueDetails",
+      "member": "due_source",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "IssueDetails",
       "member": "ephemeral",
       "type": "boolean",
       "required": false
@@ -2686,6 +2798,26 @@
       "member": "priority",
       "type": "integer",
       "required": true
+    },
+    {
+      "schema": "IssueDetails",
+      "member": "repeat_end",
+      "type": "string",
+      "format": "date-time",
+      "required": false
+    },
+    {
+      "schema": "IssueDetails",
+      "member": "repeat_pattern",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "IssueDetails",
+      "member": "repeat_start",
+      "type": "string",
+      "format": "date-time",
+      "required": false
     },
     {
       "schema": "IssueDetails",
@@ -2932,6 +3064,28 @@
     },
     {
       "schema": "IssuePatchBody",
+      "member": "repeat_end",
+      "type": "string",
+      "format": "date-time",
+      "required": false,
+      "nullable": true
+    },
+    {
+      "schema": "IssuePatchBody",
+      "member": "repeat_pattern",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "IssuePatchBody",
+      "member": "repeat_start",
+      "type": "string",
+      "format": "date-time",
+      "required": false,
+      "nullable": true
+    },
+    {
+      "schema": "IssuePatchBody",
       "member": "status",
       "type": "string",
       "required": false
@@ -3096,6 +3250,18 @@
     },
     {
       "schema": "IssueWithCounts",
+      "member": "due_missed",
+      "type": "integer",
+      "required": false
+    },
+    {
+      "schema": "IssueWithCounts",
+      "member": "due_source",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "IssueWithCounts",
       "member": "ephemeral",
       "type": "boolean",
       "required": false
@@ -3228,6 +3394,26 @@
       "member": "priority",
       "type": "integer",
       "required": true
+    },
+    {
+      "schema": "IssueWithCounts",
+      "member": "repeat_end",
+      "type": "string",
+      "format": "date-time",
+      "required": false
+    },
+    {
+      "schema": "IssueWithCounts",
+      "member": "repeat_pattern",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "IssueWithCounts",
+      "member": "repeat_start",
+      "type": "string",
+      "format": "date-time",
+      "required": false
     },
     {
       "schema": "IssueWithCounts",
@@ -3459,6 +3645,18 @@
     },
     {
       "schema": "IssueWithDependencyMetadata",
+      "member": "due_missed",
+      "type": "integer",
+      "required": false
+    },
+    {
+      "schema": "IssueWithDependencyMetadata",
+      "member": "due_source",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "IssueWithDependencyMetadata",
       "member": "ephemeral",
       "type": "boolean",
       "required": false
@@ -3585,6 +3783,26 @@
       "member": "priority",
       "type": "integer",
       "required": true
+    },
+    {
+      "schema": "IssueWithDependencyMetadata",
+      "member": "repeat_end",
+      "type": "string",
+      "format": "date-time",
+      "required": false
+    },
+    {
+      "schema": "IssueWithDependencyMetadata",
+      "member": "repeat_pattern",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "IssueWithDependencyMetadata",
+      "member": "repeat_start",
+      "type": "string",
+      "format": "date-time",
+      "required": false
     },
     {
       "schema": "IssueWithDependencyMetadata",
@@ -4620,6 +4838,18 @@
     },
     {
       "schema": "TreeNode",
+      "member": "due_missed",
+      "type": "integer",
+      "required": false
+    },
+    {
+      "schema": "TreeNode",
+      "member": "due_source",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "TreeNode",
       "member": "edge_from_parent",
       "type": "string",
       "required": false
@@ -4761,6 +4991,26 @@
     },
     {
       "schema": "TreeNode",
+      "member": "repeat_end",
+      "type": "string",
+      "format": "date-time",
+      "required": false
+    },
+    {
+      "schema": "TreeNode",
+      "member": "repeat_pattern",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "TreeNode",
+      "member": "repeat_start",
+      "type": "string",
+      "format": "date-time",
+      "required": false
+    },
+    {
+      "schema": "TreeNode",
       "member": "sender",
       "type": "string",
       "required": false
@@ -4875,6 +5125,12 @@
       "schema": "UpdateIssueRequest",
       "member": "claim",
       "type": "boolean",
+      "required": false
+    },
+    {
+      "schema": "UpdateIssueRequest",
+      "member": "due_clear_reason",
+      "type": "string",
       "required": false
     },
     {
