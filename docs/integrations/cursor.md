@@ -1,23 +1,31 @@
 ---
 title: Cursor
-description: Set up beads for Cursor with an always-applied project rules file
+description: Set up beads for Cursor with a project rules file, the Beads skill, and lifecycle hooks
 ---
 
 Use Beads with Cursor through a project rules file that keeps the workflow
-guidance in front of the agent every turn.
+guidance in front of the agent every turn, plus hooks that refresh it.
 
 ```bash
-bd setup cursor
+bd setup cursor            # Project rules, skill, and hooks
+bd setup cursor --global   # Global skill and hooks
 bd setup cursor --check
 ```
 
-`bd setup cursor` installs **`.cursor/rules/beads.mdc`** — an always-applied
-rule with the canonical Beads workflow guidance (the same content every other
-editor integration uses), so it stays in sync as the workflow evolves. Because
-it is always applied, Cursor re-includes it every turn, including after a
-context compaction.
+`bd setup cursor` installs:
 
-Restart Cursor after installing so the rule loads.
+| File | Purpose |
+|------|---------|
+| `.cursor/rules/beads.mdc` | Always-applied rule with the canonical Beads workflow guidance; Cursor re-includes it every turn |
+| `.agents/skills/beads/` | The shared Beads agent skill (the same one Codex uses) |
+| `.cursor/hooks.json` | Runs `bd cursor-hook` on session start, before compaction, and after tool use |
+
+The hooks call `bd`, so make sure `bd` is on Cursor's `PATH`. With
+`--global`, the skill and hooks go to `~/.agents/skills/beads/` and
+`~/.cursor/hooks.json`; Cursor has no file-based global rules location, so
+add global rules through Cursor Settings.
+
+Restart Cursor after installing so the rule and hooks load.
 
 ## Verifying it works
 
@@ -38,7 +46,9 @@ workflow context, ready work, and project memories.
 bd setup cursor --remove
 ```
 
-This removes the rules file while leaving the rest of `.cursor/` intact.
+This removes the rules file and the Beads hook entries while leaving the rest
+of `.cursor/` intact. The shared skill stays in place if the Codex integration
+still uses it.
 
 ## Related
 
