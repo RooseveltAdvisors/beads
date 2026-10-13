@@ -549,7 +549,7 @@ func RunCommenterRecordsExactlyOneHistoryEntry(t *testing.T, ctx context.Context
 // the issue's activity ordering while leaving unrelated issue fields alone.
 func RunCommenterAdvancesIssueActivity(t *testing.T, ctx context.Context, fixture CommenterFixture) {
 	t.Helper()
-	anchor := fixture.IssuePrefix + "-untouched"
+	anchor := fixture.IssuePrefix + "-activity"
 	seedCommenterIssue(t, ctx, fixture, anchor)
 
 	before := readCommenterAnchorRow(t, ctx, fixture, anchor)
