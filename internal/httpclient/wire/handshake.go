@@ -243,6 +243,20 @@ const CapIssuesCreateDefaultPriority = "issues.create.defaultPriority"
 // rule.
 const CapCloseAutoCloseMolecule = "issues.close.autoCloseMolecule"
 
+// CapIssuesCreateRepeat is the behavior capability announcing that the
+// server accepts the recurrence members (repeat_pattern, repeat_start,
+// repeat_end) on issues.create, issues.batchCreate and issues.batchApply
+// create items, spelled exactly as httpapi's constant of the same name. A
+// client sends them only when advertised; against an older server they would
+// be refused as unknown members.
+const CapIssuesCreateRepeat = "issues.create.repeat"
+
+// CapIssuesUpdateDueClearReason is the behavior capability announcing that
+// PATCH /v0/beads/issues/{id} accepts `due_clear_reason` (see
+// UpdateIssueRequest), spelled exactly as httpapi's constant of the same
+// name. A server without it predates the member and refuses it as unknown.
+const CapIssuesUpdateDueClearReason = "issues.update.dueClearReason"
+
 // CapExternalDependencies is the CONDITIONAL behavior capability announcing
 // that the ready, claim and close operations of this server apply bd's
 // external-dependency policy themselves, spelled exactly as httpapi's constant
@@ -383,6 +397,7 @@ var behaviorCapabilities = []string{
 	CapSweepWispsPlane, CapSweepLiveDependents, CapSweepLimit,
 	CapBatchApplyDepAddLineage, CapIssuesUpdateAllowTemplate, CapIssuesCreateDefaultPriority,
 	CapCloseAutoCloseMolecule,
+	CapIssuesCreateRepeat, CapIssuesUpdateDueClearReason,
 }
 
 // CapabilityFor reports the capability token gating op, and whether op is on

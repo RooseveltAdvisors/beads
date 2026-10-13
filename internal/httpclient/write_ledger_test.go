@@ -162,6 +162,7 @@ func writeShapes() []writeShape {
 						"notes", "status", "priority", "issue_type", "assignee", "owner",
 						"estimated_minutes", "external_ref", "due_at", "defer_until",
 						"sender", "metadata", "labels", "ephemeral", "no_history",
+						"repeat_pattern", "repeat_start", "repeat_end",
 					},
 					// The members of a types.Issue this vocabulary does NOT
 					// spell — the creation stamp, the workflow and
@@ -252,6 +253,10 @@ func writeShapes() []writeShape {
 			name:   "updateIssue",
 			source: reflect.TypeOf(issueops.UpdateRequest{}),
 			body:   reflect.TypeOf(apigen.UpdateIssueRequest{}),
+			// `due_clear_reason` is published by the body under a live refusal
+			// (W-UpdateRequest.DueClearReason): the member exists, this client
+			// refuses the field rather than sending it.
+			pending: map[string]string{"due_clear_reason": "DueClearReason"},
 			carried: map[string]carriage{
 				"Actor":   member("actor"),
 				"IssueID": {routed: pathRoute},
@@ -306,6 +311,9 @@ func writeShapes() []writeShape {
 				"ExternalRef":        member("external_ref"),
 				"DueAt":              member("due_at"),
 				"DeferUntil":         member("defer_until"),
+				"RepeatPattern":      member("repeat_pattern"),
+				"RepeatStart":        member("repeat_start"),
+				"RepeatEnd":          member("repeat_end"),
 				// THE ORDERED EDIT, whole: one field driving three members, which
 				// is what `spread` is for. `labels` replaces, `add_labels` adds
 				// and `remove_labels` removes, applied in that order so removal
@@ -535,14 +543,22 @@ func writeShapes() []writeShape {
 				// The absence of `priority` (wirePriority).
 				"DefaultPriority": absenceOf("priority"),
 			},
+			// The body publishes the recurrence members under a live refusal
+			// (W-CreateItem.Issue): published, refused, pending.
+			pending: map[string]string{
+				"repeat_pattern": "Issue",
+				"repeat_start":   "Issue",
+				"repeat_end":     "Issue",
+			},
 		},
 		{
 			// The update item. It carries every FORCE member updateIssue does:
 			// this operation publishes them per item, so a plan can express
 			// what a single patch over this wire can.
-			name:   "applyBatch/item/update",
-			source: reflect.TypeOf(issueops.UpdateItem{}),
-			body:   reflect.TypeOf(apigen.ApplyUpdateItem{}),
+			name:    "applyBatch/item/update",
+			source:  reflect.TypeOf(issueops.UpdateItem{}),
+			body:    reflect.TypeOf(apigen.ApplyUpdateItem{}),
+			pending: map[string]string{"due_clear_reason": "DueClearReason"},
 			carried: map[string]carriage{
 				"Target":                member("target"),
 				"Patch":                 member("patch"),
@@ -582,6 +598,9 @@ func writeShapes() []writeShape {
 				"ExternalRef":        member("external_ref"),
 				"DueAt":              member("due_at"),
 				"DeferUntil":         member("defer_until"),
+				"RepeatPattern":      member("repeat_pattern"),
+				"RepeatStart":        member("repeat_start"),
+				"RepeatEnd":          member("repeat_end"),
 				// The full ordered edit rather than updateIssue's replace-only
 				// member, so there is no partial row here: a removal IS
 				// expressible on this document.

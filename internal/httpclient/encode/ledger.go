@@ -686,6 +686,40 @@ func writeSideRows() []Row {
 			PinnedBy: pinnedByS3Conformance,
 		},
 		{
+			ID: "W-CloseBatchRequest.ForceNoComment", Kind: KindRefuse,
+			Type: tyCloseBatchRequest, Field: "ForceNoComment",
+			What:     "`force_no_comment` on a batch close refuses",
+			Why:      "same rule as W-CloseRequest.ForceNoComment across the batch: no close wire carries the member, so the batch refuses rather than closes while the caller believes the comment gate stood down",
+			SpecRow:  "D8 refuse-not-drop",
+			PinnedBy: "TestEveryWireExcludedWriteMemberCarriesALedgerRow",
+		},
+		{
+			ID: "W-UpdateRequest.DueClearReason", Kind: KindRefuse,
+			Type: tyUpdateRequest, Field: "DueClearReason",
+			What: "`due_clear_reason` on an update refuses",
+			Why: "the request wire this client speaks carries no `due_clear_reason` member yet (the SPEC publishes one, and a server behind it accepts it), so a request naming one refuses here rather than clearing a due date without the reason the workspace requires. " +
+				"Carrying it is the fix; refusing is what the wire allows today",
+			SpecRow:  "D8 refuse-not-drop",
+			PinnedBy: "TestEveryWireExcludedWriteMemberCarriesALedgerRow",
+		},
+		{
+			ID: "W-UpdateItem.DueClearReason", Kind: KindRefuse,
+			Type: reflect.TypeOf(issueops.UpdateItem{}), Field: "DueClearReason",
+			What:     "`due_clear_reason` on an apply update item refuses",
+			Why:      "same rule as W-UpdateRequest.DueClearReason one level down: the apply item's wire type carries no such member yet, so the item refuses rather than drops it",
+			SpecRow:  "D8 refuse-not-drop",
+			PinnedBy: "TestEveryWireExcludedWriteMemberCarriesALedgerRow",
+		},
+		{
+			ID: "W-CloseRequest.ForceNoComment", Kind: KindRefuse,
+			Type: tyCloseRequest, Field: "ForceNoComment",
+			What: "`force_no_comment` on a close refuses",
+			Why: "the close wire publishes no force_no_comment member, so a close asking for it refuses rather than closing while the caller believes the comment gate stood down. " +
+				"Closing with the gate down needs the local or proxied store until the member exists",
+			SpecRow:  "D8 refuse-not-drop",
+			PinnedBy: "TestEveryWireExcludedWriteMemberCarriesALedgerRow",
+		},
+		{
 			ID: "W-IssuePatch.Status", Kind: KindRetired,
 			What: "`bd update -s` used to refuse",
 			Why: "RETIRED with client wave ga-7i6by. IssuePatchBody published `status` with upstream #5484 and this client's encoder now emits it; close and reopen still carry the lifecycle semantics a status write has nowhere to put — the reason and session under first-close-wins, the done-status normalization, the already-closed idempotence flag — and stay the operations to reach for. " +

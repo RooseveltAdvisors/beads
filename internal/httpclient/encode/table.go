@@ -644,6 +644,8 @@ func searchParentWalkTable() Table {
 		Fields: []FieldEntry{
 			paramTo("ParentID", "parent", "ParentID"),
 			refused("IDs", "E-IssueFilter.shapeConflict"),
+			walkRefusal("IDContains"),
+			walkRefusal("FreeTextQuery"),
 
 			// The derived defaults, in the order the inversion compares them.
 			inverted("ExcludeStatus", "P-IssueFilter.ExcludeStatus"),

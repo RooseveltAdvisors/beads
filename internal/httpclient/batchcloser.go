@@ -379,6 +379,11 @@ func stripItemControlRunes(s string) string {
 // W-CloseBatchRequest.ClaimNext), so req.ClaimNext is always nil by the time
 // a request reaches this leg.
 func (s *Store) refuseUnservedCloseShape(req issueops.CloseBatchRequest) error {
+	// The close wire publishes no force_no_comment member; refusing beats
+	// dropping a flag the caller believes stood the comment gate down.
+	if req.ForceNoComment {
+		return s.unsupported("BatchCloser.CloseBatch(force_no_comment)")
+	}
 	if len(req.Items) > 1 {
 		return s.unsupported("BatchCloser.CloseBatch(multi-item)")
 	}

@@ -130,6 +130,13 @@ func createBody(req issueops.CreateRequest) (apigen.CreateIssueRequest, error) {
 	setItemString(&body.Status, string(issue.Status))
 	setItemString(&body.IssueType, string(issue.IssueType))
 	setItemString(&body.Assignee, issue.Assignee)
+	setItemString(&body.RepeatPattern, issue.RepeatPattern)
+	if issue.RepeatStart != nil {
+		body.RepeatStart = issue.RepeatStart
+	}
+	if issue.RepeatEnd != nil {
+		body.RepeatEnd = issue.RepeatEnd
+	}
 	setItemString(&body.Owner, issue.Owner)
 	setItemString(&body.Sender, issue.Sender)
 	setItemString(&body.ParentId, req.ParentID)
@@ -255,6 +262,9 @@ var createCarriedIssueMembers = map[string]string{
 	"ExternalRef":        "external_ref",
 	"DueAt":              "due_at",
 	"DeferUntil":         "defer_until",
+	"RepeatPattern":      "repeat_pattern",
+	"RepeatStart":        "repeat_start",
+	"RepeatEnd":          "repeat_end",
 	"Sender":             "sender",
 	"Metadata":           "metadata",
 	"Labels":             "labels",
@@ -455,6 +465,11 @@ func (l *httpLifecycle) applyTemplateGuardForServer(ctx context.Context, req iss
 
 // Close dials POST issues/{id}:close.
 func (l *httpLifecycle) Close(ctx context.Context, req issueops.CloseRequest) (issueops.CloseResult, error) {
+	// The close wire publishes no force_no_comment member; refusing beats
+	// dropping a flag the caller believes stood the comment gate down.
+	if req.ForceNoComment {
+		return issueops.CloseResult{}, refuse(encode.OpCloseIssue, "W-CloseRequest.ForceNoComment")
+	}
 	if err := requireActor(req.Actor); err != nil {
 		return issueops.CloseResult{}, err
 	}
@@ -720,6 +735,8 @@ func refuseUnwirableUpdateMembers(req issueops.UpdateRequest) error {
 		return refuse(encode.OpUpdateIssue, "W-UpdateRequest.IssuePlaneOnly")
 	case req.Provenance != "":
 		return refuse(encode.OpUpdateIssue, "W-UpdateRequest.Provenance")
+	case req.DueClearReason != "":
+		return refuse(encode.OpUpdateIssue, "W-UpdateRequest.DueClearReason")
 	}
 	return nil
 }
@@ -779,6 +796,9 @@ func encodeIssuePatch(patch issueops.IssuePatch) (map[string]any, error) {
 	}
 	setString(out, "assignee", patch.Assignee)
 	setString(out, "parent_id", patch.ParentID)
+	setString(out, "repeat_pattern", patch.RepeatPattern)
+	setNullableTime(out, "repeat_start", patch.RepeatStart)
+	setNullableTime(out, "repeat_end", patch.RepeatEnd)
 	if metadataPatched(patch.Metadata) {
 		document, err := encodeMetadataPatch(patch.Metadata)
 		if err != nil {

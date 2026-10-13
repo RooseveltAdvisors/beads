@@ -202,10 +202,11 @@ func TestTheProjectIdentityVocabularyMatchesTheServer(t *testing.T) {
 		httpapi.CapIssuesSweepWispsPlane, httpapi.CapIssuesSweepLiveDependents, httpapi.CapIssuesSweepLimit,
 		httpapi.CapBatchApplyDepAddLineage, httpapi.CapIssuesUpdateAllowTemplate, httpapi.CapIssuesCreateDefaultPriority,
 		httpapi.CapIssuesCloseAutoCloseMolecule,
+		httpapi.CapIssuesCreateRepeat, httpapi.CapIssuesUpdateDueClearReason,
 	}) {
 		t.Errorf("behaviorCapabilities = %v, want the server's project.enforce, issues.batchApplyLarge, issues.list.sort, "+
 			"issues.count.scope, issues.sweep.wispsPlane, issues.sweep.liveDependents, issues.sweep.limit and "+
-			"issues.batchApply.depAddLineage, issues.update.allowTemplate, issues.create.defaultPriority and issues.close.autoCloseMolecule tokens", behaviorCapabilities)
+			"issues.batchApply.depAddLineage, issues.update.allowTemplate, issues.create.defaultPriority, issues.close.autoCloseMolecule, issues.create.repeat and issues.update.dueClearReason tokens", behaviorCapabilities)
 	}
 }
 

@@ -367,7 +367,7 @@ func parentWalkRows() []Row {
 // bijection gate exists to catch exactly that arrival.
 var parentWalkRefusals = []string{
 	"Priority", "LabelPattern", "LabelRegex",
-	"TitleSearch", "IDPrefix", "SpecIDPrefix",
+	"TitleSearch", "FreeTextQuery", "IDPrefix", "IDContains", "SpecIDPrefix",
 	"TitleContains", "DescriptionContains", "NotesContains", "ExternalRefContains", "ExternalRef",
 	"UpdatedAfter", "UpdatedBefore", "ClosedAfter", "ClosedBefore", "StartedAfter", "StartedBefore",
 	"AfterCreatedAt", "AfterID", "AfterPriority",
@@ -387,7 +387,7 @@ var parentWalkRefusals = []string{
 var issueFilterBridgeRefusals = []string{
 	"Status", "Statuses", "Priority", "IssueType", "Assignee",
 	"Labels", "LabelsAny", "ExcludeLabels", "LabelPattern", "LabelRegex",
-	"TitleSearch", "IDPrefix", "SpecIDPrefix",
+	"TitleSearch", "FreeTextQuery", "IDPrefix", "IDContains", "SpecIDPrefix",
 	"TitleContains", "DescriptionContains", "NotesContains", "ExternalRefContains", "ExternalRef",
 	"CreatedAfter", "CreatedBefore", "UpdatedAfter", "UpdatedBefore",
 	"ClosedAfter", "ClosedBefore", "StartedAfter", "StartedBefore",

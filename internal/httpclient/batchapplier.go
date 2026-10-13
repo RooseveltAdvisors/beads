@@ -349,6 +349,9 @@ func applyUpdateItemBody(item *issueops.UpdateItem) (*wire.ApplyUpdateItem, erro
 		return nil, invalid("an update item names no field to write")
 	}
 
+	if item.DueClearReason != "" {
+		return nil, refuse(encode.OpApplyBatch, "W-ApplyUpdateItem.DueClearReason")
+	}
 	out := &wire.ApplyUpdateItem{
 		Target:          target,
 		Patch:           patch,
@@ -565,6 +568,9 @@ func encodeApplyPatch(patch issueops.IssuePatch) (map[string]any, error) {
 	setNullable(out, "external_ref", patch.ExternalRef)
 	setNullableTime(out, "due_at", patch.DueAt)
 	setNullableTime(out, "defer_until", patch.DeferUntil)
+	setString(out, "repeat_pattern", patch.RepeatPattern)
+	setNullableTime(out, "repeat_start", patch.RepeatStart)
+	setNullableTime(out, "repeat_end", patch.RepeatEnd)
 
 	if labels := encodeApplyLabelPatch(patch.Labels); len(labels) > 0 {
 		out["labels"] = labels
