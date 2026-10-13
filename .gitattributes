@@ -1,0 +1,8 @@
+# Keep repository text deterministic on every host. The global rule makes future
+# text formats opt in automatically and protects LF-sensitive hook templates,
+# embedded Markdown bytes, migration content hashes, and generated-doc byte
+# comparisons without requiring workstation Git configuration.
+* text=auto eol=lf
+
+# Tracked binary assets must never pass through text conversion or text diffs.
+*.jpg binary

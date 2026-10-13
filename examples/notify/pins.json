@@ -1,0 +1,39 @@
+{
+  "firstmate": {
+    "session": "firstmate",
+    "pane_id": "w1:p9",
+    "source": "lock"
+  },
+  "wiseman": {
+    "session": "wiseman",
+    "pane_id": "w1:pJ"
+  },
+  "portal-ops": {
+    "session": "firstmate",
+    "pane_id": "wA:p2"
+  },
+  "bd-fixer": {
+    "session": "firstmate",
+    "pane_id": "wV:p2"
+  },
+  "gpu-ops": {
+    "session": "firstmate",
+    "pane_id": "w3S:p2"
+  },
+  "monitor-sre": {
+    "session": "firstmate",
+    "pane_id": "w3T:p2"
+  },
+  "sync-warden": {
+    "session": "firstmate",
+    "pane_id": "w3V:p2"
+  },
+  "fleet-warden": {
+    "session": "firstmate",
+    "pane_id": "w3W:p2"
+  },
+  "bruce-site": {
+    "session": "firstmate",
+    "pane_id": "w1E:p7"
+  }
+}

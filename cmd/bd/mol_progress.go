@@ -1,0 +1,198 @@
+package main
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/spf13/cobra"
+	"github.com/steveyegge/beads/internal/metrics"
+	"github.com/steveyegge/beads/internal/storage"
+	"github.com/steveyegge/beads/internal/types"
+	"github.com/steveyegge/beads/internal/ui"
+	"github.com/steveyegge/beads/internal/utils"
+	"github.com/steveyegge/beads/issueops"
+)
+
+var molProgressCmd = &cobra.Command{
+	Use:   "progress [molecule-id]",
+	Short: "Show molecule progress summary",
+	Long: `Show efficient progress summary for a molecule.
+
+This command uses indexed queries to count progress without loading all steps,
+making it suitable for very large molecules (millions of steps).
+
+If no molecule-id is given, shows progress for any molecule you're working on.
+
+Output includes:
+  - Progress: completed / total (percentage)
+  - Current step: the in-progress step (if any)
+  - Rate: steps/hour based on closure times
+  - ETA: estimated time to completion
+
+Example:
+  bd mol progress bd-hanoi-xyz`,
+	Args:          cobra.MaximumNArgs(1),
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		evt := metrics.NewCommandEvent("mol-progress")
+		defer func() {
+			if c := metrics.Global(); c != nil {
+				c.CloseEventAndAdd(evt)
+			}
+		}()
+
+		if usesProxiedServer() {
+			return runMolProgressProxiedServer(rootCtx, args)
+		}
+		if store == nil {
+			return HandleErrorRespectJSON("no database connection")
+		}
+		resolve := func(ctx context.Context, arg string) (string, error) {
+			return utils.ResolvePartialID(ctx, store, arg)
+		}
+		return runMolProgress(rootCtx, store, resolve, args)
+	},
+}
+
+// runMolProgress is `bd mol progress` on every route: the counts are
+// issueops.ReadMoleculeProgress over the molecule's direct steps, and the
+// molecule without an id is the first of issueops.InProgressMoleculeIDs.
+func runMolProgress(ctx context.Context, s storage.DoltStorage, resolve func(context.Context, string) (string, error), args []string) error {
+	roles, err := currentMoleculeRoles(s)
+	if err != nil {
+		return HandleErrorRespectJSON("%v", err)
+	}
+
+	var moleculeID string
+	if len(args) == 1 {
+		resolved, err := resolve(ctx, args[0])
+		if err != nil {
+			return moleculeNotResolved(args[0], err)
+		}
+		moleculeID = resolved
+	} else {
+		moleculeIDs, err := issueops.InProgressMoleculeIDs(ctx, roles.reader, roles.molecule, currentActor())
+		if err != nil {
+			return HandleErrorRespectJSON("finding molecules in progress: %v", err)
+		}
+		if len(moleculeIDs) == 0 {
+			if jsonOutput {
+				return outputJSON([]interface{}{})
+			}
+			fmt.Println("No molecules in progress.")
+			fmt.Println("\nUse: bd mol progress <molecule-id>")
+			return nil
+		}
+		moleculeID = moleculeIDs[0]
+	}
+
+	stats, err := issueops.ReadMoleculeProgress(ctx, roles.molecule, moleculeID)
+	if err != nil {
+		return HandleErrorRespectJSON("%v", err)
+	}
+
+	if jsonOutput {
+		output := map[string]interface{}{
+			"molecule_id":     stats.MoleculeID,
+			"molecule_title":  stats.MoleculeTitle,
+			"total":           stats.Total,
+			"completed":       stats.Completed,
+			"in_progress":     stats.InProgress,
+			"current_step_id": stats.CurrentStepID,
+		}
+		if stats.Total > 0 {
+			output["percent"] = float64(stats.Completed) * 100 / float64(stats.Total)
+		}
+		if stats.FirstClosed != nil && stats.LastClosed != nil && stats.Completed > 1 {
+			duration := stats.LastClosed.Sub(*stats.FirstClosed)
+			if duration > 0 {
+				rate := float64(stats.Completed-1) / duration.Hours()
+				output["rate_per_hour"] = rate
+				remaining := stats.Total - stats.Completed
+				if rate > 0 {
+					etaHours := float64(remaining) / rate
+					output["eta_hours"] = etaHours
+				}
+			}
+		}
+		return outputJSON(output)
+	}
+
+	printMoleculeProgressStats(stats)
+	return nil
+}
+
+// printMoleculeProgressStats prints molecule progress in human-readable format
+func printMoleculeProgressStats(stats *types.MoleculeProgressStats) {
+	fmt.Printf("Molecule: %s (%s)\n", ui.RenderAccent(stats.MoleculeID), stats.MoleculeTitle)
+
+	// Progress bar
+	var percent float64
+	if stats.Total > 0 {
+		percent = float64(stats.Completed) * 100 / float64(stats.Total)
+	}
+	fmt.Printf("Progress: %s / %s (%.1f%%)\n",
+		formatNumber(stats.Completed),
+		formatNumber(stats.Total),
+		percent)
+
+	// Current step
+	if stats.CurrentStepID != "" {
+		fmt.Printf("Current step: %s\n", stats.CurrentStepID)
+	} else if stats.InProgress > 0 {
+		fmt.Printf("In progress: %d step(s)\n", stats.InProgress)
+	}
+
+	// Rate calculation
+	if stats.FirstClosed != nil && stats.LastClosed != nil && stats.Completed > 1 {
+		duration := stats.LastClosed.Sub(*stats.FirstClosed)
+		if duration > 0 {
+			// Rate is (completed - 1) because we need at least 2 points to measure rate
+			rate := float64(stats.Completed-1) / duration.Hours()
+			fmt.Printf("Rate: ~%.0f steps/hour\n", rate)
+
+			// ETA
+			remaining := stats.Total - stats.Completed
+			if rate > 0 && remaining > 0 {
+				etaHours := float64(remaining) / rate
+				fmt.Printf("ETA: %s remaining\n", formatDuration(etaHours))
+			}
+		}
+	}
+}
+
+// formatNumber formats large numbers with commas (handles millions)
+func formatNumber(n int) string {
+	if n < 1000 {
+		return fmt.Sprintf("%d", n)
+	}
+	if n < 1000000 {
+		return fmt.Sprintf("%d,%03d", n/1000, n%1000)
+	}
+	millions := n / 1000000
+	thousands := (n % 1000000) / 1000
+	ones := n % 1000
+	return fmt.Sprintf("%d,%03d,%03d", millions, thousands, ones)
+}
+
+// formatDuration formats hours as a human-readable duration
+func formatDuration(hours float64) string {
+	if hours < 1 {
+		minutes := hours * 60
+		return fmt.Sprintf("~%.0f minutes", minutes)
+	}
+	if hours < 24 {
+		return fmt.Sprintf("~%.1f hours", hours)
+	}
+	days := hours / 24
+	if days < 7 {
+		return fmt.Sprintf("~%.1f days", days)
+	}
+	weeks := days / 7
+	return fmt.Sprintf("~%.1f weeks", weeks)
+}
+
+func init() {
+	molCmd.AddCommand(molProgressCmd)
+}

@@ -1,0 +1,312 @@
+//go:build cgo && integration
+// +build cgo,integration
+
+package main
+
+import (
+	"context"
+	"errors"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/steveyegge/beads/internal/storage"
+	"github.com/steveyegge/beads/internal/types"
+	"github.com/steveyegge/beads/issueops"
+)
+
+func TestDeletePreviewJSONIsPayloadBlind(t *testing.T) {
+	ensureCleanGlobalState(t)
+	oldQuiet := quietFlag
+	quietFlag = false
+	t.Cleanup(func() { quietFlag = oldQuiet })
+
+	issues := map[string]*types.Issue{
+		"test-delete-1": {
+			ID:          "test-delete-1",
+			Title:       "sensitive title must not appear",
+			Description: "sensitive payload must not appear",
+		},
+	}
+	result := &issueops.DeleteResult{Deleted: 1, Dependencies: 2}
+
+	out := captureStdout(t, func() error {
+		return outputDeletionPreview([]string{"test-delete-1"}, issues, false, true, result, nil, true)
+	})
+
+	for _, secret := range []string{"sensitive title", "sensitive payload"} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("JSON preview leaked %q: %s", secret, out)
+		}
+	}
+	for _, required := range []string{"\"issue_ids\"", "\"would_delete\"", "\"dry_run\""} {
+		if !strings.Contains(out, required) {
+			t.Errorf("JSON preview missing %s: %s", required, out)
+		}
+	}
+
+	quietFlag = true
+	quietOut := captureStdout(t, func() error {
+		return outputDeletionPreview([]string{"test-delete-1"}, issues, false, true, result, nil, false)
+	})
+	if quietOut != "" {
+		t.Fatalf("quiet preview produced output: %s", quietOut)
+	}
+}
+
+func TestDeleteBatchDryRunHonorsForce(t *testing.T) {
+	tmpDir := t.TempDir()
+	s := newTestStore(t, filepath.Join(tmpDir, ".beads", "beads.db"))
+	ctx := context.Background()
+
+	parent := &types.Issue{Title: "parent", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	child := &types.Issue{Title: "child", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	if err := s.CreateIssue(ctx, parent, "test"); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	if err := s.CreateIssue(ctx, child, "test"); err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+	if err := s.AddDependency(ctx, &types.Dependency{IssueID: child.ID, DependsOnID: parent.ID, Type: types.DepBlocks}, "test"); err != nil {
+		t.Fatalf("add dependency: %v", err)
+	}
+
+	oldStore, oldRootCtx, oldJSON, oldQuiet := store, rootCtx, jsonOutput, quietFlag
+	store, rootCtx, jsonOutput, quietFlag = s, ctx, false, true
+	t.Cleanup(func() { store, rootCtx, jsonOutput, quietFlag = oldStore, oldRootCtx, oldJSON, oldQuiet })
+
+	if err := deleteBatch(nil, []string{parent.ID}, true, true, false, false, false, nil); err != nil {
+		t.Fatalf("forced dry-run rejected a dependent issue: %v", err)
+	}
+	if issue, err := s.GetIssue(ctx, parent.ID); err != nil || issue == nil {
+		t.Fatalf("forced dry-run deleted parent: issue=%v err=%v", issue, err)
+	}
+	if issue, err := s.GetIssue(ctx, child.ID); err != nil || issue == nil {
+		t.Fatalf("forced dry-run deleted child: issue=%v err=%v", issue, err)
+	}
+	deps, err := s.GetDependencies(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("get dependencies after dry-run: %v", err)
+	}
+	if len(deps) != 1 {
+		t.Fatalf("forced dry-run changed dependencies: got %d, want 1", len(deps))
+	}
+}
+
+func TestBulkDeleteNoResurrection(t *testing.T) {
+
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	testDB := filepath.Join(beadsDir, "beads.db")
+
+	testGitInit(t, tmpDir)
+
+	s := newTestStore(t, testDB)
+	ctx := context.Background()
+
+	totalIssues := 20
+	toDeleteCount := 10
+	var toDelete []string
+
+	for i := 1; i <= totalIssues; i++ {
+		issue := &types.Issue{
+			Title:       "Issue " + string(rune('A'+i-1)),
+			Description: "Test issue",
+			Status:      types.StatusOpen,
+			Priority:    2,
+			IssueType:   "task",
+		}
+		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
+			t.Fatalf("Failed to create issue %d: %v", i, err)
+		}
+		if i <= toDeleteCount {
+			toDelete = append(toDelete, issue.ID)
+		}
+	}
+
+	oldStore := store
+	oldDbPath := dbPath
+	defer func() {
+		store = oldStore
+		dbPath = oldDbPath
+	}()
+
+	store = s
+	dbPath = testDB
+
+	result, err := s.DeleteIssues(ctx, toDelete, false, true, false)
+	if err != nil {
+		t.Fatalf("DeleteIssues failed: %v", err)
+	}
+
+	if result.DeletedCount != toDeleteCount {
+		t.Errorf("Expected %d deletions, got %d", toDeleteCount, result.DeletedCount)
+	}
+
+	stats, err := s.GetStatistics(ctx)
+	if err != nil {
+		t.Fatalf("GetStatistics failed: %v", err)
+	}
+
+	expectedRemaining := totalIssues - toDeleteCount
+	if stats.TotalIssues != expectedRemaining {
+		t.Errorf("After delete: expected %d issues in DB, got %d", expectedRemaining, stats.TotalIssues)
+	}
+
+	// GetIssue reports a missing issue as storage.ErrNotFound.
+	for _, id := range toDelete {
+		issue, err := s.GetIssue(ctx, id)
+		if errors.Is(err, storage.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			t.Fatalf("GetIssue failed for %s: %v", id, err)
+		}
+		t.Errorf("Deleted issue %s was resurrected: %+v", id, issue)
+	}
+}
+
+func testGitInit(t *testing.T, dir string) {
+	t.Helper()
+	testGitCmd(t, dir, "init")
+	testGitCmd(t, dir, "config", "user.email", "test@example.com")
+	testGitCmd(t, dir, "config", "user.name", "Test User")
+}
+
+func testGitCmd(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := gitCommand(args...)
+	cmd.Dir = dir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v failed: %v\nOutput: %s", args, err, output)
+	}
+}
+
+// TestDeleteIssueWrapper tests the deleteIssue wrapper function
+func TestDeleteIssueWrapper(t *testing.T) {
+
+	tmpDir := t.TempDir()
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	testDB := filepath.Join(beadsDir, "beads.db")
+
+	s := newTestStore(t, testDB)
+	ctx := context.Background()
+
+	// Save and restore global store
+	oldStore := store
+	defer func() { store = oldStore }()
+	store = s
+
+	t.Run("successful issue deletion", func(t *testing.T) {
+		issue := &types.Issue{
+			Title:       "Issue to delete",
+			Description: "Will be permanently deleted",
+			Status:      types.StatusOpen,
+			Priority:    2,
+			IssueType:   "task",
+		}
+		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
+			t.Fatalf("Failed to create issue: %v", err)
+		}
+
+		err := deleteIssue(ctx, issue.ID)
+		if err != nil {
+			t.Fatalf("deleteIssue failed: %v", err)
+		}
+
+		// Verify issue is gone: GetIssue reports a missing issue as
+		// storage.ErrNotFound.
+		deleted, err := s.GetIssue(ctx, issue.ID)
+		if !errors.Is(err, storage.ErrNotFound) {
+			t.Fatalf("GetIssue after delete: got (%v, %v), want storage.ErrNotFound", deleted, err)
+		}
+	})
+
+	t.Run("error on non-existent issue", func(t *testing.T) {
+		err := deleteIssue(ctx, "nonexistent-issue-id")
+		if err == nil {
+			t.Error("Expected error for non-existent issue")
+		}
+	})
+
+	t.Run("verify dependencies are removed", func(t *testing.T) {
+		// Create two issues with a dependency
+		issue1 := &types.Issue{
+			Title:     "Blocker issue",
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: "task",
+		}
+		issue2 := &types.Issue{
+			Title:     "Dependent issue",
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "task",
+		}
+		if err := s.CreateIssue(ctx, issue1, "test"); err != nil {
+			t.Fatalf("Failed to create issue1: %v", err)
+		}
+		if err := s.CreateIssue(ctx, issue2, "test"); err != nil {
+			t.Fatalf("Failed to create issue2: %v", err)
+		}
+
+		// Add dependency: issue2 depends on issue1
+		dep := &types.Dependency{
+			IssueID:     issue2.ID,
+			DependsOnID: issue1.ID,
+			Type:        types.DepBlocks,
+		}
+		if err := s.AddDependency(ctx, dep, "test"); err != nil {
+			t.Fatalf("Failed to add dependency: %v", err)
+		}
+
+		// Delete issue1 (the blocker)
+		err := deleteIssue(ctx, issue1.ID)
+		if err != nil {
+			t.Fatalf("deleteIssue failed: %v", err)
+		}
+
+		// Verify issue2 no longer has dependencies
+		deps, err := s.GetDependencies(ctx, issue2.ID)
+		if err != nil {
+			t.Fatalf("GetDependencies failed: %v", err)
+		}
+		if len(deps) > 0 {
+			t.Errorf("Expected no dependencies after deleting blocker, got %d", len(deps))
+		}
+	})
+
+	t.Run("verify issue removed from database", func(t *testing.T) {
+		issue := &types.Issue{
+			Title:     "Verify removal",
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "task",
+		}
+		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
+			t.Fatalf("Failed to create issue: %v", err)
+		}
+
+		// Get statistics before delete
+		statsBefore, err := s.GetStatistics(ctx)
+		if err != nil {
+			t.Fatalf("GetStatistics failed: %v", err)
+		}
+
+		err = deleteIssue(ctx, issue.ID)
+		if err != nil {
+			t.Fatalf("deleteIssue failed: %v", err)
+		}
+
+		// Get statistics after delete
+		statsAfter, err := s.GetStatistics(ctx)
+		if err != nil {
+			t.Fatalf("GetStatistics failed: %v", err)
+		}
+
+		if statsAfter.TotalIssues != statsBefore.TotalIssues-1 {
+			t.Errorf("Expected total issues to decrease by 1, was %d now %d",
+				statsBefore.TotalIssues, statsAfter.TotalIssues)
+		}
+	})
+}

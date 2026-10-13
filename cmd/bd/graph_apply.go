@@ -1,0 +1,1260 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"reflect"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/steveyegge/beads/internal/storage"
+	"github.com/steveyegge/beads/internal/types"
+	"github.com/steveyegge/beads/internal/validation"
+	"github.com/steveyegge/beads/internal/workapi"
+	"github.com/steveyegge/beads/issueops"
+)
+
+// GraphApplyPlan describes a symbolic bead graph to create atomically.
+type GraphApplyPlan struct {
+	CommitMessage string           `json:"commit_message,omitempty"`
+	Nodes         []GraphApplyNode `json:"nodes"`
+	Edges         []GraphApplyEdge `json:"edges,omitempty"`
+}
+
+// GraphApplyNode describes a single bead to create. Field names follow the
+// types.Issue JSON tags (the names `bd show --json` emits), covering every
+// field single-issue `bd create` can set plus initial status and pinned.
+type GraphApplyNode struct {
+	Key                string                     `json:"key"`
+	ID                 string                     `json:"id,omitempty"` // explicit issue ID (default: generated)
+	Title              string                     `json:"title"`
+	Type               string                     `json:"type,omitempty"`
+	Status             string                     `json:"status,omitempty"` // initial status (default: open, or deferred when defer_until is future)
+	Description        string                     `json:"description,omitempty"`
+	Design             string                     `json:"design,omitempty"`
+	AcceptanceCriteria string                     `json:"acceptance_criteria,omitempty"`
+	Notes              string                     `json:"notes,omitempty"`
+	SpecID             string                     `json:"spec_id,omitempty"`
+	ExternalRef        string                     `json:"external_ref,omitempty"`
+	Assignee           string                     `json:"assignee,omitempty"`
+	AssignAfterCreate  bool                       `json:"assign_after_create,omitempty"`
+	Owner              string                     `json:"owner,omitempty"`
+	Priority           *int                       `json:"priority,omitempty"`          // nil defaults to P2
+	Estimate           *int                       `json:"estimate,omitempty"`          // minutes (alias for estimated_minutes)
+	EstimatedMinutes   *int                       `json:"estimated_minutes,omitempty"` // minutes
+	DueAt              *time.Time                 `json:"due_at,omitempty"`            // RFC3339
+	DeferUntil         *time.Time                 `json:"defer_until,omitempty"`       // RFC3339
+	RepeatPattern      string                     `json:"repeat_pattern,omitempty"`    // interval (+1w) or 5-field cron (0 9 * * 1)
+	RepeatStart        *time.Time                 `json:"repeat_start,omitempty"`      // RFC3339
+	RepeatEnd          *time.Time                 `json:"repeat_end,omitempty"`        // RFC3339
+	DueSource          types.DueSource            `json:"due_source,omitempty"`        // provenance of due_at: explicit | default
+	Labels             []string                   `json:"labels,omitempty"`
+	Metadata           map[string]json.RawMessage `json:"metadata,omitempty"`
+	MetadataRefs       map[string]string          `json:"metadata_refs,omitempty"`
+	Parent             string                     `json:"parent,omitempty"` // alias for parent_key
+	ParentKey          string                     `json:"parent_key,omitempty"`
+	ParentID           string                     `json:"parent_id,omitempty"`
+	Deps               []GraphApplyNodeDep        `json:"deps,omitempty"`
+	Ephemeral          *bool                      `json:"ephemeral,omitempty"`     // overrides --ephemeral for this node
+	NoHistory          *bool                      `json:"no_history,omitempty"`    // overrides --no-history for this node
+	StorageClass       string                     `json:"storage_class,omitempty"` // explicit class (C1.3: wins over storage-class.<type> config); "ephemeral" routes to the wisp plane
+	WispType           string                     `json:"wisp_type,omitempty"`
+	MolType            string                     `json:"mol_type,omitempty"`
+	Pinned             bool                       `json:"pinned,omitempty"`
+	EventKind          string                     `json:"event_kind,omitempty"` // type=event only
+	Actor              string                     `json:"actor,omitempty"`      // type=event only
+	Target             string                     `json:"target,omitempty"`     // type=event only
+	Payload            string                     `json:"payload,omitempty"`    // type=event only
+}
+
+// effectiveParentKey resolves the parent alias: parent_key wins, then parent.
+// Every consumer of a node's plan-local parent (validation, dry-run, embedded
+// apply, proxied apply) must go through this so the alias can't be dropped on
+// one path.
+func (n GraphApplyNode) effectiveParentKey() string {
+	if n.ParentKey != "" {
+		return n.ParentKey
+	}
+	return n.Parent
+}
+
+// GraphApplyEdge describes a dependency edge.
+type GraphApplyEdge struct {
+	FromKey string `json:"from_key,omitempty"`
+	FromID  string `json:"from_id,omitempty"`
+	ToKey   string `json:"to_key,omitempty"`
+	ToID    string `json:"to_id,omitempty"`
+	Type    string `json:"type,omitempty"`
+	// Gate and spawner apply to waits-for edges only (fanout gates).
+	Gate       string `json:"gate,omitempty"`        // all-children | any-children
+	SpawnerKey string `json:"spawner_key,omitempty"` // plan-local key of the spawning node
+	SpawnerID  string `json:"spawner_id,omitempty"`  // existing issue ID of the spawner
+	ThreadID   string `json:"thread_id,omitempty"`   // conversation threading (replies-to)
+}
+
+// GraphApplyNodeDep describes an inline dependency on a single graph node.
+// Target is resolved as a plan key first, then treated as a literal issue ID.
+type GraphApplyNodeDep struct {
+	Type   string `json:"type,omitempty"`
+	Target string `json:"target"`
+}
+
+// GraphApplyResult returns the concrete bead IDs assigned to each symbolic key.
+type GraphApplyResult struct {
+	IDs map[string]string `json:"ids"`
+}
+
+// GraphApplyOptions carries CLI-level storage options that apply to every node
+// in the graph.
+type GraphApplyOptions struct {
+	Ephemeral      bool
+	NoHistory      bool
+	Force          bool // --force: allow explicit IDs with foreign prefixes
+	AllowDuplicate bool // --allow-duplicate: bypass duplicate check
+}
+
+func (opts GraphApplyOptions) Validate() error {
+	if opts.Ephemeral && opts.NoHistory {
+		return fmt.Errorf("ephemeral and no_history are mutually exclusive")
+	}
+	return nil
+}
+
+// GraphApplyDryRun describes the actions that would be taken by a graph plan,
+// without performing any writes. Emitted by `bd create --graph --dry-run`.
+type GraphApplyDryRun struct {
+	DryRun          bool                  `json:"dry_run"`
+	NodeCount       int                   `json:"node_count"`
+	EdgeCount       int                   `json:"edge_count"`
+	ParentDeps      int                   `json:"parent_deps"`
+	ValidationNotes []string              `json:"validation_notes,omitempty"`
+	Nodes           []GraphApplyDryRunRow `json:"nodes"`
+}
+
+// GraphApplyDryRunRow describes a single planned node in the dry-run preview.
+type GraphApplyDryRunRow struct {
+	Key       string `json:"key"`
+	ID        string `json:"id,omitempty"` // explicit ID, when the plan sets one
+	Title     string `json:"title"`
+	Type      string `json:"type"`
+	Status    string `json:"status,omitempty"` // effective initial status (explicit, or deferred when defer_until is future)
+	Priority  int    `json:"priority"`
+	ParentKey string `json:"parent_key,omitempty"`
+	ParentID  string `json:"parent_id,omitempty"`
+}
+
+const graphApplyDryRunTransactionValidationNote = "dry-run validates the graph structure only; live create may still reject parent-child blocking paths after resolving stored dependencies, or an edge that gates a dotted-id child on its own ancestor"
+
+// Known-field sets list the JSON keys recognized on each plan struct; unknown
+// keys warn about schema typos. Derived from json tags so they can't drift. (GH#3367)
+var (
+	knownGraphPlanFields = jsonTagSet(reflect.TypeOf(GraphApplyPlan{}))
+	knownGraphNodeFields = jsonTagSet(reflect.TypeOf(GraphApplyNode{}))
+	knownGraphEdgeFields = jsonTagSet(reflect.TypeOf(GraphApplyEdge{}))
+)
+
+// jsonTagSet returns the set of JSON field names declared on t's struct tags.
+func jsonTagSet(t reflect.Type) map[string]struct{} {
+	out := make(map[string]struct{}, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		tag := t.Field(i).Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		if comma := strings.IndexByte(tag, ','); comma >= 0 {
+			tag = tag[:comma]
+		}
+		out[tag] = struct{}{}
+	}
+	return out
+}
+
+// graphFieldHints maps unknown-field names to a corrective hint pointing at
+// the recognized schema field. Used by warnUnknownGraphFields to suggest the
+// intended schema when a plan uses a common-but-wrong name (e.g. nodes carry
+// a "parent" string instead of "parent_key", or "blocks" arrays instead of
+// the top-level edges array). (GH#3367)
+var graphFieldHints = map[string]string{
+	"blocks":         "use the top-level 'edges' array or per-node 'deps', e.g. {\"deps\": [{\"target\": \"key\", \"type\": \"blocks\"}]}",
+	"depends":        "use the top-level 'edges' array or per-node 'deps' with type 'blocks'",
+	"children":       "set 'parent_key' or 'parent' on each child instead of listing children on the parent",
+	"acceptance":     "use 'acceptance_criteria' (matching the issue model's JSON field)",
+	"body":           "use 'description' (matching the issue model's JSON field)",
+	"due":            "use 'due_at' with an RFC3339 timestamp",
+	"repeat":         "use 'repeat_pattern' (an interval like +1w, or 5-field cron)",
+	"defer":          "use 'defer_until' with an RFC3339 timestamp",
+	"event_category": "use 'event_kind' (matching the issue model's JSON field)",
+	"event_actor":    "use 'actor' (matching the issue model's JSON field)",
+	"event_target":   "use 'target' (matching the issue model's JSON field)",
+	"event_payload":  "use 'payload' (matching the issue model's JSON field)",
+}
+
+// detectUnknownGraphFields scans the raw plan JSON and returns unknown field
+// names grouped by their location in the plan. The returned map keys describe
+// the location ("plan", "node[<key-or-index>]", "edge[<index>]") and values
+// are sorted lists of unknown field names at that location. Returns an empty
+// map when the plan is structurally invalid (callers should still attempt the
+// strict parse so the operator gets a normal parse error rather than only the
+// schema warning). (GH#3367)
+func detectUnknownGraphFields(rawData []byte) map[string][]string {
+	out := make(map[string][]string)
+
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(rawData, &top); err != nil {
+		return out
+	}
+
+	if planUnknown := unknownKeys(top, knownGraphPlanFields); len(planUnknown) > 0 {
+		out["plan"] = planUnknown
+	}
+
+	if nodesRaw, ok := top["nodes"]; ok {
+		var rawNodes []json.RawMessage
+		if err := json.Unmarshal(nodesRaw, &rawNodes); err == nil {
+			for i, nodeRaw := range rawNodes {
+				var nodeMap map[string]json.RawMessage
+				if err := json.Unmarshal(nodeRaw, &nodeMap); err != nil {
+					continue
+				}
+				if unknown := unknownKeys(nodeMap, knownGraphNodeFields); len(unknown) > 0 {
+					label := fmt.Sprintf("node[%d]", i)
+					if keyRaw, ok := nodeMap["key"]; ok {
+						var keyStr string
+						if err := json.Unmarshal(keyRaw, &keyStr); err == nil && keyStr != "" {
+							label = fmt.Sprintf("node[%q]", keyStr)
+						}
+					}
+					out[label] = unknown
+				}
+			}
+		}
+	}
+
+	if edgesRaw, ok := top["edges"]; ok {
+		var rawEdges []json.RawMessage
+		if err := json.Unmarshal(edgesRaw, &rawEdges); err == nil {
+			for i, edgeRaw := range rawEdges {
+				var edgeMap map[string]json.RawMessage
+				if err := json.Unmarshal(edgeRaw, &edgeMap); err != nil {
+					continue
+				}
+				if unknown := unknownKeys(edgeMap, knownGraphEdgeFields); len(unknown) > 0 {
+					out[fmt.Sprintf("edge[%d]", i)] = unknown
+				}
+			}
+		}
+	}
+
+	return out
+}
+
+// unknownKeys returns the keys present in have that are not in known, sorted
+// alphabetically for deterministic output. Matching is case-insensitive because
+// encoding/json binds case-variant keys (e.g. "Pinned") to the lowercase field.
+func unknownKeys(have map[string]json.RawMessage, known map[string]struct{}) []string {
+	var unknown []string
+	for k := range have {
+		if _, ok := known[strings.ToLower(k)]; !ok {
+			unknown = append(unknown, k)
+		}
+	}
+	sort.Strings(unknown)
+	return unknown
+}
+
+// warnUnknownGraphFields prints a single warning line per location in the
+// plan with one or more unknown fields, plus a per-field hint when one is
+// available. Output goes to w (typically os.Stderr). Returns the sorted
+// list of distinct unknown field names for test assertion; production
+// callers may safely ignore the result. (GH#3367)
+//
+//nolint:unparam // return value used by tests for assertion; production callers ignore
+func warnUnknownGraphFields(w io.Writer, unknown map[string][]string) []string {
+	if len(unknown) == 0 {
+		return nil
+	}
+
+	locations := make([]string, 0, len(unknown))
+	for loc := range unknown {
+		locations = append(locations, loc)
+	}
+	sort.Strings(locations)
+
+	distinct := make(map[string]struct{})
+	for _, loc := range locations {
+		fields := append([]string(nil), unknown[loc]...)
+		sort.Strings(fields)
+		fmt.Fprintf(w, "warning: graph plan %s has unknown field(s): %v (silently dropped — see 'bd create --graph' schema)\n", loc, fields)
+		for _, f := range fields {
+			distinct[f] = struct{}{}
+		}
+	}
+
+	hintFields := make([]string, 0, len(distinct))
+	for f := range distinct {
+		hintFields = append(hintFields, f)
+	}
+	sort.Strings(hintFields)
+	for _, f := range hintFields {
+		// Lowercase to match unknownKeys, which reports the original-case
+		// spelling against the all-lowercase hint map.
+		if hint, ok := graphFieldHints[strings.ToLower(f)]; ok {
+			fmt.Fprintf(w, "  hint: %q is not part of the schema; %s\n", f, hint)
+		}
+	}
+
+	return hintFields
+}
+
+// loadEmbeddedCustomStatuses reads custom statuses from the store only — no
+// YAML fallback, matching single-issue create and loadListFilterConfig
+// (custom types fall back to YAML; custom statuses deliberately do not).
+func loadEmbeddedCustomStatuses() []string {
+	if store == nil {
+		return nil
+	}
+	cs, err := store.GetCustomStatuses(rootCtx)
+	if err != nil {
+		return nil
+	}
+	return cs
+}
+
+// createIssuesFromGraph handles `bd create --graph <plan-file>`.
+// When dryRun is true, the plan is parsed and validated but no writes occur;
+// a preview is emitted to stdout (JSON when jsonOutput is set, otherwise
+// human-readable). Unknown plan/node/edge fields are reported to stderr in
+// both modes so schema gaps are visible before any writes happen. (GH#3367)
+func createIssuesFromGraph(planFile string, dryRun bool, opts GraphApplyOptions) error {
+	data, err := os.ReadFile(planFile) // #nosec G304 -- user-provided path is intentional
+	if err != nil {
+		return HandleErrorRespectJSON("reading graph plan: %v", err)
+	}
+
+	if unknown := detectUnknownGraphFields(data); len(unknown) > 0 {
+		warnUnknownGraphFields(os.Stderr, unknown)
+	}
+
+	var plan GraphApplyPlan
+	if err := json.Unmarshal(data, &plan); err != nil {
+		return HandleErrorRespectJSON("parsing graph plan: %v", err)
+	}
+
+	customTypes, err := resolveWorkspaceCustomTypes(rootCtx)
+	if err != nil {
+		return HandleErrorRespectJSON("%v", err)
+	}
+	dbPrefix, allowedPrefixes := loadEmbeddedIDPrefixes()
+	cfg := graphPlanConfig{
+		customTypes:     customTypes,
+		customStatuses:  loadEmbeddedCustomStatuses(),
+		dbPrefix:        dbPrefix,
+		allowedPrefixes: allowedPrefixes,
+	}
+	if store != nil {
+		cfg.issueExists = func(id string) (bool, error) {
+			if _, err := store.GetIssue(rootCtx, id); err != nil {
+				if errors.Is(err, storage.ErrNotFound) {
+					return false, nil
+				}
+				return false, err
+			}
+			return true, nil
+		}
+	}
+	if _, err := validateFullGraphPlan(&plan, cfg, opts, false); err != nil {
+		return HandleErrorRespectJSON("invalid graph plan: %v", err)
+	}
+
+	blockedItems, err := filterGraphPlan(rootCtx, store, &plan, opts)
+	if err != nil {
+		return HandleErrorRespectJSON("%v", err)
+	}
+
+	if dryRun {
+		if len(blockedItems) > 0 {
+			if !jsonOutput && len(plan.Nodes) > 0 {
+				_ = emitGraphApplyDryRun(&plan, opts)
+			}
+			return reportBlockedBatch(blockedItems, nil, jsonOutput)
+		}
+		return emitGraphApplyDryRun(&plan, opts)
+	}
+
+	result := &GraphApplyResult{}
+	if len(plan.Nodes) > 0 {
+		result, err = executeGraphApply(rootCtx, &plan, opts)
+		if err != nil {
+			return HandleErrorRespectJSON("graph create: %v", err)
+		}
+	}
+	noteDuplicateCollisions(rootCtx, store, graphCreatedIssues(plan.Nodes, result.IDs), opts.AllowDuplicate || opts.Force)
+
+	if len(blockedItems) > 0 {
+		return reportBlockedGraph(blockedItems, result.IDs, jsonOutput)
+	}
+
+	if jsonOutput {
+		return outputJSON(result)
+	}
+	fmt.Printf("Created %d issues\n", len(result.IDs)) //nolint:forbidigo // Graph create is outside the renderer contract.
+	keys := make([]string, 0, len(result.IDs))
+	for key := range result.IDs {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		fmt.Printf("  %s -> %s\n", key, result.IDs[key]) //nolint:forbidigo // Graph create is outside the renderer contract.
+	}
+	return nil
+}
+
+// emitGraphApplyDryRun prints what `bd create --graph` would do without
+// performing any writes. Mirrors the JSON-vs-human split of the live path.
+// (GH#3367)
+func emitGraphApplyDryRun(plan *GraphApplyPlan, opts GraphApplyOptions) error {
+	parentDeps := 0
+	rows := make([]GraphApplyDryRunRow, 0, len(plan.Nodes))
+	for _, node := range plan.Nodes {
+		// Preview via the same materialization the apply path uses so
+		// type/priority/status defaults can't drift. (A defer_until passing
+		// between dry-run and apply still shifts the real status to open.)
+		issue, err := graphApplyNodeIssue(node, opts, "", "")
+		if err != nil {
+			return HandleErrorRespectJSON("invalid graph plan: %v", err)
+		}
+		effectiveParentKey := node.effectiveParentKey()
+		status := string(issue.Status)
+		if node.Status == "" && issue.Status == types.StatusOpen {
+			status = "" // default status: keep the preview row terse
+		}
+		if effectiveParentKey != "" || node.ParentID != "" {
+			parentDeps++
+		}
+		rows = append(rows, GraphApplyDryRunRow{
+			Key:       node.Key,
+			ID:        node.ID,
+			Title:     node.Title,
+			Type:      string(issue.IssueType),
+			Status:    status,
+			Priority:  graphApplyPreviewPriority(node, issue),
+			ParentKey: effectiveParentKey,
+			ParentID:  node.ParentID,
+		})
+	}
+
+	preview := GraphApplyDryRun{
+		DryRun:          true,
+		NodeCount:       len(plan.Nodes),
+		EdgeCount:       len(plan.Edges),
+		ParentDeps:      parentDeps,
+		ValidationNotes: []string{graphApplyDryRunTransactionValidationNote},
+		Nodes:           rows,
+	}
+
+	if jsonOutput {
+		return outputJSON(preview)
+	}
+
+	//nolint:forbidigo // Graph create is outside the renderer contract.
+	fmt.Printf("Dry run: would create %d issue(s) and %d edge(s) (%d parent-child link(s))\n",
+		preview.NodeCount, preview.EdgeCount, preview.ParentDeps)
+	fmt.Printf("Note: %s.\n", graphApplyDryRunTransactionValidationNote) //nolint:forbidigo // Graph create is outside the renderer contract.
+	for _, row := range rows {
+		extras := ""
+		if row.ID != "" {
+			extras += fmt.Sprintf(" id=%s", row.ID)
+		}
+		if row.Status != "" {
+			extras += fmt.Sprintf(" status=%s", row.Status)
+		}
+		switch {
+		case row.ParentKey != "":
+			extras += fmt.Sprintf(" parent_key=%s", row.ParentKey)
+		case row.ParentID != "":
+			extras += fmt.Sprintf(" parent_id=%s", row.ParentID)
+		}
+		fmt.Printf("  %s [%s] P%d %q%s\n", row.Key, row.Type, row.Priority, row.Title, extras) //nolint:forbidigo // Graph create is outside the renderer contract.
+	}
+	return nil
+}
+
+// graphPlanConfig bundles the config inputs full-plan validation needs; the
+// embedded and proxied paths populate it from their respective config sources.
+type graphPlanConfig struct {
+	customTypes     []string
+	customStatuses  []string
+	dbPrefix        string
+	allowedPrefixes string
+	// issueExists probes whether an ID is already taken by a stored issue (or
+	// wisp, where the underlying lookup spans both tables). nil skips the
+	// explicit-ID collision preflight (no store access in the calling context).
+	issueExists func(id string) (bool, error)
+}
+
+// validateFullGraphPlan runs every plan-level check in one place so the
+// embedded and proxied paths cannot skip a step independently: shared plan
+// checks, storage-class resolution (uniform when requireUniform), and
+// explicit-ID prefix checks. The returned useWisp is node 0's storage class —
+// under requireUniform, the routing decision for the whole plan.
+func validateFullGraphPlan(plan *GraphApplyPlan, cfg graphPlanConfig, opts GraphApplyOptions, requireUniform bool) (useWisp bool, err error) {
+	if err := validateGraphApplyPlan(plan, cfg.customTypes, cfg.customStatuses, opts); err != nil {
+		return false, err
+	}
+	useWisp, err = validateGraphApplyStorageClasses(plan, opts, requireUniform)
+	if err != nil {
+		return false, err
+	}
+	if err := validateGraphApplyExplicitIDPrefixes(plan, cfg.dbPrefix, cfg.allowedPrefixes, opts.Force); err != nil {
+		return false, err
+	}
+	return useWisp, validateGraphApplyExplicitIDCollisions(plan, cfg.issueExists)
+}
+
+// validateGraphApplyExplicitIDCollisions rejects plan nodes whose explicit id
+// already belongs to a stored issue or wisp. The insert path upserts on a
+// duplicate ID (matching `bd create --id`), which for an atomic graph create
+// would silently rewrite the existing issue while reporting creation — a plan
+// must fail fast instead. Deliberately not overridable by --force: that flag
+// vouches for a foreign prefix, not for destroying existing data. The probe is
+// exact on every backend, http included (its GetIssue answers a miss with
+// storage.ErrNotFound like the local stores); exists is nil only where the
+// command opened no store.
+func validateGraphApplyExplicitIDCollisions(plan *GraphApplyPlan, exists func(id string) (bool, error)) error {
+	if exists == nil {
+		return nil
+	}
+	for _, node := range plan.Nodes {
+		if node.ID == "" {
+			continue
+		}
+		taken, err := exists(node.ID)
+		if err != nil {
+			return fmt.Errorf("checking explicit id %q (node %q): %w", node.ID, node.Key, err)
+		}
+		if taken {
+			return fmt.Errorf("explicit id %q (node %q) already exists; graph create will not overwrite an existing issue — drop the id to mint a new one, or update the existing issue instead", node.ID, node.Key)
+		}
+	}
+	return nil
+}
+
+func validateGraphApplyPlan(plan *GraphApplyPlan, customTypes, customStatuses []string, opts GraphApplyOptions) error {
+	if len(plan.Nodes) == 0 {
+		return fmt.Errorf("plan has no nodes")
+	}
+
+	seenKeys := make(map[string]bool, len(plan.Nodes))
+	seenIDs := make(map[string]bool)
+	for i, node := range plan.Nodes {
+		if node.Key == "" {
+			return fmt.Errorf("node %d has empty key", i)
+		}
+		if seenKeys[node.Key] {
+			return fmt.Errorf("duplicate node key %q", node.Key)
+		}
+		seenKeys[node.Key] = true
+		if node.Title == "" {
+			return fmt.Errorf("node %q has empty title", node.Key)
+		}
+		if err := validateGraphApplyNodeFields(node, customTypes, customStatuses, opts); err != nil {
+			return err
+		}
+		if node.ID != "" {
+			if seenIDs[node.ID] {
+				return fmt.Errorf("duplicate explicit id %q (node %q)", node.ID, node.Key)
+			}
+			seenIDs[node.ID] = true
+		}
+		// Validate MetadataRefs point to known keys.
+		for metaKey, refKey := range node.MetadataRefs {
+			if !seenKeys[refKey] {
+				found := false
+				for _, other := range plan.Nodes {
+					if other.Key == refKey {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return fmt.Errorf("node %q: metadata ref %q references unknown key %q", node.Key, metaKey, refKey)
+				}
+			}
+		}
+		parentKey := node.effectiveParentKey()
+		if parentKey != "" && !seenKeys[parentKey] {
+			found := false
+			for _, other := range plan.Nodes {
+				if other.Key == parentKey {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("node %q: parent key %q not found in plan", node.Key, parentKey)
+			}
+		}
+		for j, dep := range node.Deps {
+			if dep.Target == "" {
+				return fmt.Errorf("node %q: dep %d has empty target", node.Key, j)
+			}
+			if dep.Type != "" {
+				dt := types.DependencyType(dep.Type)
+				if !dt.IsValid() {
+					return fmt.Errorf("node %q: dep %d: invalid dependency type %q", node.Key, j, dep.Type)
+				}
+			}
+		}
+	}
+
+	for i, edge := range plan.Edges {
+		if edge.FromKey != "" && !seenKeys[edge.FromKey] {
+			return fmt.Errorf("edge %d: from key %q not found in plan", i, edge.FromKey)
+		}
+		if edge.ToKey != "" && !seenKeys[edge.ToKey] {
+			return fmt.Errorf("edge %d: to key %q not found in plan", i, edge.ToKey)
+		}
+		if edge.FromKey == "" && edge.FromID == "" {
+			return fmt.Errorf("edge %d: must specify from_key or from_id", i)
+		}
+		if edge.ToKey == "" && edge.ToID == "" {
+			return fmt.Errorf("edge %d: must specify to_key or to_id", i)
+		}
+		if edge.Type != "" {
+			dt := types.DependencyType(edge.Type)
+			if !dt.IsValid() {
+				return fmt.Errorf("edge %d: invalid dependency type %q", i, edge.Type)
+			}
+		}
+		if edge.Gate != "" || edge.SpawnerKey != "" || edge.SpawnerID != "" {
+			if graphApplyDependencyType(edge.Type) != types.DepWaitsFor {
+				return fmt.Errorf("edge %d: gate/spawner fields require type %q", i, types.DepWaitsFor)
+			}
+			if edge.Gate != "" && !types.IsValidWaitsForGate(edge.Gate) {
+				return fmt.Errorf("edge %d: invalid gate %q (valid: %s, %s)", i, edge.Gate, types.WaitsForAllChildren, types.WaitsForAnyChildren)
+			}
+			if edge.SpawnerKey != "" && edge.SpawnerID != "" {
+				return fmt.Errorf("edge %d: cannot specify both spawner_key and spawner_id", i)
+			}
+			if edge.SpawnerKey != "" && !seenKeys[edge.SpawnerKey] {
+				return fmt.Errorf("edge %d: spawner key %q not found in plan", i, edge.SpawnerKey)
+			}
+			// Gate evaluation reads the spawner from the dependency target
+			// (depends_on_id), not metadata, so the spawner must equal the to
+			// endpoint. Since to_id overrides to_key at apply time
+			// (resolveEdgeRef), a key-named spawner can't be combined with to_id.
+			if edge.SpawnerKey != "" && edge.ToID != "" {
+				return fmt.Errorf("edge %d: spawner_key %q cannot be combined with to_id %q (to_id overrides to_key as the waits-for target; use spawner_id)", i, edge.SpawnerKey, edge.ToID)
+			}
+			if edge.SpawnerKey != "" && edge.SpawnerKey != edge.ToKey {
+				return fmt.Errorf("edge %d: spawner_key %q must match to_key %q (the waits-for target is the spawner)", i, edge.SpawnerKey, edge.ToKey)
+			}
+			if edge.SpawnerID != "" && edge.SpawnerID != edge.ToID {
+				return fmt.Errorf("edge %d: spawner_id %q must match to_id %q (the waits-for target is the spawner)", i, edge.SpawnerID, edge.ToID)
+			}
+		}
+	}
+
+	if err := validateGraphApplyLocalCycles(plan, seenKeys); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateGraphApplyNodeFields checks the single-node fields added for
+// bd-create parity, mirroring the flag-shape checks `bd create` applies
+// (config-gated template linting is not run on graph plans).
+func validateGraphApplyNodeFields(node GraphApplyNode, customTypes, customStatuses []string, opts GraphApplyOptions) error {
+	if node.ID != "" {
+		if _, err := validation.ValidateIDFormat(node.ID); err != nil {
+			return fmt.Errorf("node %q: %w", node.Key, err)
+		}
+	}
+	// Friendlier status message than the issue-model validator's below.
+	if node.Status != "" && !types.Status(node.Status).IsValidWithCustom(customStatuses) {
+		return fmt.Errorf("node %q: invalid status %q (valid: %s; configure custom statuses via 'bd config set status.custom')", node.Key, node.Status, workapi.ValidStatusList(customStatuses))
+	}
+	if node.WispType != "" && !types.WispType(node.WispType).IsValid() {
+		return fmt.Errorf("node %q: invalid wisp_type %q (must be %s)", node.Key, node.WispType, types.ValidWispTypeNames())
+	}
+	if node.MolType != "" && !types.MolType(node.MolType).IsValid() {
+		return fmt.Errorf("node %q: invalid mol_type %q (must be %s)", node.Key, node.MolType, types.ValidMolTypeNames())
+	}
+	if (node.EventKind != "" || node.Actor != "" || node.Target != "" || node.Payload != "") && node.Type != string(types.TypeEvent) {
+		return fmt.Errorf("node %q: event_kind, actor, target, and payload require type %q", node.Key, types.TypeEvent)
+	}
+	// Issue-model rules (type validity, priority range, estimate sign,
+	// metadata JSON, ...) run against the same materialized issue the apply
+	// path stores, so plan-time and insert-time validation can't drift.
+	issue, err := graphApplyNodeIssue(node, opts, "", "")
+	if err != nil {
+		return err
+	}
+	if err := issue.ValidateWithCustom(customStatuses, customTypes); err != nil {
+		return fmt.Errorf("node %q: %w", node.Key, err)
+	}
+	return nil
+}
+
+// validateGraphApplyStorageClasses resolves each node's effective storage class
+// (per-node overrides combined with the CLI flags) so conflicts surface at
+// validation time instead of mid-apply. When requireUniform is set (proxied
+// mode, which routes the whole plan to one table), mixed durable/wisp plans are
+// also rejected. The returned useWisp is node 0's class — under requireUniform,
+// the routing decision for the whole plan.
+func validateGraphApplyStorageClasses(plan *GraphApplyPlan, opts GraphApplyOptions, requireUniform bool) (useWisp bool, err error) {
+	for i, node := range plan.Nodes {
+		ephemeral, noHistory, _, err := graphApplyNodeStorageClass(node, opts)
+		if err != nil {
+			return false, err
+		}
+		nodeWisp := ephemeral || noHistory
+		if i == 0 {
+			useWisp = nodeWisp
+		} else if requireUniform && nodeWisp != useWisp {
+			return false, fmt.Errorf("plan mixes durable and wisp storage classes (node %q vs node %q): effective ephemeral/no_history must be uniform across the plan in proxied-server mode", plan.Nodes[0].Key, node.Key)
+		}
+	}
+	return useWisp, nil
+}
+
+// validateGraphApplyExplicitIDPrefixes mirrors the `bd create --id` prefix
+// check for every plan node that pins an explicit ID: the ID must start with
+// the database prefix (or one of allowed_prefixes) unless force is set.
+func validateGraphApplyExplicitIDPrefixes(plan *GraphApplyPlan, dbPrefix, allowedPrefixes string, force bool) error {
+	for _, node := range plan.Nodes {
+		if node.ID == "" {
+			continue
+		}
+		if err := validation.ValidateIDPrefixAllowed(node.ID, dbPrefix, allowedPrefixes, force); err != nil {
+			return fmt.Errorf("node %q: %w", node.Key, err)
+		}
+	}
+	return nil
+}
+
+// loadEmbeddedIDPrefixes returns the database prefix and allowed_prefixes for
+// explicit-ID validation. YAML config takes precedence over DB (via
+// overlayYAMLPrefix) — in shared-server mode the DB may belong to a different
+// project (GH#2469) — except under --global, where the shared database's own
+// stored prefix wins (GH#4957).
+func loadEmbeddedIDPrefixes() (dbPrefix, allowedPrefixes string) {
+	var storePrefix string
+	if store != nil {
+		storePrefix, _ = store.GetConfig(rootCtx, "issue_prefix")         // Best effort: empty prefix is a valid fallback
+		allowedPrefixes, _ = store.GetConfig(rootCtx, "allowed_prefixes") // Best effort: empty means no prefix restriction
+	}
+	// Under --global the shared database's stored prefix wins over the
+	// project YAML overlay (GH#4957); selectCreateIDPrefix owns that rule.
+	dbPrefix = selectCreateIDPrefix(globalFlag, overlayYAMLPrefix(""), storePrefix)
+	return dbPrefix, allowedPrefixes
+}
+
+func validateGraphApplyLocalCycles(plan *GraphApplyPlan, knownKeys map[string]bool) error {
+	adj := make(map[string][]string)
+	for _, node := range plan.Nodes {
+		parentKey := node.effectiveParentKey()
+		if parentKey != "" && knownKeys[node.Key] && knownKeys[parentKey] {
+			// The parent key is guaranteed local by validateGraphApplyPlan, so it
+			// is safe to model the implicit parent-child dependency by key here.
+			adj[node.Key] = append(adj[node.Key], parentKey)
+		}
+	}
+	for _, edge := range plan.Edges {
+		depType := graphApplyDependencyType(edge.Type)
+		if !graphApplyEdgeIsLocalCycleRelevant(edge, depType) {
+			continue
+		}
+		if !knownKeys[edge.FromKey] || !knownKeys[edge.ToKey] {
+			continue
+		}
+		adj[edge.FromKey] = append(adj[edge.FromKey], edge.ToKey)
+	}
+
+	visiting := make(map[string]bool, len(knownKeys))
+	visited := make(map[string]bool, len(knownKeys))
+	var visit func(string) (string, bool)
+	visit = func(key string) (string, bool) {
+		if visiting[key] {
+			return key, true
+		}
+		if visited[key] {
+			return "", false
+		}
+		visiting[key] = true
+		for _, next := range adj[key] {
+			if cycleKey, ok := visit(next); ok {
+				return cycleKey, true
+			}
+		}
+		visiting[key] = false
+		visited[key] = true
+		return "", false
+	}
+
+	for _, key := range graphApplySortedKeys(knownKeys) {
+		if cycleKey, ok := visit(key); ok {
+			return fmt.Errorf("graph contains a blocking dependency cycle involving node %q", cycleKey)
+		}
+	}
+	return nil
+}
+
+// graphApplyNodeIssue materializes a plan node into an issue via the same
+// createIssueParams path used by single-issue `bd create`, so every field the
+// CLI can set stays addressable from graph plans. Assignee handling is left
+// to the caller (embedded and proxied paths defer assignment differently).
+func graphApplyNodeIssue(node GraphApplyNode, opts GraphApplyOptions, createdBy, owner string) (*types.Issue, error) {
+	issueType := types.IssueType(node.Type)
+	if issueType == "" {
+		issueType = types.TypeTask
+	}
+
+	var metadataJSON json.RawMessage
+	if len(node.Metadata) > 0 {
+		raw, err := json.Marshal(node.Metadata)
+		if err != nil {
+			return nil, fmt.Errorf("node %q: marshaling metadata: %w", node.Key, err)
+		}
+		metadataJSON = raw
+	}
+
+	// A node with no priority asks for the role's default
+	// (CreateItem.DefaultPriority); the number is not spelled here.
+	priority := 0
+	if node.Priority != nil {
+		priority = *node.Priority
+	}
+
+	ephemeral, noHistory, storageClass, err := graphApplyNodeStorageClass(node, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	if node.Owner != "" {
+		owner = node.Owner
+	}
+
+	// Resolve the estimate alias here so every materialization path (embedded,
+	// proxied, dry-run, validation) sees one canonical field. The canonical
+	// estimated_minutes wins when both are set, matching the parent alias —
+	// but a negative alias value is still rejected rather than silently
+	// discarded by the precedence (GH#4064).
+	if node.Estimate != nil && *node.Estimate < 0 {
+		return nil, fmt.Errorf("node %q: estimate cannot be negative", node.Key)
+	}
+	estimatedMinutes := node.EstimatedMinutes
+	if estimatedMinutes == nil {
+		estimatedMinutes = node.Estimate
+	}
+
+	issue := buildCreateIssue(createIssueParams{
+		ID:                 node.ID,
+		Title:              node.Title,
+		Description:        node.Description,
+		Design:             node.Design,
+		AcceptanceCriteria: node.AcceptanceCriteria,
+		Notes:              node.Notes,
+		SpecID:             node.SpecID,
+		Priority:           priority,
+		IssueType:          issueType.Normalize(),
+		ExternalRef:        node.ExternalRef,
+		EstimatedMinutes:   estimatedMinutes,
+		Ephemeral:          ephemeral,
+		NoHistory:          noHistory,
+		StorageClass:       storageClass,
+		CreatedBy:          createdBy,
+		Owner:              owner,
+		Labels:             node.Labels,
+		MolType:            types.MolType(node.MolType),
+		WispType:           types.WispType(node.WispType),
+		EventKind:          node.EventKind,
+		Actor:              node.Actor,
+		Target:             node.Target,
+		Payload:            node.Payload,
+		InitialStatus:      node.Status,
+		DueAt:              node.DueAt,
+		DeferUntil:         node.DeferUntil,
+		RepeatPattern:      node.RepeatPattern,
+		RepeatStart:        node.RepeatStart,
+		RepeatEnd:          node.RepeatEnd,
+		DueSource:          node.DueSource,
+		Metadata:           metadataJSON,
+	})
+	applyDefaultDue(issue)
+	// Backfill status-coupled timestamps: the proxied domain insert does no
+	// backfill, and neither path stamps started_at for issues born in_progress.
+	now := time.Now().UTC()
+	if issue.Status == types.StatusClosed && issue.ClosedAt == nil {
+		issue.ClosedAt = &now
+	}
+	if issue.Status == types.StatusInProgress && issue.StartedAt == nil {
+		issue.StartedAt = &now
+	}
+	issue.Pinned = node.Pinned
+	return issue, nil
+}
+
+// graphApplyNodeStorageClass resolves a node's effective storage class from
+// its per-node overrides, the plan-wide CLI flags, and the per-type config
+// default, with single-issue create's precedence (Protocol v0.1 C1.3): the
+// node's explicit storage_class wins, then storage-class.<type> config, else
+// unset. "ephemeral" is the spelled-out spelling of ephemeral: true (C1.4) —
+// it routes the node to the wisp plane and leaves the marker cell empty
+// (wisp-plane rows derive their class, C1.2). A durable class
+// (versioned/unversioned) combined with an effective wisp-plane node is
+// reconciled by flag-over-config precedence: an explicit node storage_class is
+// rejected rather than silently erased, while a per-type config default yields
+// to the effective plane; versioned normalizes to the unset marker only after
+// that check.
+func graphApplyNodeStorageClass(node GraphApplyNode, opts GraphApplyOptions) (ephemeral, noHistory bool, class types.StorageClass, err error) {
+	ephemeral = opts.Ephemeral
+	if node.Ephemeral != nil {
+		ephemeral = *node.Ephemeral
+	}
+	noHistory = opts.NoHistory
+	if node.NoHistory != nil {
+		noHistory = *node.NoHistory
+	}
+	if ephemeral && noHistory {
+		return false, false, "", fmt.Errorf("node %q: ephemeral and no_history are mutually exclusive", node.Key)
+	}
+	issueType := types.IssueType(node.Type)
+	if issueType == "" {
+		issueType = types.TypeTask
+	}
+	class, err = resolveStorageClass(node.StorageClass, issueType.Normalize())
+	if err != nil {
+		return false, false, "", fmt.Errorf("node %q: %w", node.Key, err)
+	}
+	if class == types.StorageClassEphemeral {
+		if noHistory {
+			return false, false, "", fmt.Errorf("node %q: storage_class ephemeral and no_history are mutually exclusive", node.Key)
+		}
+		if node.Ephemeral != nil && !*node.Ephemeral {
+			return false, false, "", fmt.Errorf("node %q: storage_class ephemeral conflicts with ephemeral: false", node.Key)
+		}
+		ephemeral = true
+		class = ""
+	}
+	// Reconcile the requested durable class with the effective wisp plane
+	// (flag > config, Protocol v0.1 §C1.3): an explicit node storage_class
+	// contradicts an ephemeral/no_history node and is rejected, so the durable
+	// intent is preserved rather than silently collapsed into an
+	// effective-ephemeral record; a per-type config default yields to the
+	// effective plane. versioned normalizes to the unset marker only after the
+	// check (C2.4).
+	var conflict bool
+	class, conflict = reconcileStorageClassPlane(class, node.StorageClass != "", ephemeral || noHistory)
+	if conflict {
+		return false, false, "", fmt.Errorf("node %q: storage_class %s conflicts with ephemeral/no_history: wisp-plane records are storage class ephemeral", node.Key, class)
+	}
+	return ephemeral, noHistory, class, nil
+}
+
+// GraphApplyTooLargeError reports a graph plan whose translated BatchApplier
+// item count exceeds the role's own flat ceiling (issueops.MaxApplyBatchItems).
+// `bd create --graph` refuses outright rather than splitting the plan across
+// more than one transaction, which would abandon the "atomic, all or nothing"
+// guarantee the role and this command both promise.
+type GraphApplyTooLargeError struct {
+	ItemCount int
+	Max       int
+}
+
+func (e *GraphApplyTooLargeError) Error() string {
+	return fmt.Sprintf("graph plan has %d BatchApplier item(s) (nodes, edges and deferred assignments combined), which exceeds the %d-item cap; split the plan into multiple `bd create --graph` calls — each is its own atomic transaction, so this command will never chunk one plan into several", e.ItemCount, e.Max)
+}
+
+// buildGraphApplyBatchRequest translates a GraphApplyPlan into the single
+// issueops.ApplyBatchRequest both the embedded and proxied `bd create --graph`
+// legs now apply, so the two transports cannot drift in how a plan is read.
+//
+// Item order is: every node's create item first (plan order), then
+// parent-child dep_add items, then explicit top-level edges (plan order),
+// then per-node inline deps (plan order), then trailing update items for
+// assign_after_create. Every create lands before any dep_add or update item
+// references it, so every Ref below resolves backward regardless of which
+// order the plan itself declares nodes and edges in (Ref.Key "reaches
+// backward only" — issueops/batchapplier.go).
+//
+// What this function does NOT do, deliberately: re-check for dependency
+// cycles, parent-child blocking paths, or duplicate/reverse parent-child
+// pairs. BatchApplier's own end gate re-validates the whole scheduling graph
+// after every item, and its per-edge insert already raises
+// *issueops.DependencyTypeConflictError for a same-pair, different-type
+// conflict — both are one shared implementation reached from every leg, so
+// re-deriving them here would be a second, divergeable copy of a check the
+// role already owns.
+//
+// One consequence is accepted on purpose: the end gate walks the scheduling
+// edges only (types.IsSchedulingEdge leaves waits-for out), so a plan whose
+// path from a node's parent to the node runs through a waits-for hop is now
+// stored, where the old in-transaction preflight, which walked every
+// AffectsReadyWork edge, refused it. `bd dep add` and `bd batch apply` store
+// that shape too, and it can stall ready work: once the spawner has an open
+// child, every issue in the shape stays blocked. Refusing it is a change to
+// the shared role, for every front door at once;
+// TestExecuteGraphApplyAcceptsParentToChildPathThroughWaitsFor pins the
+// current behavior until then.
+func buildGraphApplyBatchRequest(plan *GraphApplyPlan, opts GraphApplyOptions, actor, owner string) (issueops.ApplyBatchRequest, error) {
+	if err := opts.Validate(); err != nil {
+		return issueops.ApplyBatchRequest{}, err
+	}
+
+	planKeys := make(map[string]bool, len(plan.Nodes))
+	for _, node := range plan.Nodes {
+		planKeys[node.Key] = true
+	}
+
+	// ref mirrors the old resolveEdgeRef precedence: an explicit id wins over
+	// a plan key when an edge endpoint carries both.
+	ref := func(key, id string) issueops.Ref {
+		if id != "" {
+			return issueops.Ref{ID: id}
+		}
+		return issueops.Ref{Key: key}
+	}
+
+	items := make([]issueops.ApplyItem, 0, len(plan.Nodes)*2+len(plan.Edges))
+	pendingAssignees := make(map[string]string, len(plan.Nodes))
+
+	// Pass 1: create every node. ALL creates land before any dep_add/update
+	// item below, so backward-only Ref resolution never depends on the plan's
+	// own node order.
+	for _, node := range plan.Nodes {
+		issue, err := graphApplyNodeIssue(node, opts, actor, owner)
+		if err != nil {
+			return issueops.ApplyBatchRequest{}, err
+		}
+		if node.Assignee != "" {
+			if node.AssignAfterCreate {
+				pendingAssignees[node.Key] = node.Assignee
+			} else {
+				issue.Assignee = node.Assignee
+			}
+		}
+		var metadataRefs map[string]issueops.Ref
+		if len(node.MetadataRefs) > 0 {
+			metadataRefs = make(map[string]issueops.Ref, len(node.MetadataRefs))
+			for metaKey, refKey := range node.MetadataRefs {
+				// CreateItem.MetadataRefs is the one ref member allowed to reach
+				// forward (or to itself); refKey is always a plan-local key
+				// (validateGraphApplyPlan already rejected an unknown one).
+				metadataRefs[metaKey] = issueops.Ref{Key: refKey}
+			}
+		}
+		items = append(items, issueops.ApplyItem{
+			Kind: issueops.ItemCreate,
+			Create: &issueops.CreateItem{
+				Key:             node.Key,
+				Issue:           issue,
+				MetadataRefs:    metadataRefs,
+				DefaultPriority: node.Priority == nil,
+			},
+		})
+	}
+
+	// Pass 2: parent-child dep_add items, one per node with a parent — added
+	// before any other edge, matching the embedded path's old ordering.
+	//
+	// A node naming both a plan-local parent and a parent_id keeps the old
+	// precedence of both legs: the plan key wins. That is the reverse of ref's
+	// id-first rule for edge endpoints, and it is the parent the dry-run
+	// preview and validateGraphApplyLocalCycles already model.
+	for _, node := range plan.Nodes {
+		var parent issueops.Ref
+		switch parentKey := node.effectiveParentKey(); {
+		case parentKey != "":
+			parent = issueops.Ref{Key: parentKey}
+		case node.ParentID != "":
+			parent = issueops.Ref{ID: node.ParentID}
+		default:
+			continue
+		}
+		items = append(items, issueops.ApplyItem{
+			Kind: issueops.ItemDepAdd,
+			DepAdd: &issueops.DepAddItem{
+				Source: issueops.Ref{Key: node.Key},
+				Target: parent,
+				Type:   types.DepParentChild,
+			},
+		})
+	}
+
+	// Pass 3: explicit top-level edges, in plan order.
+	for _, edge := range plan.Edges {
+		depType := graphApplyDependencyType(edge.Type)
+		metadata, err := graphApplyEdgeBatchMetadata(edge, depType)
+		if err != nil {
+			return issueops.ApplyBatchRequest{}, err
+		}
+		items = append(items, issueops.ApplyItem{
+			Kind: issueops.ItemDepAdd,
+			DepAdd: &issueops.DepAddItem{
+				Source:     ref(edge.FromKey, edge.FromID),
+				Target:     ref(edge.ToKey, edge.ToID),
+				Type:       depType,
+				Metadata:   metadata,
+				HasSpawner: edge.SpawnerKey != "" || edge.SpawnerID != "",
+				ThreadID:   edge.ThreadID,
+			},
+		})
+	}
+
+	// Pass 4: per-node inline deps, in plan order. Target resolves as a plan
+	// key first, then falls back to a literal issue id — the same precedence
+	// types.NewGraphNodeDependency applied on the old embedded path.
+	for _, node := range plan.Nodes {
+		for _, dep := range node.Deps {
+			depType := types.DependencyType(dep.Type)
+			if depType == "" {
+				depType = types.DepBlocks
+			}
+			target := issueops.Ref{ID: dep.Target}
+			if planKeys[dep.Target] {
+				target = issueops.Ref{Key: dep.Target}
+			}
+			items = append(items, issueops.ApplyItem{
+				Kind: issueops.ItemDepAdd,
+				DepAdd: &issueops.DepAddItem{
+					Source: issueops.Ref{Key: node.Key},
+					Target: target,
+					Type:   depType,
+				},
+			})
+		}
+	}
+
+	// Pass 5: deferred assignees (assign_after_create), trailing update items
+	// in plan order.
+	for _, node := range plan.Nodes {
+		assignee, ok := pendingAssignees[node.Key]
+		if !ok {
+			continue
+		}
+		items = append(items, issueops.ApplyItem{
+			Kind: issueops.ItemUpdate,
+			Update: &issueops.UpdateItem{
+				Target: issueops.Ref{Key: node.Key},
+				Patch:  issueops.IssuePatch{Assignee: issueops.Field[string]{Set: true, Value: assignee}},
+			},
+		})
+	}
+
+	// This check is the CLIENT's own compiled copy of the role's flat ceiling
+	// (issueops.MaxApplyBatchItems, currently 1000 — see its doc comment for
+	// the 100-item legacy threshold and the issues.batchApplyLarge capability
+	// token). It is only correct when the embedded role IS this binary's own
+	// compiled copy, which is true for both BatchApplier legs this command
+	// reaches directly (issueops/embeddeddolt, uow/proxied-same-build).
+	//
+	// DESIGN NOTE for any future client that can reach a remote `bd serve` of
+	// a DIFFERENT version (e.g. a prospective S5 HTTP client): that client
+	// must NOT assume the remote accepts up to MaxApplyBatchItems. An older
+	// server may still enforce the legacy 100-item bound. Such a client must
+	// refuse locally at 100 unless the server has first advertised the
+	// issues.batchApplyLarge capability (internal/httpapi), or — if one
+	// becomes available — read the cap the store itself advertises, rather
+	// than trusting the requesting binary's own compiled constant.
+	if len(items) > issueops.MaxApplyBatchItems {
+		return issueops.ApplyBatchRequest{}, &GraphApplyTooLargeError{ItemCount: len(items), Max: issueops.MaxApplyBatchItems}
+	}
+
+	commitMsg := plan.CommitMessage
+	if commitMsg == "" {
+		commitMsg = fmt.Sprintf("bd: graph-apply %d nodes", len(plan.Nodes))
+	}
+
+	return issueops.ApplyBatchRequest{
+		Actor:         actor,
+		Items:         items,
+		Provenance:    commitMsg,
+		ForceIDPrefix: opts.Force,
+	}, nil
+}
+
+// graphApplyEdgeBatchMetadata builds a dep_add item's Metadata for a waits-for
+// edge. Only Gate is carried here: SpawnerKey/SpawnerID are redundant with the
+// edge's own Target (validateGraphApplyPlan already forces SpawnerKey ==
+// ToKey and SpawnerID == ToID — "the waits-for target is the spawner"), so
+// this never needs to resolve one. The role's own
+// internal/storage/issueops.StampWaitsForSpawnerID fills metadata.spawner_id
+// from the resolved target AFTER the batch mints every id, which is the only
+// way a same-batch, plan-local spawner key can land in the blob at all — this
+// function runs before any id in the plan exists. An empty Gate is left for
+// normalizeApplyEdgeMetadata to default to {"gate":"all-children"}.
+func graphApplyEdgeBatchMetadata(edge GraphApplyEdge, depType types.DependencyType) (string, error) {
+	if depType != types.DepWaitsFor || edge.Gate == "" {
+		return "", nil
+	}
+	raw, err := json.Marshal(types.WaitsForMeta{Gate: edge.Gate})
+	if err != nil {
+		return "", fmt.Errorf("edge %s%s -> %s%s: marshaling gate metadata: %w", edge.FromKey, edge.FromID, edge.ToKey, edge.ToID, err)
+	}
+	return string(raw), nil
+}
+
+func executeGraphApply(ctx context.Context, plan *GraphApplyPlan, opts GraphApplyOptions) (*GraphApplyResult, error) {
+	req, err := buildGraphApplyBatchRequest(plan, opts, currentActor(), getOwner())
+	if err != nil {
+		return nil, err
+	}
+	applier, err := store.BatchApplier()
+	if err != nil {
+		return nil, err
+	}
+	result, err := applier.ApplyBatch(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return &GraphApplyResult{IDs: result.Keys}, nil
+}
+
+// graphApplyEdgeIsLocalCycleRelevant reports whether an edge participates in the
+// in-memory local cycle check run by validateGraphApplyLocalCycles: it must be a
+// fully-local edge (both endpoints addressed by key, neither by an existing ID)
+// of a cycle-relevant dependency type.
+func graphApplyEdgeIsLocalCycleRelevant(edge GraphApplyEdge, depType types.DependencyType) bool {
+	if edge.FromKey == "" || edge.ToKey == "" || edge.FromID != "" || edge.ToID != "" {
+		return false
+	}
+	return graphApplyCycleRelevantDependencyType(depType)
+}
+
+func graphApplyDependencyType(depType string) types.DependencyType {
+	if depType == "" {
+		return types.DepBlocks
+	}
+	return types.DependencyType(depType)
+}
+
+func graphApplyCycleRelevantDependencyType(depType types.DependencyType) bool {
+	return depType == types.DepBlocks || depType == types.DepConditionalBlocks
+}
+
+func graphApplySortedKeys(keys map[string]bool) []string {
+	out := make([]string, 0, len(keys))
+	for key := range keys {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// graphApplyPreviewPriority is the priority the dry-run preview shows: the
+// node's own, or — for a node that names none and so asks the role for its
+// default — the library's DefaultCreatePriority, which is what the live apply
+// will store.
+func graphApplyPreviewPriority(node GraphApplyNode, issue *types.Issue) int {
+	if node.Priority == nil {
+		return issueops.DefaultCreatePriority
+	}
+	return issue.Priority
+}

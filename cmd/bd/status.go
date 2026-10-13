@@ -1,0 +1,273 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/spf13/cobra"
+	"github.com/steveyegge/beads/internal/metrics"
+	"github.com/steveyegge/beads/internal/types"
+	"github.com/steveyegge/beads/internal/ui"
+	"github.com/steveyegge/beads/issueops"
+)
+
+// StatusOutput represents the complete status output
+type StatusOutput struct {
+	Summary             *types.Statistics      `json:"summary"`
+	BlockedCountSkipped bool                   `json:"blocked_count_skipped,omitempty"`
+	RecentActivity      *RecentActivitySummary `json:"recent_activity,omitempty"`
+}
+
+// RecentActivitySummary represents activity from git history
+type RecentActivitySummary struct {
+	HoursTracked   int `json:"hours_tracked"`
+	CommitCount    int `json:"commit_count"`
+	IssuesCreated  int `json:"issues_created"`
+	IssuesClosed   int `json:"issues_closed"`
+	IssuesUpdated  int `json:"issues_updated"`
+	IssuesReopened int `json:"issues_reopened"`
+	TotalChanges   int `json:"total_changes"`
+}
+
+var statusCmd = &cobra.Command{
+	Use:     "status",
+	GroupID: "views",
+	Aliases: []string{"stats"},
+	Short:   "Show issue database overview and statistics",
+	Long: `Show a quick snapshot of the issue database state and statistics.
+
+This command provides a summary of issue counts by state (open, in_progress,
+blocked, closed), ready work, extended statistics (pinned issues,
+average lead time), and recent activity over the last 24 hours from git history.
+
+Similar to how 'git status' shows working tree state, 'bd status' gives you
+a quick overview of your issue database without needing multiple queries.
+
+Use cases:
+  - Quick project health check
+  - Onboarding for new contributors
+  - Integration with shell prompts or CI/CD
+  - Daily standup reference
+  - Fast CI status checks that don't need blocked-count accuracy
+
+Examples:
+  bd status                    # Show summary with activity
+  bd status --no-activity      # Skip git activity (faster)
+  bd status --no-blocked       # Skip slow blocked-count scan (faster)
+  bd stats --no-blocked --json # JSON output without blocked count
+  bd status --json             # JSON format output
+  bd status --assigned         # Show issues assigned to current user
+  bd stats                     # Alias for bd status`,
+	SilenceUsage:  true,
+	SilenceErrors: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		evt := metrics.NewCommandEvent("status")
+		defer func() {
+			if c := metrics.Global(); c != nil {
+				c.CloseEventAndAdd(evt)
+			}
+		}()
+
+		showAssigned, _ := cmd.Flags().GetBool("assigned")
+		noActivity, _ := cmd.Flags().GetBool("no-activity")
+		noBlocked, _ := cmd.Flags().GetBool("no-blocked")
+		jsonFormat, _ := cmd.Flags().GetBool("json")
+
+		if jsonFormat {
+			jsonOutput = true
+		}
+
+		reporter, err := openStatsReporter()
+		if err != nil {
+			return HandleErrorRespectJSON("%v", err)
+		}
+
+		var result issueops.StatsResult
+		if showAssigned {
+			// --no-blocked is not consulted here, and never was: an
+			// assignee-scoped summary computes both numbers by a route that has
+			// no fast path (issueops.StatsReporter.AssigneeStats).
+			result, err = reporter.AssigneeStats(rootCtx, issueops.AssigneeStatsRequest{Assignee: currentActor()})
+		} else {
+			result, err = reporter.Stats(rootCtx, issueops.StatsRequest{SkipBlocked: noBlocked})
+			if err == nil && noBlocked && result.Summary.BlockedIssues != nil {
+				// Derived from the ANSWER rather than from the route: the two
+				// routes differ on it today (the unit-of-work seam publishes no
+				// no-blocked query), and a backend that gains one stops printing
+				// this without an edit here.
+				fmt.Fprintln(os.Stderr, "warning: this backend has no --no-blocked fast path; the full blocked-count query ran")
+			}
+		}
+		if err != nil {
+			return HandleErrorRespectJSON("%v", err)
+		}
+
+		var recentActivity *RecentActivitySummary
+		if !noActivity {
+			recentActivity = getGitActivity(24)
+		}
+
+		return renderStatus(&result.Summary, recentActivity)
+	},
+}
+
+// openStatsReporter hands back the summary role for whichever route this
+// invocation is on, each through its own capability accessor.
+func openStatsReporter() (issueops.StatsReporter, error) {
+	if usesProxiedServer() {
+		return proxiedStatsReporter()
+	}
+	return store.StatsReporter()
+}
+
+// suppressedTypeSummary describes the counted rows that a default bd list will
+// not show, so the totals above can be reconciled against a listing instead of
+// looking like a phantom.
+//
+// THE REMEDY IT PRINTS NAMES TWO FLAGS, not one, because the default listing
+// applies its TYPE and its STATUS suppressions independently. These counts
+// come from the same scan as TotalIssues and are status-blind with it: a
+// CLOSED gate is in GateIssues. `bd list --include-gates` would still not show
+// that row, because the default ExcludeStatus of closed and pinned
+// (internal/workapi/list.go) is lifted only by --all - which "replaces the
+// status exclusions only" and lifts no type exclusion of its own, pinned as
+// that phrase in backend/conformance/reader_contract.go. So the type flag on
+// its own is a remedy that reproduces the number only in a workspace whose
+// gates and protos all happen to still be open, and gates are closed as the
+// work they guard completes. Naming both flags is what makes the printed
+// remedy actually reconcile; a hint that does not is the same silent
+// disagreement this line exists to remove, one level down.
+//
+// It names two of the three type-based suppressions a default listing applies.
+// The third - the infra types, which applyTypeSuppressions
+// (internal/workapi/list.go) adds to ExcludeTypes independently of the wisp
+// plane bit - is NOT here, and not because a durable infra row is unreachable.
+// It is reachable: the plane routing and the listing's exclusions both read the
+// WORKSPACE-CONFIGURED types.infra set, and changing that set only invalidates
+// a cache (internal/storage/dolt/config.go) - it never moves rows already
+// written. So durable rows created while a type was not infra stay in the
+// issues plane once it becomes one, and a type evicted from the set creates
+// durable rows outright (pinned by the create contract in
+// backend/conformance/issue_operations_contract.go). Counting them therefore
+// needs that configured set, which ScanIssueCountsInTx - pure portable SQL with
+// no config seam - cannot reach. Tracked separately rather than guessed at
+// here with the built-in names, which would be wrong in exactly the workspaces
+// where it matters.
+func suppressedTypeSummary(stats *types.Statistics) string {
+	var parts []string
+	if stats.GateIssues > 0 {
+		parts = append(parts, fmt.Sprintf("%s (--include-gates --all)", pluralCount(stats.GateIssues, "gate", "gates")))
+	}
+	if stats.TemplateIssues > 0 {
+		parts = append(parts, fmt.Sprintf("%s (--include-templates --all)", pluralCount(stats.TemplateIssues, "template", "templates")))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// pluralCount renders a count with the right one of two spellings. Both forms
+// are passed in rather than derived by appending "s", so a caller with an
+// irregular plural is not silently mis-served.
+//
+// It is not a fourth spelling of the three helpers already in package main:
+// pluralIssue, pluralize and plural all DERIVE the "s" and so cannot render a
+// caller-chosen pair. The tree's one two-form helper, pluralWord in
+// internal/storage/issueops/lease.go, is unexported in a storage package, and
+// exporting it so a CLI string could reach it would add exported surface to a
+// storage role for a cosmetic. That file's own doc comment records the same
+// trade from the other side - it carries whole words because the issueops
+// plural() covers only the "s" case - so one two-form helper per package is
+// the established shape here.
+func pluralCount(n int, singular, plural string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, singular)
+	}
+	return fmt.Sprintf("%d %s", n, plural)
+}
+
+func renderStatus(stats *types.Statistics, recentActivity *RecentActivitySummary) error {
+	output := &StatusOutput{
+		Summary:             stats,
+		BlockedCountSkipped: stats.BlockedIssues == nil,
+		RecentActivity:      recentActivity,
+	}
+
+	if jsonOutput {
+		return outputJSON(output)
+	}
+
+	// Human-readable colorized output using semantic ui package
+	fmt.Printf("\n%s Issue Database Status\n\n", ui.RenderAccent("📊"))
+	fmt.Printf("Summary:\n")
+	fmt.Printf("  Total Issues:           %d\n", stats.TotalIssues)
+	fmt.Printf("  Open:                   %s\n", ui.RenderPass(fmt.Sprintf("%d", stats.OpenIssues)))
+	fmt.Printf("  In Progress:            %s\n", ui.RenderWarn(fmt.Sprintf("%d", stats.InProgressIssues)))
+	// Skip-state is derived from the data itself (nil BlockedIssues/ReadyIssues),
+	// not the --no-blocked flag: --assigned recomputes fully-populated stats even
+	// when --no-blocked was also passed, so the flag alone would misrender those
+	// as skipped.
+	if stats.BlockedIssues == nil {
+		fmt.Printf("  Blocked:                %s\n", ui.MutedStyle.Render("(skipped)"))
+	} else if *stats.BlockedIssues > 0 {
+		fmt.Printf("  Blocked:                %s\n", ui.RenderFail(fmt.Sprintf("%d", *stats.BlockedIssues)))
+	} else {
+		fmt.Printf("  Blocked:                %d\n", *stats.BlockedIssues)
+	}
+	fmt.Printf("  Closed:                 %d\n", stats.ClosedIssues)
+	if stats.ReadyIssues == nil {
+		fmt.Printf("  Ready to Work:          %s\n", ui.MutedStyle.Render("(skipped)"))
+	} else {
+		fmt.Printf("  Ready to Work:          %s\n", ui.RenderPass(fmt.Sprintf("%d", *stats.ReadyIssues)))
+	}
+
+	if suppressed := suppressedTypeSummary(stats); suppressed != "" {
+		fmt.Printf("  Not shown by bd list:   %s\n", suppressed)
+	}
+
+	// Extended statistics (only show if non-zero)
+	hasExtended := stats.PinnedIssues > 0 ||
+		stats.EpicsEligibleForClosure > 0 || stats.AverageLeadTime > 0
+	if hasExtended {
+		fmt.Printf("\nExtended:\n")
+		if stats.PinnedIssues > 0 {
+			fmt.Printf("  Pinned:                 %d\n", stats.PinnedIssues)
+		}
+		if stats.EpicsEligibleForClosure > 0 {
+			fmt.Printf("  Epics Ready to Close:   %s\n", ui.RenderPass(fmt.Sprintf("%d", stats.EpicsEligibleForClosure)))
+		}
+		if stats.AverageLeadTime > 0 {
+			fmt.Printf("  Avg Lead Time:          %.1f hours\n", stats.AverageLeadTime)
+		}
+	}
+
+	if recentActivity != nil {
+		fmt.Printf("\nRecent Activity (last %d hours):\n", recentActivity.HoursTracked)
+		fmt.Printf("  Commits:                %d\n", recentActivity.CommitCount)
+		fmt.Printf("  Total Changes:          %d\n", recentActivity.TotalChanges)
+		fmt.Printf("  Issues Created:         %d\n", recentActivity.IssuesCreated)
+		fmt.Printf("  Issues Closed:          %d\n", recentActivity.IssuesClosed)
+		fmt.Printf("  Issues Reopened:        %d\n", recentActivity.IssuesReopened)
+		fmt.Printf("  Issues Updated:         %d\n", recentActivity.IssuesUpdated)
+	}
+
+	fmt.Printf("\nFor more details, use 'bd list' to see individual issues.\n")
+	fmt.Println()
+
+	return nil
+}
+
+// getGitActivity returns recent activity statistics.
+// Previously calculated from git log of issues.jsonl; now returns nil
+// as activity tracking has moved to Dolt-native queries.
+func getGitActivity(_ int) *RecentActivitySummary {
+	return nil
+}
+
+func init() {
+	statusCmd.Flags().Bool("all", false, "Show all issues (default behavior)")
+	statusCmd.Flags().Bool("assigned", false, "Show issues assigned to current user")
+	statusCmd.Flags().Bool("no-activity", false, "Skip git activity summary (faster)")
+	statusCmd.Flags().Bool("no-blocked", false, "Skip blocked-count computation (faster on large rigs; not supported in proxied-server mode)")
+	// Note: --json flag is defined as a persistent flag in main.go, not here
+	rootCmd.AddCommand(statusCmd)
+}

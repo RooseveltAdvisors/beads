@@ -1,0 +1,478 @@
+// Pure-Go test helpers shared across cmd/bd test files.
+//
+// This file MUST NOT carry a `//go:build cgo` tag. Helpers here are kept
+// stdlib-only (no sql.DB, no internal/storage/dolt, no embedded Dolt) so
+// that pure-Go tests in this package compile under CGO_ENABLED=0 with the
+// gms_pure_go build tag. The cgo-only counterparts live in
+// test_helpers_test.go (tagged `//go:build cgo`).
+//
+// If you add a helper here that grows a cgo dependency, move it to
+// test_helpers_test.go to preserve the build-tag separation.
+
+package main
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/steveyegge/beads/internal/config"
+	"github.com/steveyegge/beads/internal/storage"
+	"github.com/steveyegge/beads/internal/testutil/bazeltest"
+)
+
+const windowsOS = "windows"
+
+// testIDCounter ensures unique IDs across all test runs.
+var testIDCounter atomic.Uint64
+
+// doltNewMutex serializes dolt.New() calls in tests. The Dolt embedded engine's
+// InitStatusVariables() has an internal race condition when called concurrently
+// from multiple goroutines (writes to a shared global map without synchronization).
+// Serializing store creation prevents this race while allowing tests to run their
+// assertions in parallel after the store is created.
+//
+// Declared in the pure-Go helpers file so that any test (including non-cgo
+// tests that exercise pure code paths) can refer to it without forcing cgo.
+var doltNewMutex sync.Mutex
+
+// stdioMutex serializes tests that redirect os.Stdout or os.Stderr.
+// These process-global file descriptors cannot be safely redirected from
+// concurrent goroutines.
+//
+// IMPORTANT: Any test that calls Cobra methods which read stdio or lazily
+// merge inherited flags (Help, Execute, Print*, Find, InheritedFlags, etc.)
+// MUST NOT be parallel (no t.Parallel()), OR must serialize those calls under
+// stdioMutex. Setting cmd.SetOut() is NOT sufficient for output methods
+// because cobra's OutOrStdout() eagerly evaluates os.Stdout as the default
+// argument even when outWriter is set — the Go race detector catches this read.
+//
+// The name is historical; this mutex also serializes Cobra command-tree lazy
+// mutations on shared commands. TestCobraParallelPolicyGuard in
+// stdio_race_guard_test.go enforces this.
+var stdioMutex sync.Mutex
+
+// uniqueTestDBName generates a unique database name for test isolation.
+func uniqueTestDBName(t *testing.T) string {
+	t.Helper()
+	h := sha256.Sum256([]byte(t.Name() + fmt.Sprintf("%d", time.Now().UnixNano())))
+	return "testdb_" + hex.EncodeToString(h[:6])
+}
+
+// generateUniqueTestID creates a globally unique test ID using prefix, test name, and atomic counter.
+// This prevents ID collisions when multiple tests manipulate global state.
+func generateUniqueTestID(t *testing.T, prefix string, index int) string {
+	t.Helper()
+	counter := testIDCounter.Add(1)
+	// include test name, counter, and index for uniqueness
+	data := []byte(t.Name() + prefix + string(rune(counter)) + string(rune(index)))
+	hash := sha256.Sum256(data)
+	return prefix + "-" + hex.EncodeToString(hash[:])[:8]
+}
+
+// isolateBeadsDirForTest starts a fresh-workspace fixture without an inherited
+// selection and restores BEADS_DIR exactly after command dispatch, even
+// when dispatch changes BEADS_DIR with raw os.Setenv.
+// Call before fixture setup or dispatch; like t.Setenv, it is not parallel-safe.
+// Tests that intentionally select a workspace should set BEADS_DIR explicitly
+// instead; initConfigForTest and ensureCleanGlobalState preserve that selection.
+func isolateBeadsDirForTest(t *testing.T) {
+	t.Helper()
+	t.Setenv("BEADS_DIR", "")
+}
+
+// initConfigForTest initializes viper config for a test and ensures cleanup.
+// main.go's init() calls config.Initialize() which picks up the real .beads/config.yaml.
+// TestMain resets viper, but any test calling config.Initialize() re-loads the real config.
+// This helper ensures viper is reset after the test completes, preventing state pollution
+// (e.g., repo config values leaking into JSONL export tests).
+//
+// Tests automatically opt out of <module-root>/.beads/config.yaml via
+// BEADS_TEST_IGNORE_REPO_CONFIG; tests that want the repo config must override
+// before calling this helper.
+//
+// BEADS_DIR is pinned via t.Setenv here so that a test earlier in the binary which
+// resolved a real BEADS_DIR via raw os.Setenv (e.g. running actual CLI command
+// dispatch) doesn't leak it forward past this test. config.Initialize honors
+// BEADS_TEST_IGNORE_REPO_CONFIG on the BEADS_DIR source too, so such a leaked value
+// can no longer re-import the repo's own config (ga-e6h6i); tests that want the repo
+// config must unset the flag before calling this helper.
+func initConfigForTest(t *testing.T) {
+	t.Helper()
+	t.Setenv("BEADS_DIR", os.Getenv("BEADS_DIR"))
+	t.Setenv("BEADS_TEST_IGNORE_REPO_CONFIG", "1")
+	config.ResetForTesting()
+	if err := config.Initialize(); err != nil {
+		t.Fatalf("config.Initialize: %v", err)
+	}
+	t.Cleanup(config.ResetForTesting)
+}
+
+// ensureTestMode is a no-op; BEADS_TEST_MODE is set once in TestMain.
+// Previously each test set/unset the env var, which raced under t.Parallel().
+func ensureTestMode(t *testing.T) {
+	t.Helper()
+	// BEADS_TEST_MODE is set in TestMain and stays set for the entire test run.
+}
+
+// ensureCleanGlobalState resets global state that may have been modified by other tests.
+// Call this at the start of tests that manipulate globals directly.
+func ensureCleanGlobalState(t *testing.T) {
+	t.Helper()
+	// Reset CommandContext so accessor functions fall back to globals
+	resetCommandContext()
+	// Pin BEADS_DIR so real CLI command dispatch this test triggers (which sets
+	// BEADS_DIR via raw os.Setenv with no restore, e.g. prepareSelectedCommandContext)
+	// doesn't leak into later tests in the same binary.
+	t.Setenv("BEADS_DIR", os.Getenv("BEADS_DIR"))
+}
+
+// savedGlobals holds a snapshot of package-level globals for safe restoration.
+// Used by saveAndRestoreGlobals to ensure test isolation.
+type savedGlobals struct {
+	dbPath                string
+	store                 storage.DoltStorage
+	storeActive           bool
+	exportOutput          string
+	exportAll             bool
+	exportIncludeInfra    bool
+	exportScrub           bool
+	exportNoMemories      bool
+	exportIncludeMemories bool
+}
+
+// saveAndRestoreGlobals snapshots all commonly-mutated package-level globals
+// and registers a t.Cleanup() to restore them when the test completes.
+// This replaces the fragile manual save/defer pattern:
+//
+//	oldDBPath := dbPath
+//	defer func() { dbPath = oldDBPath }()
+//
+// With the safer:
+//
+//	saveAndRestoreGlobals(t)
+//
+// Benefits:
+//   - All globals saved atomically (can't forget one)
+//   - t.Cleanup runs even on panic (no risk of missed defer registration)
+//   - Single call replaces multiple save/defer pairs
+func saveAndRestoreGlobals(t *testing.T) *savedGlobals {
+	t.Helper()
+	saved := &savedGlobals{
+		dbPath:                dbPath,
+		store:                 store,
+		storeActive:           storeActive,
+		exportOutput:          exportOutput,
+		exportAll:             exportAll,
+		exportIncludeInfra:    exportIncludeInfra,
+		exportScrub:           exportScrub,
+		exportNoMemories:      exportNoMemories,
+		exportIncludeMemories: exportIncludeMemories,
+	}
+	t.Cleanup(func() {
+		dbPath = saved.dbPath
+		store = saved.store
+		storeMutex.Lock()
+		storeActive = saved.storeActive
+		storeMutex.Unlock()
+		exportOutput = saved.exportOutput
+		exportAll = saved.exportAll
+		exportIncludeInfra = saved.exportIncludeInfra
+		exportScrub = saved.exportScrub
+		exportNoMemories = saved.exportNoMemories
+		exportIncludeMemories = saved.exportIncludeMemories
+	})
+	return saved
+}
+
+// runCommandInDir runs a command in the specified directory.
+func runCommandInDir(dir string, name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	cmd.Env = testEnvNoPrompt()
+	return cmd.Run()
+}
+
+// runCommandInDirWithOutput runs a command in the specified directory and returns its output.
+func runCommandInDirWithOutput(dir string, name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	cmd.Env = testEnvNoPrompt()
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// testEnvNoPrompt returns the current environment with git auth prompts
+// suppressed. Prevents ksshaskpass/SSH_ASKPASS popups during tests that
+// configure fake git remotes (e.g. github.com/test/repo.git).
+func testEnvNoPrompt() []string {
+	env := os.Environ()
+	env = append(env, "GIT_TERMINAL_PROMPT=0", "SSH_ASKPASS=", "GIT_ASKPASS=")
+	return env
+}
+
+// captureStdout captures stdout output from fn and returns it as a string.
+// Uses stdioMutex to prevent races with concurrent os.Stdout redirection (bd-cqjoi).
+func captureStdout(t *testing.T, fn func() error) string {
+	t.Helper()
+
+	stdioMutex.Lock()
+	defer stdioMutex.Unlock()
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+
+	done := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r)
+		done <- buf.String()
+	}()
+
+	os.Stdout = w
+	restored := false
+	restore := func() string {
+		if restored {
+			return ""
+		}
+		restored = true
+		w.Close()
+		os.Stdout = oldStdout
+		out := <-done
+		_ = r.Close()
+		return out
+	}
+	defer restore()
+
+	err := fn()
+
+	out := restore()
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	return out
+}
+
+// captureStderr captures stderr output from fn and returns it as a string.
+// Uses stdioMutex to prevent races with concurrent os.Stderr redirection.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+
+	stdioMutex.Lock()
+	defer stdioMutex.Unlock()
+
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&buf, r)
+		close(done)
+	}()
+
+	os.Stderr = w
+	restored := false
+	restore := func() {
+		if restored {
+			return
+		}
+		restored = true
+		_ = w.Close()
+		os.Stderr = old
+		<-done
+		_ = r.Close()
+	}
+	defer restore()
+
+	fn()
+	restore()
+
+	return buf.String()
+}
+
+// buildBDOnce builds the bd binary once for subprocess tests.
+// Uses sync.Once for efficiency when multiple tests need the binary.
+var (
+	initTestBD     string
+	initTestBDOnce sync.Once
+	initTestBDErr  error
+)
+
+// findPrebuiltBDBinary returns the absolute path of the BEADS_TEST_BD_BINARY
+// binary, or "" when none is configured and the caller should `go build` bd.
+// Under Bazel the binary is always injected (//cmd/bd:bd_for_tests) and is
+// resolved through runfiles; see bazeltest.PrebuiltBD.
+func findPrebuiltBDBinary() (string, error) {
+	return bazeltest.PrebuiltBD()
+}
+
+// bdModulePackage is cmd/bd's import path. The in-test fallback build names
+// it explicitly instead of "." so it can never build whatever package happens
+// to be in the working directory.
+const bdModulePackage = "github.com/steveyegge/beads/cmd/bd"
+
+// bdSourceDir is cmd/bd's source directory, resolved during package
+// initialization, before TestMain or any test can chdir: this file's
+// compiled-in path when it is absolute (not -trimpath) and next to main.go,
+// else the working directory go test starts the binary in (the package
+// directory).
+var bdSourceDir = resolveBDSourceDir()
+
+func resolveBDSourceDir() string {
+	if _, file, _, ok := runtime.Caller(0); ok && filepath.IsAbs(file) {
+		dir := filepath.Dir(file)
+		if _, err := os.Stat(filepath.Join(dir, "main.go")); err == nil {
+			return dir
+		}
+	}
+	wd, _ := os.Getwd()
+	return wd
+}
+
+// goBuildBDCommand returns the `go build` that subprocess-test helpers fall
+// back to when BEADS_TEST_BD_BINARY is unset. It is the build CI prebuilds
+// that binary with (main.yml build-artifacts: go build -tags gms_pure_go
+// ./cmd/bd; no -race), and it builds cmd/bd whatever the caller's working
+// directory is: the package is named by import path and the command runs in
+// bdSourceDir, so a helper first reached from a test that chdir'd into a
+// fixture (or a precompiled test binary run from elsewhere) still builds bd.
+func goBuildBDCommand(out string) *exec.Cmd {
+	cmd := exec.Command("go", "build", "-tags", "gms_pure_go", "-o", out, bdModulePackage)
+	cmd.Dir = bdSourceDir
+	return cmd
+}
+
+// TestGoBuildBDCommandIsCWDIndependent pins that the fallback build resolves
+// cmd/bd from any working directory. It resolves the command's package in
+// the command's directory with `go list` rather than paying for a full link.
+func TestGoBuildBDCommandIsCWDIndependent(t *testing.T) {
+	if bazeltest.IsBazel() {
+		t.Skip("Bazel always injects bd through BEADS_TEST_BD_BINARY; the fallback build is unused")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skipf("go toolchain not on PATH: %v", err)
+	}
+	t.Chdir(t.TempDir())
+
+	cmd := goBuildBDCommand(filepath.Join(t.TempDir(), "bd"))
+	if got := cmd.Args[len(cmd.Args)-1]; got != bdModulePackage {
+		t.Fatalf("goBuildBDCommand builds %q, want %q", got, bdModulePackage)
+	}
+	if !strings.Contains(strings.Join(cmd.Args, " "), "-tags gms_pure_go") {
+		t.Fatalf("goBuildBDCommand args %q lack CI's -tags gms_pure_go", cmd.Args)
+	}
+
+	list := exec.Command("go", "list", "-tags", "gms_pure_go", "-f", "{{.Name}} {{.ImportPath}}", bdModulePackage)
+	list.Dir = cmd.Dir
+	out, err := list.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go list %s in %q: %v\n%s", bdModulePackage, cmd.Dir, err, out)
+	}
+	if got, want := strings.TrimSpace(string(out)), "main "+bdModulePackage; got != want {
+		t.Fatalf("go list in %q = %q, want %q", cmd.Dir, got, want)
+	}
+}
+
+// buildBDForInitTests builds (or locates) a bd binary suitable for subprocess
+// tests. Uses the gms_pure_go tag so the resulting binary works in either
+// CGO mode. Lives in the pure-Go helpers file so subprocess-style tests can
+// run without the test package itself depending on cgo at compile time.
+//
+// The fast path is BEADS_TEST_BD_BINARY (exported by scripts/test.sh and CI),
+// via findPrebuiltBDBinary. There is deliberately NO repo-root ./bd reuse
+// here anymore: that "optimization" silently ran subprocess tests against
+// whatever stale binary happened to sit in the checkout root — a two-day-old
+// one produced phantom TestCreateDepsAtomicity failures (features the source
+// under test had, the binary didn't). Tests must exercise the checkout's
+// source or an explicitly supplied binary, never an incidental artifact
+// (wy-4mtr0).
+func buildBDForInitTests(t *testing.T) string {
+	t.Helper()
+	initTestBDOnce.Do(func() {
+		prebuilt, err := findPrebuiltBDBinary()
+		if err != nil {
+			initTestBDErr = err
+			return
+		}
+		if prebuilt != "" {
+			initTestBD = prebuilt
+			return
+		}
+		bdBinary := "bd"
+		if runtime.GOOS == windowsOS {
+			bdBinary = "bd.exe"
+		}
+		// Fall back to building.
+		tmpDir, err := testTempDir("bd-init-test-*")
+		if err != nil {
+			initTestBDErr = fmt.Errorf("failed to create temp dir: %w", err)
+			return
+		}
+		initTestBD = filepath.Join(tmpDir, bdBinary)
+		cmd := goBuildBDCommand(initTestBD)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			initTestBDErr = fmt.Errorf("go build failed: %v\n%s", err, out)
+		}
+	})
+	if initTestBDErr != nil {
+		t.Fatalf("Failed to build bd binary: %v", initTestBDErr)
+	}
+	return initTestBD
+}
+
+// runGitForBootstrapTest runs a git subcommand in the given directory and
+// fails the test on error. Used by bootstrap and init-safety subprocess tests.
+func runGitForBootstrapTest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := gitCommand(args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, string(output))
+	}
+}
+
+// initGitRepoAt turns dir into a git repository with a test identity, giving
+// the no-workspace tests a walk boundary so FindBeadsDir cannot climb out of
+// the temp dir into a real .beads above it.
+//
+// This lives in the pure-Go helper file, not alongside the embedded-Dolt
+// helpers: cmd/bd/where_test.go carries no build tag, so it compiles under
+// CGO_ENABLED=0 where every `//go:build cgo` file is excluded. Keep this
+// helper stdlib-only and keep it here.
+func initGitRepoAt(t *testing.T, dir string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.email", "test@test.com"},
+		{"config", "user.name", "Test"},
+		// Force repo-local hooks so tests ignore any global hooksPath override.
+		{"config", "core.hooksPath", ".git/hooks"},
+	} {
+		cmd := gitCommand(args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s failed: %v\n%s", args[0], err, out)
+		}
+	}
+}

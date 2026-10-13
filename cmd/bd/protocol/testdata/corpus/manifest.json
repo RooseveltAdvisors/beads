@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "generated_by": "cmd/bd/protocol TestCorpusGolden",
+  "canonicalized": true,
+  "blobs": {
+    "envelope/close": {
+      "cmd": "bd close --force --json --reason \"corpus close reason exceeding twenty chars\" corpus-closed",
+      "sha256": "490e463b6bb6f8dc41f338c14b176714a112019726209d1ebecb43cc0fbffe71"
+    },
+    "envelope/count": {
+      "cmd": "bd count --json",
+      "sha256": "8f3df407d576e3fd8e9c0365d496283cf4895a0600a547c4635b8fddeb5516ea"
+    },
+    "envelope/create_closed": {
+      "cmd": "bd create \"Corpus closeable issue\" --id corpus-closed --force --priority 3 --type task --description \"deterministic corpus closeable\" --json",
+      "sha256": "6118e2a3a4245a1b13656a595b4289e0ee691463bc449d131dd3d03f3502f63c"
+    },
+    "envelope/create_deleted": {
+      "cmd": "bd create \"Corpus deletable issue\" --id corpus-deleted --force --priority 3 --type task --description \"deterministic corpus deletable\" --json",
+      "sha256": "01c27370620af93f05916317890d219c03aa429d5ec6f31d1d5bf0a69fff406b"
+    },
+    "envelope/create_dep": {
+      "cmd": "bd create \"Corpus dependency issue\" --id corpus-dep --force --priority 2 --type task --description \"deterministic corpus dependency\" --json",
+      "sha256": "90ff86cd1865ce8f31b8eb8b4a8f9511d0606b74329a357d31e1ed62bd543651"
+    },
+    "envelope/create_root": {
+      "cmd": "bd create \"Corpus root issue\" --id corpus-root --force --priority 1 --type feature --description \"deterministic corpus root\" --json",
+      "sha256": "07f9f1b197f3720631163c81b66983fb3806d55118219823e46fb72778d5e0b5"
+    },
+    "envelope/delete": {
+      "cmd": "bd delete --force --json corpus-deleted",
+      "sha256": "c4d2d5143d0f07f5888109d416be8d153a491006b4f9da3cc3f3e7b51670d16a"
+    },
+    "envelope/dep_add": {
+      "cmd": "bd dep add corpus-root corpus-dep --type blocks --json",
+      "sha256": "53f7ebc8e63a8b3cac5aa75d84d98d733753089f0cee3d2df2641781724e779f"
+    },
+    "envelope/dep_list": {
+      "cmd": "bd dep list corpus-root --json",
+      "sha256": "9cbd56b4ee80a44d384af7e4765751a787cf374ae3f5a998ee1f275bbb190814"
+    },
+    "envelope/dep_remove": {
+      "cmd": "bd dep remove corpus-root corpus-dep --json",
+      "sha256": "9e2d0224b4989eb7d05f7247c2fe51ef8e8864d7023bcd8f924ce331c59614cc"
+    },
+    "envelope/error": {
+      "cmd": "bd show nonexistent-xyz-corpus --json",
+      "sha256": "17d5eafb5a0147e81dca583ea572191a705ba793f5619c27d597705c299dcddd"
+    },
+    "envelope/list": {
+      "cmd": "bd list --all --json",
+      "sha256": "9bc7bf90e33cdfb37ce39d7cce86743a67180430aa2c26f87147da56747008c2"
+    },
+    "envelope/ready": {
+      "cmd": "bd ready --json",
+      "sha256": "9bc7bf90e33cdfb37ce39d7cce86743a67180430aa2c26f87147da56747008c2"
+    },
+    "envelope/reopen": {
+      "cmd": "bd reopen --json corpus-closed",
+      "sha256": "5127a77ddaa66b9896d7e69cbafe80c530f94f67c7651789a418ab4918f87125"
+    },
+    "envelope/show": {
+      "cmd": "bd show corpus-root --json",
+      "sha256": "3e861f06f911812c89d87208adbe5930a649fab2fa5f22c9e57aba612fd5a6d9"
+    },
+    "envelope/update": {
+      "cmd": "bd update corpus-root --json --priority 0 --add-label corpus-label --set-metadata phase=2 --description \"updated corpus root\"",
+      "sha256": "f21643db388bfc22a35b07ba16ebde7712b7610b7d435ad96f2d68edd5410f28"
+    },
+    "envelope/version": {
+      "cmd": "bd version --json",
+      "sha256": "756a704c64ab62286a355d17aa18ffc16cfb4e297e8b9520a218decb12c70939"
+    },
+    "flat/close": {
+      "cmd": "bd close --force --json --reason \"corpus close reason exceeding twenty chars\" corpus-closed",
+      "sha256": "6d32f212a34f07db8e3153001be4e8004b4c96e7aa7c7b85aac5582ede74c445"
+    },
+    "flat/count": {
+      "cmd": "bd count --json",
+      "sha256": "003bda6bcf2489c440df3af6c76d7d5e49dfcb52a7bee2b4625254044ac665e6"
+    },
+    "flat/create_closed": {
+      "cmd": "bd create \"Corpus closeable issue\" --id corpus-closed --force --priority 3 --type task --description \"deterministic corpus closeable\" --json",
+      "sha256": "029ff6e43754b0f408b91468cd30080c440d0c7bcabfeefc381a5c1708a386cc"
+    },
+    "flat/create_deleted": {
+      "cmd": "bd create \"Corpus deletable issue\" --id corpus-deleted --force --priority 3 --type task --description \"deterministic corpus deletable\" --json",
+      "sha256": "36ed282cfd1b7fe6b2f70a91a00789f677202073e14d59b2dd640a1dbb2cfc07"
+    },
+    "flat/create_dep": {
+      "cmd": "bd create \"Corpus dependency issue\" --id corpus-dep --force --priority 2 --type task --description \"deterministic corpus dependency\" --json",
+      "sha256": "131287793b8eccf8a0c232c739fd7f65de80c3e0c5b0a9ed124fc16d5c8c832d"
+    },
+    "flat/create_root": {
+      "cmd": "bd create \"Corpus root issue\" --id corpus-root --force --priority 1 --type feature --description \"deterministic corpus root\" --json",
+      "sha256": "5433d9b9c6dc02ff6a3e23ba7fbe265b6cb11bbb0ce19467e1681675b5d99438"
+    },
+    "flat/delete": {
+      "cmd": "bd delete --force --json corpus-deleted",
+      "sha256": "38543df163c746bf55b5aa4b0a08040af4109f0fe81e3131e4f6455d23091a9b"
+    },
+    "flat/dep_add": {
+      "cmd": "bd dep add corpus-root corpus-dep --type blocks --json",
+      "sha256": "07f84f475c1126f19deb288074d82fa66ed589adb7871a6c3acf59affead874b"
+    },
+    "flat/dep_list": {
+      "cmd": "bd dep list corpus-root --json",
+      "sha256": "60f6d24e6790581f50fb9af9750791f7e18a6bb291d610867832151ee868f829"
+    },
+    "flat/dep_remove": {
+      "cmd": "bd dep remove corpus-root corpus-dep --json",
+      "sha256": "2cad2bf44a31d11c50a70f37e935175bd6a35fe87e87211f2a2fe4432b5ae63a"
+    },
+    "flat/error": {
+      "cmd": "bd show nonexistent-xyz-corpus --json",
+      "sha256": "7d31206f17d193611086a67460f751f323b93ae4d8297861e680a2d4b444e116"
+    },
+    "flat/list": {
+      "cmd": "bd list --all --json",
+      "sha256": "a22a6efdca3bcff3efb7943003e3f5d6050118239ecd844b09042ccd4a506c0e"
+    },
+    "flat/ready": {
+      "cmd": "bd ready --json",
+      "sha256": "a22a6efdca3bcff3efb7943003e3f5d6050118239ecd844b09042ccd4a506c0e"
+    },
+    "flat/reopen": {
+      "cmd": "bd reopen --json corpus-closed",
+      "sha256": "f99196a3c21786ccc936ba2cd59e9d045c1c3051620b6110e7adc9f3f032dfa0"
+    },
+    "flat/show": {
+      "cmd": "bd show corpus-root --json",
+      "sha256": "16801a01954900d7f14878cb79b70d14022b64c523cd144e54b41ba960fe981c"
+    },
+    "flat/update": {
+      "cmd": "bd update corpus-root --json --priority 0 --add-label corpus-label --set-metadata phase=2 --description \"updated corpus root\"",
+      "sha256": "7da909da5026142f0d410276a952c8fafc14f14787d55644d8a8da7c6ba1d9f1"
+    },
+    "flat/version": {
+      "cmd": "bd version --json",
+      "sha256": "63d2ab5c51cbdcc7d51588bef7d039dbfb857a432f42c6f13687a0100bd787e3"
+    }
+  }
+}

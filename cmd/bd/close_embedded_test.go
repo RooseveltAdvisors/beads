@@ -1,0 +1,941 @@
+//go:build cgo
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/steveyegge/beads/internal/configfile"
+	"github.com/steveyegge/beads/internal/storage/embeddeddolt"
+	"github.com/steveyegge/beads/internal/types"
+	"github.com/steveyegge/beads/issueops"
+)
+
+// ===== Close-specific test helpers =====
+
+// bdClose runs "bd close" with the given args and returns stdout.
+// Retries on flock contention.
+func bdClose(t *testing.T, bd, dir string, args ...string) string {
+	t.Helper()
+	args = ensureCloseReason(args)
+	fullArgs := append([]string{"close"}, args...)
+	out, err := bdRunWithFlockRetry(t, bd, dir, fullArgs...)
+	if err != nil {
+		t.Fatalf("bd close %s failed: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
+}
+
+// ensureCloseReason satisfies comment.progress_required (house default ON)
+// for assigned fixtures. --force only bypasses close-authority, not progress.
+func ensureCloseReason(args []string) []string {
+	for _, a := range args {
+		if a == "--reason" || strings.HasPrefix(a, "--reason=") {
+			return args
+		}
+	}
+	return append(args, "--reason", "test close")
+}
+
+// bdCloseFail runs "bd close" expecting failure.
+func bdCloseFail(t *testing.T, bd, dir string, args ...string) string {
+	t.Helper()
+	fullArgs := append([]string{"close"}, args...)
+	cmd := exec.Command(bd, fullArgs...)
+	cmd.Dir = dir
+	cmd.Env = bdEnv(dir)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected bd close %s to fail, but it succeeded:\n%s", strings.Join(args, " "), out)
+	}
+	return string(out)
+}
+
+// bdDepAdd runs "bd dep add" with the given args.
+// Retries on flock contention.
+func bdDepAdd(t *testing.T, bd, dir string, args ...string) {
+	t.Helper()
+	fullArgs := append([]string{"dep", "add"}, args...)
+	out, err := bdRunWithFlockRetry(t, bd, dir, fullArgs...)
+	if err != nil {
+		t.Fatalf("bd dep add %s failed: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
+
+// closeJSONEntry is one entry of `bd close --json`, decoded as a consumer that
+// knows the molecule auto-close members does: the closed issue's own members
+// at the top level, with the members beside them.
+type closeJSONEntry struct {
+	types.Issue
+	AutoClosedMolecule       *types.Issue `json:"auto_closed_molecule"`
+	MoleculeAutoCloseRefusal *string      `json:"molecule_auto_close_refusal"`
+}
+
+// decodeCloseJSON decodes the array of closed issues `bd close --json` prints
+// on stdout, and requires one entry per id in ids, in order, each closed.
+func decodeCloseJSON(t *testing.T, stdout string, ids []string) []closeJSONEntry {
+	t.Helper()
+	start := strings.Index(stdout, "[")
+	if start < 0 {
+		t.Fatalf("no JSON array in bd close --json output:\n%s", stdout)
+	}
+	var entries []closeJSONEntry
+	if err := json.Unmarshal([]byte(stdout[start:]), &entries); err != nil {
+		t.Fatalf("parse bd close --json: %v\n%s", err, stdout[start:])
+	}
+	if len(entries) != len(ids) {
+		t.Fatalf("bd close --json has %d entries, want %d (%v):\n%s", len(entries), len(ids), ids, stdout[start:])
+	}
+	for i, entry := range entries {
+		if entry.ID != ids[i] || entry.Status != types.StatusClosed {
+			t.Fatalf("entry %d = %s (%s), want %s closed:\n%s", i, entry.ID, entry.Status, ids[i], stdout[start:])
+		}
+	}
+	return entries
+}
+
+// requireCloseJSONReportsAutoClosedMolecule asserts a `bd close --json` of
+// stepIDs, in order, whose close completed the molecule rootID: the first
+// entry carries the closed root as auto_closed_molecule, and no entry carries
+// the root again or a refusal.
+func requireCloseJSONReportsAutoClosedMolecule(t *testing.T, stdout string, stepIDs []string, rootID string) {
+	t.Helper()
+	entries := decodeCloseJSON(t, stdout, stepIDs)
+	root := entries[0].AutoClosedMolecule
+	if root == nil {
+		t.Fatalf("the close that completed molecule %s does not report it as auto_closed_molecule:\n%s", rootID, stdout)
+	}
+	if root.ID != rootID || root.Status != types.StatusClosed || root.CloseReason != "all steps complete" {
+		t.Errorf("auto_closed_molecule = %s (%s, %q), want %s closed with %q", root.ID, root.Status, root.CloseReason, rootID, "all steps complete")
+	}
+	for i, entry := range entries {
+		if i > 0 && entry.AutoClosedMolecule != nil {
+			t.Errorf("entry %d (%s) reports molecule %s again: a batch reports each root once", i, entry.ID, entry.AutoClosedMolecule.ID)
+		}
+		if entry.MoleculeAutoCloseRefusal != nil {
+			t.Errorf("entry %d (%s) reports a refusal for a root that closed: %q", i, entry.ID, *entry.MoleculeAutoCloseRefusal)
+		}
+	}
+}
+
+// requireCloseJSONReportsMoleculeRefusal asserts a `bd close --json` of
+// stepID whose close completed the molecule rootID but could not close it:
+// the entry carries no auto-closed root and reports the refusal as want, the
+// refusing guard's own sentence, on every route.
+func requireCloseJSONReportsMoleculeRefusal(t *testing.T, stdout, stepID, rootID string, want error) {
+	t.Helper()
+	entry := decodeCloseJSON(t, stdout, []string{stepID})[0]
+	if entry.AutoClosedMolecule != nil {
+		t.Errorf("a refused root is reported as auto-closed: %s", entry.AutoClosedMolecule.ID)
+	}
+	if entry.MoleculeAutoCloseRefusal == nil {
+		t.Fatalf("the close that completed molecule %s does not report why its root stayed open:\n%s", rootID, stdout)
+	}
+	if got := *entry.MoleculeAutoCloseRefusal; got != want.Error() {
+		t.Errorf("molecule_auto_close_refusal for %s:\n got %q\nwant %q", rootID, got, want.Error())
+	}
+}
+
+// ===== Close tests =====
+
+// The TestEmbeddedCloseBasic*, TestEmbeddedCloseGuardsAndEpics and
+// TestEmbeddedCloseAlreadyClosed* tests were split from TestEmbeddedClose
+// (originally ~404s, measured under --config=embedded) into top-level tests
+// over disjoint subtest groups, for CI shard balance (see
+// scripts/ci/embedded_cmd_test_durations.json and engdocs/TESTING.md). Every
+// original subtest is preserved exactly once, in its original order within
+// its group. Subtests that share a store stay in one test; the others each
+// init their own isolated store.
+func TestEmbeddedCloseBasicSharedStore(t *testing.T) {
+	if os.Getenv("BEADS_TEST_EMBEDDED_DOLT") != "1" {
+		t.Skip("set BEADS_TEST_EMBEDDED_DOLT=1 to run embedded dolt integration tests")
+	}
+	t.Parallel()
+
+	bd := buildEmbeddedBD(t)
+	dir, _, _ := bdInit(t, bd, "--prefix", "tc")
+
+	// ===== Basic Close Behavior =====
+
+	t.Run("basic_close", func(t *testing.T) {
+		issue := bdCreate(t, bd, dir, "Close me", "--type", "task")
+		bdClose(t, bd, dir, issue.ID)
+		got := bdShow(t, bd, dir, issue.ID)
+		if got.Status != types.StatusClosed {
+			t.Errorf("expected status closed, got %s", got.Status)
+		}
+		if got.ClosedAt == nil {
+			t.Error("expected closed_at to be set")
+		}
+	})
+
+	// Mixed batch: one already-closed bead + one live bead. Both must appear in
+	// the JSON array — the already-closed one for output parity, the live one as a
+	// real close.
+	t.Run("close_json_mixed_batch_includes_already_closed", func(t *testing.T) {
+		already := bdCreate(t, bd, dir, "Mixed already", "--type", "task")
+		fresh := bdCreate(t, bd, dir, "Mixed fresh", "--type", "task")
+		bdClose(t, bd, dir, already.ID) // pre-close one
+
+		cmd := exec.Command(bd, "close", already.ID, fresh.ID, "--json")
+		cmd.Dir = dir
+		cmd.Env = bdEnv(dir)
+		stdout, stderr, err := runCommandBuffers(t, cmd)
+		if err != nil {
+			t.Fatalf("bd close --json (mixed batch) failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+		}
+		s := stdout.String()
+		start := strings.Index(s, "[")
+		if start < 0 {
+			t.Fatalf("expected a JSON array for mixed-batch --json close, got: %s", s)
+		}
+		var issues []json.RawMessage
+		if jsonErr := json.Unmarshal([]byte(s[start:]), &issues); jsonErr != nil {
+			t.Fatalf("expected valid JSON array, got: %s (%v)", s[start:], jsonErr)
+		}
+		if len(issues) != 2 {
+			t.Fatalf("expected both issues in JSON (real close + already-closed parity), got %d: %s", len(issues), s[start:])
+		}
+		if !strings.Contains(s, already.ID) || !strings.Contains(s, fresh.ID) {
+			t.Errorf("expected both %s and %s in JSON output, got: %s", already.ID, fresh.ID, s)
+		}
+	})
+
+	// A batch still closes the IDs it can close, but a caller must receive a
+	// nonzero exit when any sibling was refused. Otherwise an orchestrator can
+	// record the whole batch as complete while a blocked issue remains open.
+	t.Run("mixed_batch_refusal_exits_nonzero_after_closing_survivor", func(t *testing.T) {
+		blocker := bdCreate(t, bd, dir, "Mixed batch blocker", "--type", "task")
+		blocked := bdCreate(t, bd, dir, "Mixed batch blocked", "--type", "task")
+		closable := bdCreate(t, bd, dir, "Mixed batch closable", "--type", "task")
+		bdDepAdd(t, bd, dir, blocked.ID, blocker.ID)
+
+		out := bdCloseFail(t, bd, dir, closable.ID, blocked.ID)
+		if !strings.Contains(out, "1 of 2 issues failed to close") {
+			t.Errorf("expected partial-close summary, got: %s", out)
+		}
+		if got := bdShow(t, bd, dir, closable.ID); got.Status != types.StatusClosed {
+			t.Errorf("closable issue status = %s, want closed", got.Status)
+		}
+		if got := bdShow(t, bd, dir, blocked.ID); got.Status != types.StatusOpen {
+			t.Errorf("blocked issue status = %s, want open", got.Status)
+		}
+	})
+}
+
+func TestEmbeddedCloseBasicIsolatedStores(t *testing.T) {
+	if os.Getenv("BEADS_TEST_EMBEDDED_DOLT") != "1" {
+		t.Skip("set BEADS_TEST_EMBEDDED_DOLT=1 to run embedded dolt integration tests")
+	}
+	t.Parallel()
+
+	bd := buildEmbeddedBD(t)
+
+	// The direct-route twin of TestProxiedClose/
+	// close_partial_failure_json_names_the_failed_ids. Two things were asserted
+	// on the proxied route only: that exit 1 comes with a payload naming the
+	// failed ids while stdout keeps the success-shaped closed-issues array, and
+	// that failed[].error is the TYPED error rather than the decorated line
+	// stderr shows a person. This is the default route — what most scripts and
+	// the parity harness exercise — so a regression in reportCloseFailures'
+	// jsonOut branch was previously invisible to CI on the route most callers
+	// are on, and the two routes could drift on the field's contents with
+	// nothing failing.
+	t.Run("close_partial_failure_json_names_the_failed_ids", func(t *testing.T) {
+		jdir, _, _ := bdInit(t, bd, "--prefix", "jf")
+		closable := bdCreate(t, bd, jdir, "JSON closable", "--type", "task")
+		blocker := bdCreate(t, bd, jdir, "JSON blocker", "--type", "task")
+		blocked := bdCreate(t, bd, jdir, "JSON blocked", "--type", "task")
+		bdDepAdd(t, bd, jdir, blocked.ID, blocker.ID)
+
+		cmd := exec.Command(bd, "close", "--json", closable.ID, blocked.ID)
+		cmd.Dir = jdir
+		cmd.Env = bdEnv(jdir)
+		stdoutBuf, stderrBuf, err := runCommandBuffers(t, cmd)
+		stdout, stderr := stdoutBuf.String(), stderrBuf.String()
+		if err == nil {
+			t.Fatalf("expected a partial batch close to exit nonzero\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		}
+
+		// stdout keeps the success shape: just the survivor.
+		start := strings.Index(stdout, "[")
+		if start < 0 {
+			t.Fatalf("expected the closed-issues array on stdout, got:\n%s", stdout)
+		}
+		var closed []*types.Issue
+		if jsonErr := json.Unmarshal([]byte(stdout[start:]), &closed); jsonErr != nil {
+			t.Fatalf("parse closed array: %v\nraw: %s", jsonErr, stdout[start:])
+		}
+		if len(closed) != 1 || closed[0].ID != closable.ID {
+			t.Fatalf("stdout closed array = %d issue(s), want only the survivor %s\nraw: %s", len(closed), closable.ID, stdout[start:])
+		}
+
+		// stderr's last line is the failure report.
+		line := lastJSONObjectLine(stderr)
+		if line == "" {
+			t.Fatalf("expected a compact JSON failure line on stderr, got:\n%s", stderr)
+		}
+		var report struct {
+			Error  string `json:"error"`
+			Failed []struct {
+				ID    string `json:"id"`
+				Error string `json:"error"`
+			} `json:"failed"`
+		}
+		if jsonErr := json.Unmarshal([]byte(line), &report); jsonErr != nil {
+			t.Fatalf("parse failure report: %v\nraw: %s", jsonErr, line)
+		}
+		if report.Error != "1 of 2 issues failed to close" {
+			t.Errorf("failure report error = %q, want the N of M summary", report.Error)
+		}
+		if len(report.Failed) != 1 || report.Failed[0].ID != blocked.ID {
+			t.Fatalf("failure report named %+v, want exactly the refused id %s", report.Failed, blocked.ID)
+		}
+		assertCloseFailedErrorIsTyped(t, report.Failed[0].Error, stderr)
+
+		if got := bdShow(t, bd, jdir, closable.ID); got.Status != types.StatusClosed {
+			t.Errorf("closable issue status = %s, want closed despite the refused sibling", got.Status)
+		}
+		if got := bdShow(t, bd, jdir, blocked.ID); got.Status != types.StatusOpen {
+			t.Errorf("blocked issue status = %s, want open", got.Status)
+		}
+	})
+
+	// The --claim-next × partial-failure interaction, adjudicated rather than
+	// left implicit (#6648). --claim-next rides inside the batch transaction
+	// and fires whenever something LANDED, so a mixed batch claims and then
+	// exits 1. The claim is durable — the refused sibling does not roll it back
+	// — so the contract pinned here is "the claim stands and the failure
+	// summary names it", NOT "the claim is silently suppressed": suppressing
+	// only the report would leave an issue assigned to this actor with nothing
+	// saying so, which is strictly worse than announcing it.
+	//
+	// Its own project, because the assertion depends on exactly which issue is
+	// ready at claim time: once `closable` closes, `blocker` is the only ready
+	// issue left (`blocked` still depends on it), so the claim is deterministic.
+	t.Run("mixed_batch_claim_next_names_the_claim_it_kept", func(t *testing.T) {
+		kdir, _, _ := bdInit(t, bd, "--prefix", "kn")
+		closable := bdCreate(t, bd, kdir, "Claim-next batch closable", "--type", "task")
+		blocker := bdCreate(t, bd, kdir, "Claim-next batch blocker", "--type", "task")
+		blocked := bdCreate(t, bd, kdir, "Claim-next batch blocked", "--type", "task")
+		bdDepAdd(t, bd, kdir, blocked.ID, blocker.ID)
+
+		out := bdCloseFail(t, bd, kdir, closable.ID, blocked.ID, "--claim-next")
+		if !strings.Contains(out, "1 of 2 issues failed to close") {
+			t.Errorf("expected the partial-close summary, got: %s", out)
+		}
+		if !strings.Contains(out, "already claimed "+blocker.ID) {
+			t.Errorf("expected the failure summary to name the claim it kept (%s), got: %s", blocker.ID, out)
+		}
+		if got := bdShow(t, bd, kdir, closable.ID); got.Status != types.StatusClosed {
+			t.Errorf("closable issue status = %s, want closed", got.Status)
+		}
+		if got := bdShow(t, bd, kdir, blocked.ID); got.Status != types.StatusOpen {
+			t.Errorf("blocked issue status = %s, want open", got.Status)
+		}
+		// The claim really landed: the report is not describing a claim that
+		// was rolled back with the refusal.
+		if got := bdShow(t, bd, kdir, blocker.ID); got.Assignee == "" {
+			t.Errorf("claimed issue %s assignee = %q, want it assigned: the claim commits inside the batch transaction and the refused sibling does not undo it",
+				blocker.ID, got.Assignee)
+		}
+
+		// And retrying does NOT stack a second claim, which is what makes
+		// keeping the first one safe. `closable` is already closed on the way
+		// back through, so the batch lands nothing and an empty batch earns no
+		// claim (see the already-closed re-close subtest below). `spare` is
+		// created only now, so it is the one ready issue a repeat claim could
+		// take — without it this assertion would pass vacuously, since the
+		// first run left nothing else ready.
+		spare := bdCreate(t, bd, kdir, "Claim-next batch spare", "--type", "task")
+		out = bdCloseFail(t, bd, kdir, closable.ID, blocked.ID, "--claim-next")
+		if strings.Contains(out, "already claimed "+spare.ID) {
+			t.Errorf("a retry claimed %s as well, got: %s", spare.ID, out)
+		}
+		if got := bdShow(t, bd, kdir, spare.ID); got.Assignee != "" {
+			t.Errorf("retrying the same failed batch claimed a second issue (%s assignee = %q); the leak must be bounded at the one claim the first run earned",
+				spare.ID, got.Assignee)
+		}
+	})
+
+}
+
+// TestEmbeddedCloseGuardsAndEpics was split from TestEmbeddedClose (originally
+// ~404s, measured under --config=embedded) into 3 top-level tests over
+// disjoint subtest groups, for CI shard balance (see
+// scripts/ci/embedded_cmd_test_durations.json and engdocs/TESTING.md). Every original
+// subtest is preserved exactly once.
+func TestEmbeddedCloseGuardsAndEpics(t *testing.T) {
+	if os.Getenv("BEADS_TEST_EMBEDDED_DOLT") != "1" {
+		t.Skip("set BEADS_TEST_EMBEDDED_DOLT=1 to run embedded dolt integration tests")
+	}
+	t.Parallel()
+
+	bd := buildEmbeddedBD(t)
+	dir, beadsDir, _ := bdInit(t, bd, "--prefix", "tc")
+
+	// Proves the S7 delegation: `bd close` on a blocked issue now surfaces the
+	// engine's atomic guard (storage.ErrCloseBlocked) rather than a duplicated
+	// CLI pre-check. The refusal must be atomic — the issue stays open because the
+	// guard and the close share one transaction — and the message must name the
+	// blocker and the --force hint. --force then bypasses the engine guard.
+	t.Run("close_blocked_delegated_guard", func(t *testing.T) {
+		blocker := bdCreate(t, bd, dir, "Deleg blocker", "--type", "task")
+		blocked := bdCreate(t, bd, dir, "Deleg blocked", "--type", "task")
+		bdDepAdd(t, bd, dir, blocked.ID, blocker.ID)
+
+		out := bdCloseFail(t, bd, dir, blocked.ID)
+		if !strings.Contains(out, "cannot close") {
+			t.Errorf("expected engine guard message ('cannot close'), got: %s", out)
+		}
+		if !strings.Contains(out, blocker.ID) {
+			t.Errorf("expected guard message to name blocker %s, got: %s", blocker.ID, out)
+		}
+		if !strings.Contains(out, "--force") {
+			t.Errorf("expected guard message to mention --force, got: %s", out)
+		}
+
+		// Atomic refuse: the guard ran in-transaction, so the issue must remain open.
+		got := bdShow(t, bd, dir, blocked.ID)
+		if got.Status == types.StatusClosed {
+			t.Error("expected blocked issue to remain open after the guard refused (atomic)")
+		}
+
+		// --force bypasses the engine guard.
+		bdClose(t, bd, dir, blocked.ID, "--force")
+		got = bdShow(t, bd, dir, blocked.ID)
+		if got.Status != types.StatusClosed {
+			t.Errorf("expected closed with --force, got %s", got.Status)
+		}
+	})
+
+	t.Run("reclose_by_foreign_actor_is_idempotent", func(t *testing.T) {
+		issue := bdCreate(t, bd, dir, "Foreign reclose", "--type", "task")
+		bdUpdate(t, bd, dir, issue.ID, "--actor", "bob", "--claim")
+		bdClose(t, bd, dir, issue.ID, "--actor", "bob")
+
+		// Alice re-closes a bead she never held. bdClose t.Fatalf's on a nonzero
+		// exit, so this line is the assertion.
+		bdClose(t, bd, dir, issue.ID, "--actor", "alice")
+
+		got := bdShow(t, bd, dir, issue.ID)
+		if got.Status != types.StatusClosed {
+			t.Errorf("status: got %q, want closed", got.Status)
+		}
+		if got.Assignee != "bob" {
+			t.Errorf("assignee: got %q, want bob — a re-close must not rewrite the holder", got.Assignee)
+		}
+	})
+
+	t.Run("close_epic_open_children_force", func(t *testing.T) {
+		epic := bdCreate(t, bd, dir, "Epic force", "--type", "epic")
+		child := bdCreate(t, bd, dir, "Epic child force", "--type", "task")
+		bdDepAdd(t, bd, dir, child.ID, epic.ID, "--type", "parent-child")
+
+		cmd := exec.Command(bd, "close", epic.ID, "--force", "--reason", "test close")
+		cmd.Dir = dir
+		cmd.Env = bdEnv(dir)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("bd close --force failed: %v\n%s", err, out)
+		}
+		got := bdShow(t, bd, dir, epic.ID)
+		if got.Status != types.StatusClosed {
+			t.Errorf("expected epic closed with --force, got %s", got.Status)
+		}
+		if !strings.Contains(string(out), "warning:") || !strings.Contains(string(out), "open child") {
+			t.Errorf("expected warning about open children on --force, got: %s", out)
+		}
+		_ = child
+	})
+
+	t.Run("close_dolt_commit", func(t *testing.T) {
+		dataDir := filepath.Join(beadsDir, "embeddeddolt")
+		cfg, _ := configfile.Load(beadsDir)
+		database := ""
+		if cfg != nil {
+			database = cfg.GetDoltDatabase()
+		}
+
+		countCommits := func() int {
+			db, cleanup, err := embeddeddolt.OpenSQL(t.Context(), dataDir, database, "main")
+			if err != nil {
+				t.Fatalf("OpenSQL: %v", err)
+			}
+			defer cleanup()
+			var count int
+			if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM dolt_log").Scan(&count); err != nil {
+				t.Fatalf("query dolt_log: %v", err)
+			}
+			return count
+		}
+
+		before := countCommits()
+		issue := bdCreate(t, bd, dir, "Dolt commit test", "--type", "task")
+		_ = issue
+		afterCreate := countCommits()
+		bdClose(t, bd, dir, issue.ID)
+		afterClose := countCommits()
+
+		if afterClose <= afterCreate {
+			t.Errorf("expected Dolt commit count to increase after close: before=%d afterCreate=%d afterClose=%d", before, afterCreate, afterClose)
+		}
+	})
+
+}
+
+// See TestEmbeddedCloseBasicSharedStore for the TestEmbeddedClose split.
+func TestEmbeddedCloseAlreadyClosedMultipleIDs(t *testing.T) {
+	if os.Getenv("BEADS_TEST_EMBEDDED_DOLT") != "1" {
+		t.Skip("set BEADS_TEST_EMBEDDED_DOLT=1 to run embedded dolt integration tests")
+	}
+	t.Parallel()
+
+	bd := buildEmbeddedBD(t)
+
+	// The direct route's mirror of the proxied route's
+	// single_transaction_dolt_commit oracle. N ids are ONE request, and the
+	// request is the transaction boundary, so they land as one transaction with
+	// one Dolt commit whose message names every id that landed. Before `bd close`
+	// moved onto the BatchCloser role this route wrote one commit per id, each
+	// titled "bd: close issue".
+	t.Run("close_multiple_ids_single_dolt_commit", func(t *testing.T) {
+		// Isolated store so the commit count is deterministic, mirroring
+		// close_already_closed_claim_next.
+		sdir, sbeads, _ := bdInit(t, bd, "--prefix", "sb")
+		readLog := func() (int, string) {
+			dataDir := filepath.Join(sbeads, "embeddeddolt")
+			cfg, _ := configfile.Load(sbeads)
+			database := ""
+			if cfg != nil {
+				database = cfg.GetDoltDatabase()
+			}
+			db, cleanup, err := embeddeddolt.OpenSQL(t.Context(), dataDir, database, "main")
+			if err != nil {
+				t.Fatalf("OpenSQL: %v", err)
+			}
+			defer cleanup()
+			var count int
+			if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM dolt_log").Scan(&count); err != nil {
+				t.Fatalf("query dolt_log: %v", err)
+			}
+			var message string
+			if err := db.QueryRowContext(t.Context(), "SELECT message FROM dolt_log ORDER BY date DESC LIMIT 1").Scan(&message); err != nil {
+				t.Fatalf("query latest dolt_log message: %v", err)
+			}
+			return count, message
+		}
+
+		a := bdCreate(t, bd, sdir, "Batch commit A", "--type", "task")
+		b := bdCreate(t, bd, sdir, "Batch commit B", "--type", "task")
+		c := bdCreate(t, bd, sdir, "Batch commit C", "--type", "task")
+
+		before, _ := readLog()
+		bdClose(t, bd, sdir, a.ID, b.ID, c.ID)
+		after, message := readLog()
+
+		if got := after - before; got != 1 {
+			t.Errorf("dolt commits for a 3-id close = %d, want 1: the request is the transaction boundary", got)
+		}
+		if !strings.HasPrefix(message, "bd: close ") {
+			t.Errorf("commit message = %q, want it to start with %q", message, "bd: close ")
+		}
+		for _, id := range []string{a.ID, b.ID, c.ID} {
+			if !strings.Contains(message, id) {
+				t.Errorf("commit message %q should name %s: the entry names what landed", message, id)
+			}
+		}
+	})
+}
+
+func TestEmbeddedCloseAlreadyClosedContinue(t *testing.T) {
+	if os.Getenv("BEADS_TEST_EMBEDDED_DOLT") != "1" {
+		t.Skip("set BEADS_TEST_EMBEDDED_DOLT=1 to run embedded dolt integration tests")
+	}
+	t.Parallel()
+
+	bd := buildEmbeddedBD(t)
+
+	t.Run("close_already_closed_continue_advances", func(t *testing.T) {
+		// Isolated store so molecule progress and the Dolt commit count are
+		// deterministic, mirroring close_already_closed_claim_next.
+		cdir, cbeads, _ := bdInit(t, bd, "--prefix", "rk")
+		countCommits := func() int {
+			dataDir := filepath.Join(cbeads, "embeddeddolt")
+			cfg, _ := configfile.Load(cbeads)
+			database := ""
+			if cfg != nil {
+				database = cfg.GetDoltDatabase()
+			}
+			db, cleanup, err := embeddeddolt.OpenSQL(t.Context(), dataDir, database, "main")
+			if err != nil {
+				t.Fatalf("OpenSQL: %v", err)
+			}
+			defer cleanup()
+			var count int
+			if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM dolt_log").Scan(&count); err != nil {
+				t.Fatalf("query dolt_log: %v", err)
+			}
+			return count
+		}
+
+		root := bdCreate(t, bd, cdir, "Reclose continue root", "--type", "epic", "--labels", "template")
+		step1 := bdCreate(t, bd, cdir, "Reclose continue step one", "--type", "task", "--parent", root.ID)
+		step2 := bdCreate(t, bd, cdir, "Reclose continue step two", "--type", "task", "--parent", root.ID)
+		// step2 blocks on step1, so closing step1 makes step2 the next ready step.
+		bdDepAdd(t, bd, cdir, step2.ID, step1.ID)
+
+		if _, err := bdRunWithFlockRetry(t, bd, cdir, "update", step1.ID, "--claim"); err != nil {
+			t.Fatalf("seed claim failed: %v", err)
+		}
+
+		// Close step1 for real WITHOUT --continue — the advancement trigger never ran
+		// (models a crash/retry between the status flip and the advance).
+		bdClose(t, bd, cdir, step1.ID, "--reason", "first")
+
+		// Retry the close WITH --continue against the now already-closed step. The
+		// idempotent re-close must advance the molecule AND persist the advance, not
+		// just mutate the in-memory working set.
+		beforeCommits := countCommits()
+		_ = bdClose(t, bd, cdir, step1.ID, "--reason", "retry", "--continue")
+
+		got, err := os.ReadFile(filepath.Join(cbeads, "last-touched"))
+		if err != nil {
+			t.Fatalf("read .beads/last-touched: %v", err)
+		}
+		if gotID := strings.TrimSpace(string(got)); gotID != step2.ID {
+			t.Errorf(".beads/last-touched = %q after re-closing already-closed %s --continue, want %q (auto-advanced step)",
+				gotID, step1.ID, step2.ID)
+		}
+
+		// Persisted-advancement assertions — the retry-safety property the fix
+		// guarantees, and the gap the reviewer flagged: last-touched alone proves
+		// AdvanceToNextStep ran in the working set, not that the advance was
+		// committed. step2 must be persisted as in_progress, and the already-closed
+		// re-close (closedCount==0) must still produce a Dolt commit for the advance.
+		// The auto-advance moves the step to in_progress via UpdateIssue but, unlike
+		// --claim-next's ClaimIssue, does not set an assignee, so we assert status +
+		// commit rather than assignee.
+		if s2 := bdShow(t, bd, cdir, step2.ID); s2.Status != types.StatusInProgress {
+			t.Errorf("expected step2 %s persisted as in_progress after already-closed --continue, got status=%s",
+				step2.ID, s2.Status)
+		}
+		if afterCommits := countCommits(); afterCommits <= beforeCommits {
+			t.Errorf("expected a Dolt commit for the --continue advance on an already-closed re-close: before=%d after=%d",
+				beforeCommits, afterCommits)
+		}
+	})
+}
+
+func TestEmbeddedCloseAlreadyClosedClaimNextAndMolecule(t *testing.T) {
+	if os.Getenv("BEADS_TEST_EMBEDDED_DOLT") != "1" {
+		t.Skip("set BEADS_TEST_EMBEDDED_DOLT=1 to run embedded dolt integration tests")
+	}
+	t.Parallel()
+
+	bd := buildEmbeddedBD(t)
+
+	t.Run("close_already_closed_claim_next", func(t *testing.T) {
+		// Isolated store so the ready set is deterministic — the shared store carries
+		// open issues from sibling subtests, and --claim-next claims the global
+		// highest-priority ready issue.
+		cdir, cbeads, _ := bdInit(t, bd, "--prefix", "rc")
+		countCommits := func() int {
+			dataDir := filepath.Join(cbeads, "embeddeddolt")
+			cfg, _ := configfile.Load(cbeads)
+			database := ""
+			if cfg != nil {
+				database = cfg.GetDoltDatabase()
+			}
+			db, cleanup, err := embeddeddolt.OpenSQL(t.Context(), dataDir, database, "main")
+			if err != nil {
+				t.Fatalf("OpenSQL: %v", err)
+			}
+			defer cleanup()
+			var count int
+			if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM dolt_log").Scan(&count); err != nil {
+				t.Fatalf("query dolt_log: %v", err)
+			}
+			return count
+		}
+
+		target := bdCreate(t, bd, cdir, "Reclose claim target", "--type", "task")
+		next := bdCreate(t, bd, cdir, "Reclose claim next", "--type", "task")
+		bdClose(t, bd, cdir, target.ID) // real close; `next` is now the only ready issue
+
+		// Re-close the already-closed target with --claim-next. The claim does NOT
+		// fire: bd-yby99.19 adjudicated that a batch whose items were all already
+		// closed mutated nothing, so it earns no claim and mints no commit
+		// (issueops/batchcloser.go, "CHANGED IS THE TEST"). This subtest used to
+		// assert the opposite as a retry-safety property — a crashed agent
+		// re-running `bd close X --claim-next` got its next work item — and that
+		// property is what the adjudication traded away; bd-yby99.30 carries it.
+		beforeCommits := countCommits()
+		_ = bdClose(t, bd, cdir, target.ID, "--claim-next")
+
+		got := bdShow(t, bd, cdir, next.ID)
+		if got.Status != types.StatusOpen || got.Assignee != "" {
+			t.Errorf("next issue %s = (status=%s assignee=%q) after an already-closed --claim-next, want it untouched: the re-close closed nothing, so the claim was never earned",
+				next.ID, got.Status, got.Assignee)
+		}
+		// Nothing landed, so nothing is committed either — the shape the
+		// adjudication names, a commit that changed nothing.
+		if afterCommits := countCommits(); afterCommits != beforeCommits {
+			t.Errorf("dolt_log went %d -> %d across an already-closed re-close that claimed nothing, want no commit",
+				beforeCommits, afterCommits)
+		}
+	})
+
+	// Regression for the delegated-close change: molecule root auto-close is a
+	// state-derived post-close contract, so an already-closed re-close of the final
+	// step must re-drive it. Models the crash where the final step's close persisted
+	// but its molecule-root auto-close did not — the idempotent retry heals the
+	// stranded-open root instead of leaving it open forever.
+	t.Run("close_already_closed_replays_molecule_auto_close", func(t *testing.T) {
+		// Isolated store so molecule progress is deterministic.
+		mdir, _, _ := bdInit(t, bd, "--prefix", "rm")
+		root := bdCreate(t, bd, mdir, "Reclose molecule root", "--type", "epic", "--labels", "template")
+		step1 := bdCreate(t, bd, mdir, "Reclose molecule step one", "--type", "task", "--parent", root.ID)
+		step2 := bdCreate(t, bd, mdir, "Reclose molecule step two", "--type", "task", "--parent", root.ID)
+
+		// Close both steps for real. Closing the final step auto-closes the root.
+		bdClose(t, bd, mdir, step1.ID, "--reason", "one")
+		bdClose(t, bd, mdir, step2.ID, "--reason", "two")
+		if got := bdShow(t, bd, mdir, root.ID); got.Status != types.StatusClosed {
+			t.Fatalf("precondition: expected molecule root %s auto-closed after final step, got %s", root.ID, got.Status)
+		}
+
+		// Strand the molecule: reopen ONLY the root, leaving both steps closed — the
+		// exact state left when a final step's close commits but its root auto-close
+		// does not.
+		bdReopen(t, bd, mdir, root.ID)
+		if got := bdShow(t, bd, mdir, root.ID); got.Status != types.StatusOpen {
+			t.Fatalf("precondition: expected molecule root %s reopened, got %s", root.ID, got.Status)
+		}
+		if got := bdShow(t, bd, mdir, step2.ID); got.Status != types.StatusClosed {
+			t.Fatalf("precondition: expected step2 %s to stay closed after reopening only the root, got %s", step2.ID, got.Status)
+		}
+
+		// Re-close the already-closed final step. The idempotent re-close must replay
+		// molecule auto-close and re-close the stranded-open root.
+		_ = bdClose(t, bd, mdir, step2.ID, "--reason", "retry")
+
+		if got := bdShow(t, bd, mdir, root.ID); got.Status != types.StatusClosed {
+			t.Errorf("expected stranded-open molecule root %s re-closed by an already-closed re-close of the final step, got %s",
+				root.ID, got.Status)
+		}
+	})
+
+}
+
+// TestEmbeddedCloseJSONReportsMoleculeAutoClose pins what `bd close --json`
+// says about the molecule a close completed, on the direct route: the root it
+// closed, once per batch, or why the root stayed open.
+// TestProxiedServerClose2B's json_reports_* subtests are its proxied twins.
+func TestEmbeddedCloseJSONReportsMoleculeAutoClose(t *testing.T) {
+	if os.Getenv("BEADS_TEST_EMBEDDED_DOLT") != "1" {
+		t.Skip("set BEADS_TEST_EMBEDDED_DOLT=1 to run embedded dolt integration tests")
+	}
+	t.Parallel()
+
+	bd := buildEmbeddedBD(t)
+
+	t.Run("auto_closed_root_reported_once_per_batch", func(t *testing.T) {
+		dir, _, _ := bdInit(t, bd, "--prefix", "jm")
+		root := bdCreate(t, bd, dir, "JSON molecule root", "--type", "epic", "--labels", "template")
+		step1 := bdCreate(t, bd, dir, "JSON molecule step one", "--type", "task", "--parent", root.ID)
+		step2 := bdCreate(t, bd, dir, "JSON molecule step two", "--type", "task", "--parent", root.ID)
+		step3 := bdCreate(t, bd, dir, "JSON molecule step three", "--type", "task", "--parent", root.ID)
+		bdClose(t, bd, dir, step1.ID)
+
+		out := bdClose(t, bd, dir, "--json", step2.ID, step3.ID)
+		requireCloseJSONReportsAutoClosedMolecule(t, out, []string{step2.ID, step3.ID}, root.ID)
+	})
+
+	t.Run("refused_root_reported", func(t *testing.T) {
+		dir, _, _ := bdInit(t, bd, "--prefix", "jr")
+		root := bdCreate(t, bd, dir, "JSON held molecule root", "--type", "epic", "--labels", "template", "--assignee", "someone-else")
+		step := bdCreate(t, bd, dir, "JSON held molecule step", "--type", "task", "--parent", root.ID)
+
+		out := bdClose(t, bd, dir, "--actor", "json-closer", "--json", step.ID)
+		requireCloseJSONReportsMoleculeRefusal(t, out, step.ID, root.ID,
+			&issueops.CloseNotAssigneeError{IssueID: root.ID, Assignee: "someone-else", Actor: "json-closer"})
+		if got := bdShow(t, bd, dir, root.ID); got.Status != types.StatusOpen {
+			t.Errorf("a root assigned to another actor must stay open, got %s", got.Status)
+		}
+	})
+}
+
+// TestEmbeddedCloseConcurrent exercises create, close, and list operations
+// concurrently to verify EmbeddedDoltStore handles concurrent CLI invocations
+// without panics, data corruption, or deadlocks.
+//
+// issuesPerWorker was 5 (F1 review S1): under real CI-like load this
+// measured ~324s for the same reason documented on
+// TestEmbeddedUpdateConcurrent above (genuine serialized-write contention,
+// not a queueing-delay artifact). issuesPerWorker=2 preserves the same
+// invariants (duplicate-ID detection across all numWorkers concurrent
+// processes, one non-decreasing-list-count check per worker) at 40% of the
+// serialized work.
+func TestEmbeddedCloseConcurrent(t *testing.T) {
+	if os.Getenv("BEADS_TEST_EMBEDDED_DOLT") != "1" {
+		t.Skip("set BEADS_TEST_EMBEDDED_DOLT=1 to run embedded dolt integration tests")
+	}
+	t.Parallel()
+
+	bd := buildEmbeddedBD(t)
+	dir, beadsDir, _ := bdInit(t, bd, "--prefix", "cx")
+
+	const (
+		numWorkers      = 10
+		issuesPerWorker = 2
+	)
+
+	type workerResult struct {
+		worker     int
+		ids        []string
+		listCounts []int
+		err        error
+	}
+
+	results := make([]workerResult, numWorkers)
+	var wg sync.WaitGroup
+	wg.Add(numWorkers)
+
+	for w := 0; w < numWorkers; w++ {
+		go func(worker int) {
+			defer wg.Done()
+			r := workerResult{worker: worker}
+
+			for i := 0; i < issuesPerWorker; i++ {
+				// Create an issue.
+				title := fmt.Sprintf("w%d-close-%d", worker, i)
+				out, err := bdRunWithFlockRetry(t, bd, dir, "create", "--silent", title)
+				if err != nil {
+					r.err = fmt.Errorf("create %d: %v\n%s", i, err, out)
+					results[worker] = r
+					return
+				}
+				id := strings.TrimSpace(string(out))
+				if id == "" {
+					r.err = fmt.Errorf("create %d: empty ID", i)
+					results[worker] = r
+					return
+				}
+				r.ids = append(r.ids, id)
+
+				// Close with a reason.
+				reason := fmt.Sprintf("done-by-worker-%d", worker)
+				cCmd := exec.Command(bd, "close", id, "--reason", reason)
+				cCmd.Dir = dir
+				cCmd.Env = bdEnv(dir)
+				cOut, err := cCmd.CombinedOutput()
+				if err != nil {
+					r.err = fmt.Errorf("close %d: %v\n%s", i, err, cOut)
+					results[worker] = r
+					return
+				}
+
+				// List to verify consistency (interleaved with writes).
+				listCmd := exec.Command(bd, "list", "--json", "--limit", "0", "--all")
+				listCmd.Dir = dir
+				listCmd.Env = bdEnv(dir)
+				listStdout, listStderr, err := runCommandBuffers(t, listCmd)
+				if err != nil {
+					r.err = fmt.Errorf("list after close %d: %v\nstdout:\n%s\nstderr:\n%s", i, err, listStdout.String(), listStderr.String())
+					results[worker] = r
+					return
+				}
+				s := listStdout.String()
+				start := strings.Index(s, "[")
+				if start < 0 {
+					r.listCounts = append(r.listCounts, 0)
+					continue
+				}
+				var issues []json.RawMessage
+				if jsonErr := json.Unmarshal([]byte(s[start:]), &issues); jsonErr != nil {
+					r.err = fmt.Errorf("list parse %d: %v\nstdout:\n%s\nstderr:\n%s", i, jsonErr, s, listStderr.String())
+					results[worker] = r
+					return
+				}
+				r.listCounts = append(r.listCounts, len(issues))
+			}
+
+			results[worker] = r
+		}(w)
+	}
+	wg.Wait()
+
+	// Check for errors and collect IDs.
+	allIDs := make(map[string]bool)
+	var failures int
+	for _, r := range results {
+		if r.err != nil {
+			if !strings.Contains(r.err.Error(), "one writer at a time") {
+				t.Errorf("worker %d failed: %v", r.worker, r.err)
+			}
+			failures++
+			continue
+		}
+		for _, id := range r.ids {
+			if allIDs[id] {
+				t.Errorf("duplicate ID %q from worker %d", id, r.worker)
+			}
+			allIDs[id] = true
+		}
+	}
+
+	successes := numWorkers - failures
+	if successes == 0 {
+		t.Fatalf("all %d workers failed; expected at least 1 success", numWorkers)
+	}
+	t.Logf("%d/%d workers succeeded (flock contention expected)", successes, numWorkers)
+
+	if len(allIDs) == 0 {
+		t.Fatal("no IDs collected from successful workers")
+	}
+
+	// Verify issues from successful workers exist and are closed.
+	store := openStore(t, beadsDir, "cx")
+	for id := range allIDs {
+		issue, err := store.GetIssue(t.Context(), id)
+		if err != nil {
+			t.Errorf("GetIssue(%s): %v", id, err)
+			continue
+		}
+		if issue.Status != types.StatusClosed {
+			t.Errorf("issue %s: expected status closed, got %s", id, issue.Status)
+		}
+		if issue.ClosedAt == nil {
+			t.Errorf("issue %s: expected closed_at to be set", id)
+		}
+	}
+
+	// Verify list counts were monotonically non-decreasing per worker.
+	for _, r := range results {
+		if r.err != nil {
+			continue
+		}
+		for i := 1; i < len(r.listCounts); i++ {
+			if r.listCounts[i] < r.listCounts[i-1] {
+				t.Errorf("worker %d: list count decreased from %d to %d at step %d",
+					r.worker, r.listCounts[i-1], r.listCounts[i], i)
+			}
+		}
+	}
+
+	stats, err := store.GetStatistics(t.Context())
+	if err != nil {
+		t.Fatalf("GetStatistics: %v", err)
+	}
+
+	t.Logf("created and closed %d issues across %d concurrent workers, %d in DB",
+		len(allIDs), numWorkers, stats.TotalIssues)
+}

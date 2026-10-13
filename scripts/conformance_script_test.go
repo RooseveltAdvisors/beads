@@ -1,0 +1,224 @@
+package scripts_test
+
+import (
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"runtime"
+	"strconv"
+	"strings"
+	"testing"
+)
+
+func TestConformanceScriptUsesExplicitTimeoutBudgets(t *testing.T) {
+	run := runConformanceScript(t, 0, 0)
+	if run.err != nil {
+		t.Fatalf("conformance.sh failed: %v\n%s", run.err, run.output)
+	}
+
+	want := [][]string{
+		{"test", "-tags", "gms_pure_go", "-v", "-timeout", "30m", "./internal/storage/embeddeddolt/", "-run", "TestConformance"},
+		{"test", "-tags", "gms_pure_go e2e", "-timeout", "10m", "./test/conformance/"},
+		{"test", "-tags", "gms_pure_go", "-timeout=40m", "./internal/httpclient/"},
+	}
+	if !reflect.DeepEqual(run.calls, want) {
+		t.Fatalf("go calls = %#v, want %#v", run.calls, want)
+	}
+}
+
+func TestConformanceScriptPropagatesGoTestFailures(t *testing.T) {
+	tests := []struct {
+		name      string
+		failCall  int
+		exitCode  int
+		wantCalls int
+	}{
+		{name: "tier 1", failCall: 1, exitCode: 41, wantCalls: 1},
+		{name: "tier 2", failCall: 2, exitCode: 42, wantCalls: 2},
+		{name: "tier 3", failCall: 3, exitCode: 43, wantCalls: 3},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			run := runConformanceScript(t, test.failCall, test.exitCode)
+			if got := conformanceExitCode(run.err); got != test.exitCode {
+				t.Fatalf("exit = %d, want %d; error=%v\n%s", got, test.exitCode, run.err, run.output)
+			}
+			if len(run.calls) != test.wantCalls {
+				t.Fatalf("go call count = %d, want %d; calls=%#v", len(run.calls), test.wantCalls, run.calls)
+			}
+		})
+	}
+}
+
+func conformanceExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return -1
+}
+
+// The conformance tiers CI runs are Bazel targets, not this script: Tier 1
+// is the embedded lane's embeddeddolt_conformance_{core,audit}_test
+// (TestBazelEmbeddedJobRunsEmbeddedTier pins their flags), Tier 2 the
+// integration lane's //test/conformance:conformance_test, pinned here to the
+// script's tier: both harness files, built under the e2e or integration tag,
+// against the injected non-race bd. Tier 3 is the embedded lane's
+// //internal/httpclient:httpclient_served_test
+// (TestConformanceServedTierRunsUnderBazel). conformance.yml, which ran the
+// script on a GitHub runner, is gone.
+func TestConformanceE2ETierRunsUnderBazel(t *testing.T) {
+	root := sourceRepoRoot(t)
+	rule := bazelRuleBlock(readPolicyFile(t, root, "test/conformance/BUILD.bazel"), "conformance_test")
+	if rule == "" {
+		t.Fatal("test/conformance/BUILD.bazel has no conformance_test")
+	}
+	for _, want := range []string{
+		`"e2e_test.go",`,
+		`"roundtrip_test.go",`,
+		`data = ["//cmd/bd:bd_for_tests"],`,
+		`env = {"BEADS_TEST_BD_BINARY": "$(rlocationpath //cmd/bd:bd_for_tests)"},`,
+		`tags = ["integration-only"],`,
+	} {
+		if !strings.Contains(rule, want) {
+			t.Errorf("//test/conformance:conformance_test lacks %q:\n%s", want, rule)
+		}
+	}
+	for _, file := range []string{"e2e_test.go", "roundtrip_test.go"} {
+		src := readPolicyFile(t, root, "test/conformance/"+file)
+		if !strings.HasPrefix(src, "//go:build e2e || integration\n") {
+			t.Errorf("test/conformance/%s must build under e2e (scripts/conformance.sh) and integration (the Bazel lane)", file)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, ".github", "workflows", "conformance.yml")); err == nil {
+		t.Error(".github/workflows/conformance.yml is back; its tiers run under Bazel")
+	}
+}
+
+// Tier 3's Bazel target runs the script's Tier 3 package, the httpclient
+// go_test binary, with every BEADS_* switch the script sets for it: the one
+// that stands the served corpus up and the one that makes it required. A
+// switch the script gains that the target lacks fails here;
+// TestBazelRetiredLanesCannotBeNarrowed pins the target's args and env
+// exactly.
+func TestConformanceServedTierRunsUnderBazel(t *testing.T) {
+	root := sourceRepoRoot(t)
+	tier := regexp.MustCompile(`(?m)^((?:[A-Z_]+=\S+ )+)\\\n\s+go test -tags "\$TAGS" -timeout=40m \./internal/httpclient/$`).
+		FindStringSubmatch(readPolicyFile(t, root, "scripts/conformance.sh"))
+	if tier == nil {
+		t.Fatal("scripts/conformance.sh has no Tier 3 `... go test -tags \"$TAGS\" -timeout=40m ./internal/httpclient/` invocation")
+	}
+	switches := regexp.MustCompile(`\b(BEADS_[A-Z_]+)=(\S+)`).FindAllStringSubmatch(tier[1], -1)
+	if len(switches) < 2 {
+		t.Fatalf("parsed only %v from Tier 3's env %q", switches, tier[1])
+	}
+	rule := bazelRuleBlock(readPolicyFile(t, root, "internal/httpclient/BUILD.bazel"), "httpclient_served_test")
+	if rule == "" {
+		t.Fatal("internal/httpclient/BUILD.bazel has no httpclient_served_test")
+	}
+	want := []string{`"$(rootpath :httpclient_test)",`, `":httpclient_test",`, `tags = ["embedded"],`}
+	for _, sw := range switches {
+		want = append(want, `"`+sw[1]+`": "`+sw[2]+`",`)
+	}
+	for _, w := range want {
+		if !strings.Contains(rule, w) {
+			t.Errorf("//internal/httpclient:httpclient_served_test lacks %q:\n%s", w, rule)
+		}
+	}
+}
+
+type conformanceRun struct {
+	output string
+	calls  [][]string
+	err    error
+}
+
+func runConformanceScript(t *testing.T, failCall, failExit int) conformanceRun {
+	t.Helper()
+
+	bash := requireHostTool(t, "bash")
+
+	bin := t.TempDir()
+	stateDir := t.TempDir()
+	callLog := filepath.Join(stateDir, "go-calls")
+	if err := os.WriteFile(callLog, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, filepath.Join(bin, "go"), `#!/bin/sh
+set -eu
+count=0
+if [ -s "$GO_CALL_COUNT" ]; then
+  count="$(cat "$GO_CALL_COUNT")"
+fi
+count=$((count + 1))
+printf '%s\n' "$count" >"$GO_CALL_COUNT"
+printf '%s\0' "$#" >>"$GO_CALL_LOG"
+printf '%s\0' "$@" >>"$GO_CALL_LOG"
+if [ "$count" = "$GO_FAIL_CALL" ]; then
+  exit "$GO_FAIL_EXIT"
+fi
+if [ "$count" = 1 ]; then
+  printf '%s\n' '--- PASS: TestConformance (0.01s)'
+fi
+`)
+
+	root := sourceRepoRoot(t)
+	pathEnv := shellPathEnv()
+	binPath := shellPathUnderEnv(t, bash, bin, pathEnv)
+	statePath := shellPathUnderEnv(t, bash, stateDir, pathEnv)
+	commandPath := binPath + ":" + os.Getenv("PATH") + ":/usr/bin:/bin"
+	if runtime.GOOS == "windows" {
+		commandPath = binPath + ":/usr/bin:/bin"
+	}
+	env := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"BEADS_TEST_COMMAND_PATH=" + commandPath,
+		"HOME=" + statePath,
+		"LC_ALL=C",
+		"LANG=C",
+		"BASH_ENV=",
+		"ENV=",
+		"GO_CALL_LOG=" + statePath + "/go-calls",
+		"GO_CALL_COUNT=" + statePath + "/go-call-count",
+		"GO_FAIL_CALL=" + strconv.Itoa(failCall),
+		"GO_FAIL_EXIT=" + strconv.Itoa(failExit),
+	}
+	requireShellCommandPath(t, bash, root, env, "go", binPath+"/go")
+
+	cmd := bashScriptCommand(bash, "scripts/conformance.sh")
+	cmd.Dir = root
+	cmd.Env = env
+	output, runErr := cmd.CombinedOutput()
+	log, readErr := os.ReadFile(callLog)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	return conformanceRun{output: string(output), calls: parseArgvCalls(t, log), err: runErr}
+}
+
+func parseArgvCalls(t *testing.T, log []byte) [][]string {
+	t.Helper()
+	tokens := strings.Split(string(log), "\x00")
+	if len(tokens) == 0 || tokens[len(tokens)-1] != "" {
+		t.Fatalf("invalid NUL-delimited argv log: %q", log)
+	}
+	tokens = tokens[:len(tokens)-1]
+
+	var calls [][]string
+	for len(tokens) > 0 {
+		count, err := strconv.Atoi(tokens[0])
+		if err != nil || count < 0 || len(tokens) < count+1 {
+			t.Fatalf("invalid NUL-delimited argv log: %q", log)
+		}
+		calls = append(calls, append([]string(nil), tokens[1:count+1]...))
+		tokens = tokens[count+1:]
+	}
+	return calls
+}

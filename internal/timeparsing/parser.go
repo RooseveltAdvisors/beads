@@ -1,0 +1,207 @@
+// Package timeparsing provides layered time parsing for relative date/time expressions.
+//
+// The parsing follows a layered architecture (ADR-001):
+//  1. Compact duration (+6h, -1d, +2w)
+//  2. Natural language (tomorrow, next monday)
+//  3. Absolute timestamp (RFC3339, date-only)
+package timeparsing
+
+import (
+	"fmt"
+	"regexp"
+	"strconv"
+	"time"
+
+	"github.com/olebedev/when"
+	"github.com/olebedev/when/rules/common"
+	"github.com/olebedev/when/rules/en"
+)
+
+// compactDurationRe matches compact duration patterns: [+-]?(\d+)(min|[hdwmy])
+// Examples: +6h, -1d, +2w, 3m, 1y, +30min
+var compactDurationRe = regexp.MustCompile(`^([+-]?)(\d+)(min|[hdwmy])$`)
+
+// ParseCompactDuration parses compact duration syntax and returns the resulting time.
+//
+// Format: [+-]?(\d+)(min|[hdwmy])
+//
+// Units:
+//   - min = minutes
+//   - h = hours
+//   - d = days
+//   - w = weeks
+//   - m = months (NOT minutes; use "min" for minutes)
+//   - y = years
+//
+// Examples:
+//   - "+30min" -> now + 30 minutes
+//   - "+6h" -> now + 6 hours
+//   - "-1d" -> now - 1 day
+//   - "+2w" -> now + 2 weeks
+//   - "3m"  -> now + 3 months (no sign = positive)
+//   - "1y"  -> now + 1 year
+//
+// Returns error if input doesn't match the compact duration pattern.
+func ParseCompactDuration(s string, now time.Time) (time.Time, error) {
+	matches := compactDurationRe.FindStringSubmatch(s)
+	if matches == nil {
+		return time.Time{}, fmt.Errorf("not a compact duration: %q", s)
+	}
+
+	sign := matches[1]
+	amountStr := matches[2]
+	unit := matches[3]
+
+	amount, err := strconv.Atoi(amountStr)
+	if err != nil {
+		// Should not happen given regex ensures digits, but handle gracefully
+		return time.Time{}, fmt.Errorf("invalid duration amount: %q", amountStr)
+	}
+
+	// Apply sign (default positive)
+	if sign == "-" {
+		amount = -amount
+	}
+
+	return applyDuration(now, amount, unit), nil
+}
+
+// applyDuration applies the given amount and unit to the base time. Month and
+// year steps clamp to the last day of a shorter target month (Jan 31 + 1m is
+// Feb 28, not Mar 3) instead of overflowing the way time.AddDate does.
+func applyDuration(base time.Time, amount int, unit string) time.Time {
+	switch unit {
+	case "min":
+		return base.Add(time.Duration(amount) * time.Minute)
+	case "h":
+		return base.Add(time.Duration(amount) * time.Hour)
+	case "d":
+		return base.AddDate(0, 0, amount)
+	case "w":
+		return base.AddDate(0, 0, amount*7)
+	case "m":
+		return addMonthsClamped(base, amount)
+	case "y":
+		return addMonthsClamped(base, 12*amount)
+	default:
+		// Should not happen given regex, but return base unchanged
+		return base
+	}
+}
+
+// addMonthsClamped moves base forward (or back) by whole months, keeping its
+// day-of-month where the target month has it and clamping to the target
+// month's last day where it does not.
+func addMonthsClamped(base time.Time, months int) time.Time {
+	target := time.Date(base.Year(), base.Month()+time.Month(months), 1,
+		base.Hour(), base.Minute(), base.Second(), base.Nanosecond(), base.Location())
+	day := base.Day()
+	if last := daysInMonth(target); day > last {
+		day = last
+	}
+	return target.AddDate(0, 0, day-1)
+}
+
+// daysInMonth reports the length of t's month.
+func daysInMonth(t time.Time) int {
+	return time.Date(t.Year(), t.Month()+1, 0, 0, 0, 0, 0, t.Location()).Day()
+}
+
+// isCompactDuration returns true if the string matches compact duration syntax.
+func isCompactDuration(s string) bool {
+	return compactDurationRe.MatchString(s)
+}
+
+// nlpParser is the singleton natural language parser (olebedev/when).
+// Initialized lazily on first use.
+var nlpParser *when.Parser
+
+// getNLPParser returns the singleton NLP parser, initializing it if needed.
+func getNLPParser() *when.Parser {
+	if nlpParser == nil {
+		nlpParser = when.New(nil)
+		nlpParser.Add(en.All...)
+		nlpParser.Add(common.All...)
+	}
+	return nlpParser
+}
+
+// parseNaturalLanguage parses natural language time expressions using olebedev/when.
+//
+// Examples:
+//   - "tomorrow" -> tomorrow at current time
+//   - "next monday" -> next Monday at current time
+//   - "next monday at 9am" -> next Monday at 9:00
+//   - "in 3 days" -> now + 3 days
+//   - "3 days ago" -> now - 3 days
+//
+// Known Issues (olebedev/when):
+//   - Month name "September" may not parse correctly in some contexts.
+//     Workaround: Use date format "2025-09-15" instead of "September 15" or "Sep 15".
+//     This is a known issue in the olebedev/when library.
+//
+// Returns error if input cannot be parsed as natural language.
+func parseNaturalLanguage(s string, now time.Time) (time.Time, error) {
+	parser := getNLPParser()
+	result, err := parser.Parse(s, now)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("NLP parse error: %w", err)
+	}
+	if result == nil {
+		return time.Time{}, fmt.Errorf("not a natural language time expression: %q", s)
+	}
+	return result.Time, nil
+}
+
+// dateOnlyRe matches date-only format YYYY-MM-DD to avoid NLP misinterpretation.
+var dateOnlyRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
+// ParseRelativeTime parses a time expression using the layered architecture (ADR-001).
+//
+// Parsing order:
+//  1. Compact duration (+6h, -1d, +2w)
+//  2. Absolute formats (date-only, RFC3339) - checked before NLP to avoid misinterpretation
+//  3. Natural language (tomorrow, next monday)
+//
+// Timezone-less inputs are interpreted in now's location. Returns the parsed
+// time in UTC or an error if no layer could parse the input.
+func ParseRelativeTime(s string, now time.Time) (time.Time, error) {
+	location := now.Location()
+
+	// Layer 1: Compact duration
+	if t, err := ParseCompactDuration(s, now); err == nil {
+		return t.UTC(), nil
+	}
+
+	// Layer 2: Absolute formats (must be checked before NLP to avoid misinterpretation)
+	// NLP parser can incorrectly parse "2025-02-01" as a time, so we check date formats first.
+
+	// Try date-only format (YYYY-MM-DD)
+	if dateOnlyRe.MatchString(s) {
+		if t, err := time.ParseInLocation("2006-01-02", s, location); err == nil {
+			return t.UTC(), nil
+		}
+	}
+
+	// Try RFC3339 format (2025-01-15T10:00:00Z)
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t.UTC(), nil
+	}
+
+	// Try ISO 8601 datetime without timezone (2025-01-15T10:00:00)
+	if t, err := time.ParseInLocation("2006-01-02T15:04:05", s, location); err == nil {
+		return t.UTC(), nil
+	}
+
+	// Try datetime with space (2025-01-15 10:00:00)
+	if t, err := time.ParseInLocation("2006-01-02 15:04:05", s, location); err == nil {
+		return t.UTC(), nil
+	}
+
+	// Layer 3: Natural language (after absolute formats to avoid misinterpretation)
+	if t, err := parseNaturalLanguage(s, now); err == nil {
+		return t.UTC(), nil
+	}
+
+	return time.Time{}, fmt.Errorf("cannot parse time expression: %q (examples: +30min, +6h, tomorrow, 2025-01-15)", s)
+}
