@@ -122,9 +122,12 @@ func TestMergeQueueRequiredGatesRunOnMergeGroup(t *testing.T) {
 		if gate.Name != gateName || gate.If != "${{ always() }}" {
 			t.Errorf("%s ci-gate: name %q, if %q; want %q (the ruleset's exact context), if ${{ always() }}", name, gate.Name, gate.If, gateName)
 		}
-		// The gate runs on Blacksmith for a merge group (same-repo trust).
-		if got := mustEvalGHRunsOn(t, gate.RunsOn, mergeGroupCtx(1, nil)); !strings.HasPrefix(got, "blacksmith-") {
-			t.Errorf("%s ci-gate runs-on for merge_group = %q, want a Blacksmith runner", name, got)
+		// The gate runs on a named-capacity runner for a merge group
+		// (same-repo trust). GitHub-hosted ubuntu-latest also qualifies: the
+		// labels moved there on 2026-10-13 while the blacksmith pool queued
+		// jobs for hours.
+		if got := mustEvalGHRunsOn(t, gate.RunsOn, mergeGroupCtx(1, nil)); !strings.HasPrefix(got, "blacksmith-") && got != "ubuntu-latest" {
+			t.Errorf("%s ci-gate runs-on for merge_group = %q, want a Blacksmith runner or ubuntu-latest", name, got)
 		}
 		event := regexp.MustCompile(`github\.event_name|github\.event\.|github\.base_ref|github\.head_ref`)
 		for jobName, job := range w.Jobs {
@@ -283,8 +286,8 @@ func TestMergeQueueBazelRunsRemotely(t *testing.T) {
 		if out["mode"] != c.mode || log != "" {
 			t.Errorf("rbe on merge_group (%s): mode %q (mint asked: %q), want %s without asking rbe-fork", c.name, out["mode"], log, c.mode)
 		}
-		if got := mustEvalGHRunsOn(t, rbe.RunsOn, ctx); !strings.HasPrefix(got, "blacksmith-") {
-			t.Errorf("rbe runs-on for merge_group = %q, want Blacksmith", got)
+		if got := mustEvalGHRunsOn(t, rbe.RunsOn, ctx); !strings.HasPrefix(got, "blacksmith-") && got != "ubuntu-latest" {
+			t.Errorf("rbe runs-on for merge_group = %q, want a Blacksmith runner or ubuntu-latest", got)
 		}
 	}
 }

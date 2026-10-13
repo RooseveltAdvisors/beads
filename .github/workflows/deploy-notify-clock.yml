@@ -44,7 +44,7 @@ jobs:
     # is how the deploy lane failed twice on 10-04/10-05. The clock this label
     # once named is gone (deleted 2026-10-12); the label still pins installs
     # to this host.
-    runs-on: [self-hosted, gpu, bd-clock]
+    runs-on: self-hosted, gpu, bd-clock
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
@@ -53,7 +53,7 @@ jobs:
 
   deploy:
     name: Rebuild + install bd binary
-    runs-on: [self-hosted, gpu, bd-clock]
+    runs-on: self-hosted, gpu, bd-clock
     needs: guard
     timeout-minutes: 30
     steps:
@@ -102,7 +102,7 @@ jobs:
   # code that is already running in production.
   release-cut:
     name: Cut release (after merged deploy)
-    runs-on: [self-hosted, gpu, bd-clock]
+    runs-on: self-hosted, gpu, bd-clock
     needs: deploy
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:

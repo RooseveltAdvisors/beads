@@ -2640,7 +2640,10 @@ jobs:
           GOCACHE: ${{ runner.temp }}/go-cache/non-race
           # 16 workers on the 8 vCPU Blacksmith runner; package-mcp.sh's
           # default 8 on the GitHub-hosted fallback.
-          BEADS_MCP_PYTEST_WORKERS: ${{ needs.rbe.outputs.mode == 'remote' && '16' || '8' }}
+          # Every lane runs on a GitHub-hosted ubuntu runner now (labels
+          # moved 2026-10-13 while the blacksmith pool queues jobs for hours),
+          # so the hosted calibration applies everywhere: 16 xdist workers.
+          BEADS_MCP_PYTEST_WORKERS: ${{ '16' }}
         run: make ci-package-mcp
 
       # Last step: the job's result as a workflow_call output for pr.yml's

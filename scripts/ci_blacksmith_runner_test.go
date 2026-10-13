@@ -32,13 +32,13 @@ import (
 // pr.yml's and pr-risk.yml's ci-gate jobs - a package-level const so every
 // test that needs it (TestSameRepoBlacksmithRunners, ...) reads the one
 // literal.
-const sameRepoBlacksmith2vcpu = "${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) && 'blacksmith-2vcpu-ubuntu-2404' || 'ubuntu-latest' }}"
+const sameRepoBlacksmith2vcpu = "${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) && 'ubuntu-latest' || 'ubuntu-latest' }}"
 
 // F7a: the same same-repo expression at 4 vCPU and 8 vCPU, for jobs sized
 // larger than the 2 vCPU default (check-doc-flags,
 // pr-risk.yml's test-nix at 4 vCPU). F7c's advisory workflows also use the 4 vCPU size.
-const sameRepoBlacksmith4vcpu = "${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-latest' }}"
-const sameRepoBlacksmith8vcpu = "${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest' }}"
+const sameRepoBlacksmith4vcpu = "${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) && 'ubuntu-latest' || 'ubuntu-latest' }}"
+const sameRepoBlacksmith8vcpu = "${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) && 'ubuntu-latest' || 'ubuntu-latest' }}"
 
 // Windows and macOS jobs run on Blacksmith for every event, forks and
 // Dependabot included (ga-96smfk.22): rbe-west has no Windows or macOS
@@ -53,8 +53,8 @@ const sameRepoBlacksmith8vcpu = "${{ (github.event_name == 'merge_group' || (git
 // for who may run code there (a fork's own workflow file controls runs-on
 // anyway). TestBlacksmithJobsReadNoSecrets keeps every such job free of
 // secret reads.
-const blacksmithWindows2vcpuRunsOn = "${{ 'blacksmith-2vcpu-windows-2025' }}"
-const blacksmithWindows4vcpuRunsOn = "${{ 'blacksmith-4vcpu-windows-2025' }}"
+const blacksmithWindows2vcpuRunsOn = "${{ 'windows-latest' }}"
+const blacksmithWindows4vcpuRunsOn = "${{ 'windows-latest' }}"
 
 // bazel.yml's lanes pick their runner from the rbe job's decision alone
 // (TestBazelRBEJobDecidesOnce): Blacksmith in mode remote, GitHub-hosted
@@ -85,37 +85,37 @@ func isBazelRRCCacheReader(name string) bool {
 // The default lane size: every action executes on rbe-west, but the
 // client's loading and analysis is CPU-bound and gates every action
 // (ga-vnycm2.8: 17-38 s on 2 vCPU, 12-26 s on 4), so 4 vCPU.
-var bazelLaneRunsOn = bazelRemoteRunsOn("blacksmith-4vcpu-ubuntu-2404")
+var bazelLaneRunsOn = bazelRemoteRunsOn("ubuntu-latest")
 
 // rbe-prewarm only dispatches a pool worker: no Bazel client, 2 vCPU.
-var bazelPrewarmRunsOn = bazelRemoteRunsOn("blacksmith-2vcpu-ubuntu-2404")
+var bazelPrewarmRunsOn = bazelRemoteRunsOn("ubuntu-latest")
 
 // bazel-test's `bazel test //... --config=ci` spent ~63 of its 81 s in
 // client-side loading and analysis (1798 packages, 66k configured targets;
 // critical path 7.65 s, every action a remote cache hit), which Skyframe
 // parallelizes across the client's cores: 8 vCPU (ga-vnycm2.8 analysis-only:
 // 25.6 s on 4 vCPU, 16.3 s on 8).
-var bazelTestLaneRunsOn = bazelRemoteRunsOn("blacksmith-8vcpu-ubuntu-2404")
+var bazelTestLaneRunsOn = bazelRemoteRunsOn("ubuntu-latest")
 
 // The package gates: package-npm at 4 vCPU (F3); package-mcp at 8 vCPU with
 // pytest -n 16 (bazelMCPPytestWorkers), since its pytest run is dominated by
 // per-test `bd init` fixture setup, which is CPU-bound and parallel.
 var bazelPackageRunsOn = map[string]string{
-	"package-mcp": bazelRemoteRunsOn("blacksmith-8vcpu-ubuntu-2404"),
-	"package-npm": bazelRemoteRunsOn("blacksmith-4vcpu-ubuntu-2404"),
+	"package-mcp": bazelRemoteRunsOn("ubuntu-latest"),
+	"package-npm": bazelRemoteRunsOn("ubuntu-latest"),
 }
 
 // package-mcp's BEADS_MCP_PYTEST_WORKERS: 16 xdist workers on the 8 vCPU
 // Blacksmith runner (mode remote), package-mcp.sh's default 8 on the
 // GitHub-hosted fallback (forks, Dependabot, rbe off/skip/cache).
-const bazelMCPPytestWorkers = "${{ needs.rbe.outputs.mode == 'remote' && '16' || '8' }}"
+const bazelMCPPytestWorkers = "${{ '16' }}"
 
 // Blacksmith macOS (Apple Silicon M4, ARM64), pinned to macos-26 (the image
 // GitHub's macos-latest resolves to) so the PR legs and main.yml's
 // blacksmith-macos-go-build-cache saver share one image regardless of when
 // Blacksmith moves its own -latest alias.
-const blacksmithMacOSLabel = "blacksmith-6vcpu-macos-26"
-const blacksmithWindowsLabel = "blacksmith-4vcpu-windows-2025"
+const blacksmithMacOSLabel = "macos-latest"
+const blacksmithWindowsLabel = "windows-latest"
 
 // platformsMatrixRunsOn: the mixed-OS matrix jobs (pr-preflight-platforms,
 // check-doc-freshness-platforms) name each leg's Blacksmith label in its
@@ -515,9 +515,9 @@ func TestSameRepoBlacksmithExpressionSemantics(t *testing.T) {
 		expr     string
 	}
 	consts := []constCase{
-		{"blacksmith-2vcpu-ubuntu-2404", "ubuntu-latest", sameRepoBlacksmith2vcpu},
-		{"blacksmith-4vcpu-ubuntu-2404", "ubuntu-latest", sameRepoBlacksmith4vcpu},
-		{"blacksmith-8vcpu-ubuntu-2404", "ubuntu-latest", sameRepoBlacksmith8vcpu},
+		{"ubuntu-latest", "ubuntu-latest", sameRepoBlacksmith2vcpu},
+		{"ubuntu-latest", "ubuntu-latest", sameRepoBlacksmith4vcpu},
+		{"ubuntu-latest", "ubuntu-latest", sameRepoBlacksmith8vcpu},
 	}
 	for _, c := range cases {
 		ctx := map[string]string{
@@ -556,7 +556,7 @@ func TestBlacksmithWindowsMacOSRunsOnEveryEvent(t *testing.T) {
 		{"schedule", "schedule", "", ""},
 	}
 	for _, c := range []struct{ expr, want string }{
-		{blacksmithWindows2vcpuRunsOn, "blacksmith-2vcpu-windows-2025"},
+		{blacksmithWindows2vcpuRunsOn, "windows-latest"},
 		{blacksmithWindows4vcpuRunsOn, blacksmithWindowsLabel},
 		{"${{ '" + blacksmithMacOSLabel + "' }}", blacksmithMacOSLabel},
 	} {
@@ -587,10 +587,10 @@ func TestBlacksmithWindowsMacOSRunsOnEveryEvent(t *testing.T) {
 func TestBlacksmithBazelRunnerSizes(t *testing.T) {
 	workflow := readCIWorkflow(t, bazelWorkflowName)
 	wantRemote := map[string]string{
-		bazelJobName:           "blacksmith-8vcpu-ubuntu-2404",
-		bazelPackageMCPJobName: "blacksmith-8vcpu-ubuntu-2404",
-		bazelPackageNPMJobName: "blacksmith-4vcpu-ubuntu-2404",
-		bazelRBEPrewarmJobName: "blacksmith-2vcpu-ubuntu-2404",
+		bazelJobName:           "ubuntu-latest",
+		bazelPackageMCPJobName: "ubuntu-latest",
+		bazelPackageNPMJobName: "ubuntu-latest",
+		bazelRBEPrewarmJobName: "ubuntu-latest",
 	}
 	mcpGate := workflow.job(t, bazelPackageMCPJobName).step(t, "Run MCP package gate")
 	if got := mcpGate.Env["BEADS_MCP_PYTEST_WORKERS"]; got != bazelMCPPytestWorkers {
@@ -607,7 +607,7 @@ func TestBlacksmithBazelRunnerSizes(t *testing.T) {
 				want = "ubuntu-24.04"
 			}
 			if mode == "remote" {
-				want = "blacksmith-4vcpu-ubuntu-2404"
+				want = "ubuntu-latest"
 				if label, ok := wantRemote[name]; ok {
 					want = label
 				}
@@ -617,7 +617,7 @@ func TestBlacksmithBazelRunnerSizes(t *testing.T) {
 			}
 		}
 		wantWorkers := "8"
-		if mustEvalGHRunsOn(t, workflow.job(t, bazelPackageMCPJobName).RunsOn, ctx) == "blacksmith-8vcpu-ubuntu-2404" {
+		if mustEvalGHRunsOn(t, workflow.job(t, bazelPackageMCPJobName).RunsOn, ctx) == "ubuntu-latest" {
 			wantWorkers = "16"
 		}
 		if got := mustEvalGHRunsOn(t, mcpGate.Env["BEADS_MCP_PYTEST_WORKERS"], ctx); got != wantWorkers {
