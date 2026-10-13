@@ -69,9 +69,9 @@ go_test(
         "worker_env_autosync_test.go",
     ],  # keep
     data = [
-        "//scripts/notify:test_beads_notify_e2e.sh",
         "//:repo_other_files",
         "//internal/testutil:testdoltcommon.go",
+        "//scripts/notify:test_beads_notify_e2e.sh",
         "@go_sdk//:bin/go",
         "@go_sdk//:files",
     ],

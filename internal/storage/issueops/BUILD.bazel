@@ -62,6 +62,7 @@ go_library(
         "helpers.go",
         "history.go",
         "history_presence.go",
+        "id_query.go",
         "identity.go",
         "journal.go",
         "journal_autoprune.go",
