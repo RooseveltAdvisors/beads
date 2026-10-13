@@ -1,0 +1,5 @@
+exports_files([
+    "bd-notify-lib.sh",
+    "fleet-monitor-beads-notify.sh",
+    "test_beads_notify_e2e.sh",
+])
