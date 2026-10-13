@@ -201,6 +201,13 @@ func TestFixMissingMetadataJSON_NotBeadsWorkspace(t *testing.T) {
 // setupGitRepoInDir initializes a git repo in the given directory with a remote.
 func setupGitRepoInDir(t *testing.T, dir string) {
 	t.Helper()
+	// An empty dir would run every command in the test process's working
+	// directory - the checkout the tests are being run FROM - and `git config`
+	// would then rewrite THAT repository's remote.origin.url and hooksPath
+	// with the fixtures below. Refuse before any command runs.
+	if strings.TrimSpace(dir) == "" {
+		t.Fatal("setupGitRepoInDir: empty dir would configure the repository the tests run in")
+	}
 	cmds := [][]string{
 		{"git", "init"},
 		{"git", "config", "user.email", "test@test.com"},
@@ -212,7 +219,10 @@ func setupGitRepoInDir(t *testing.T, dir string) {
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir = dir
 		if err := cmd.Run(); err != nil {
-			// git init must succeed; config failures are non-fatal
+			if args[1] == "init" {
+				t.Fatalf("setupGitRepoInDir: git init in %s: %v", dir, err)
+			}
+			// config failures are non-fatal
 			if args[1] == "init" {
 				t.Fatalf("git init failed: %v", err)
 			}

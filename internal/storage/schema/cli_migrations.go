@@ -133,9 +133,28 @@ func cliCompatibleMigrationSQL(name, sqlText string) string {
 		// House due-miss escalation (fleet already applied as v68).
 		return cliMigration0068AddDueMissed
 	case "0069_add_versioned_beads_schema.up.sql":
-		// Upstream versioned-beads Phase 1, renumbered 0067→0069 so it does
+		// Upstream versioned-beads Phase 1 (its own 0067, kept at 0067 here too) -
 		// not collide with house recurrence/due_missed already on fleet DBs.
 		return cliMigration0069AddVersionedBeadsSchema
+	case "0070_add_attribution_status.up.sql":
+		// Direct DDL for the same reason as 0067: the source migration's
+		// PREPARE guards (INFORMATION_SCHEMA probes) are what make the raw
+		// .up.sql idempotent when replayed onto an already-migrated store,
+		// and the 2.2.x CLI no-ops a prepared ADD COLUMN and MODIFY COLUMN
+		// alike. issue_versions is always present here -- 0067 runs earlier
+		// in the same fresh-bundle series -- never carries attribution_status
+		// yet, and still has durable_state as the JSON type 0067 gave it, so
+		// both of 0068's steps always fire on a fresh bundle.
+		return cliMigration0070AddAttributionStatus
+	case "0071_widen_issue_versions_datetime_precision.up.sql":
+		// Direct DDL for the same reason as 0068: the source migration's
+		// PREPARE guards (DATETIME_PRECISION probes) are what make the raw
+		// .up.sql idempotent when replayed onto an already-widened store,
+		// and the 2.2.x CLI no-ops a prepared MODIFY COLUMN. Nothing before
+		// 0069 in the fresh-bundle series widens change_at or removed_at --
+		// 0067 creates both as plain DATETIME and 0068 retypes only
+		// durable_state -- so both of 0069's MODIFYs always fire here too.
+		return cliMigration0071WidenIssueVersionsDatetimePrecision
 	default:
 		return sqlText
 	}
@@ -235,7 +254,7 @@ ALTER TABLE wisps ADD COLUMN due_missed INT NOT NULL DEFAULT 0;`
 const cliMigration0065WidenWispCommentsText = `ALTER TABLE wisp_comments MODIFY COLUMN text LONGTEXT NOT NULL;`
 const cliMigration0066AddEventsJournalActor = `ALTER TABLE bd_events_journal ADD COLUMN actor VARCHAR(255) NOT NULL DEFAULT '';`
 
-// cliMigration0069AddVersionedBeadsSchema is 0069 (upstream 0067) with its two guarded
+// cliMigration0069AddVersionedBeadsSchema is upstream's 0067 with its two guarded
 // PREPARE blocks replaced by the direct ALTERs they would run on a fresh
 // database. The CREATE TABLEs are the source file's own text: CREATE TABLE
 // IF NOT EXISTS executes on the CLI batch path unchanged.
@@ -262,6 +281,28 @@ CREATE TABLE IF NOT EXISTS store_epoch (
 );
 ALTER TABLE issues ADD COLUMN current_revision BIGINT NOT NULL DEFAULT 1;
 ALTER TABLE wisps ADD COLUMN current_revision BIGINT NOT NULL DEFAULT 1;`
+
+// cliMigration0070AddAttributionStatus is 0068 with its two guarded PREPARE
+// blocks replaced by the direct ALTERs they would run on a fresh database:
+// step 6's ADD COLUMN attribution_status, and step 7's MODIFY COLUMN
+// durable_state LONGBLOB (the byte-preserving type the review on
+// gastownhall/beads#6358 item 4 asked for -- see the migration's step 7
+// header). issue_versions is created earlier in the same series by 0067,
+// which still creates durable_state as JSON and whose override is left
+// untouched: 0068 is what retypes it. So the column always needs adding and
+// the retype always fires here; no wisps twin exists for this table.
+const cliMigration0070AddAttributionStatus = `ALTER TABLE issue_versions ADD COLUMN attribution_status VARCHAR(20) NOT NULL;
+ALTER TABLE issue_versions MODIFY COLUMN durable_state LONGBLOB;`
+
+// cliMigration0071WidenIssueVersionsDatetimePrecision is 0069 with its two
+// guarded PREPARE blocks replaced by the direct MODIFYs they would run on a
+// fresh database: change_at and removed_at from 0067's plain DATETIME to
+// DATETIME(6) (the microsecond widen be-hs42e.8 / gastownhall/beads#6132
+// asks for -- see the migration's header). Neither 0067's override nor
+// 0068's touches either column, so both retypes always fire here; no wisps
+// twin exists for this table.
+const cliMigration0071WidenIssueVersionsDatetimePrecision = `ALTER TABLE issue_versions MODIFY COLUMN change_at DATETIME(6) NOT NULL;
+ALTER TABLE issue_versions MODIFY COLUMN removed_at DATETIME(6);`
 
 const cliMigration0041SplitDependenciesTarget = `DELETE FROM dolt_nonlocal_tables;
 CALL DOLT_COMMIT('-Am', 'disable nonlocal tables for fk migrations');
