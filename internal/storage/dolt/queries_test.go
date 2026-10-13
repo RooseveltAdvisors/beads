@@ -1,7 +1,9 @@
 package dolt
 
 import (
+	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -1851,7 +1853,8 @@ func TestSearchIssues_FreeTextFieldCoverage(t *testing.T) {
 		// Unchanged behavior: a title-only term still returns exactly its
 		// title match and does not gain the other rows.
 		{name: "title only", query: "Quaquaversal", want: []string{"sfc-title"}},
-		// Unchanged behavior: ID-like queries still resolve by ID.
+		// Unchanged behavior: a query naming a prefix this store uses still
+		// resolves by ID.
 		{name: "id exact", query: "sfc-unrelated", want: []string{"sfc-unrelated"}},
 		{name: "no match", query: "nonexistent-term", want: nil},
 	}
@@ -1968,6 +1971,195 @@ func TestSearchIssues_IDQueryNotDilutedByCitations(t *testing.T) {
 	}
 }
 
+// TestSearchIssues_HyphenatedPrefixIsStillAnIDQuery pins the same contract for
+// a workspace whose issue prefix contains a hyphen — which is the common case,
+// since `bd init` defaults the prefix to the directory name. The prefix is
+// everything before the LAST hyphen, so the store probe sees "claude-config"
+// and the lookup takes the undiluted ID predicate; deriving it from the FIRST
+// hyphen instead yields "claude" with a hyphenated tail, which no store can
+// ever confirm, and the named bead is buried under its higher-priority citers.
+func TestSearchIssues_HyphenatedPrefixIsStillAnIDQuery(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx, cancel := testContext(t)
+	defer cancel()
+
+	const hubID = "claude-config-5q4x7"
+
+	hub := &types.Issue{
+		ID:          hubID,
+		Title:       "Coordination hub",
+		Description: "Tracks the rollout.",
+		Status:      types.StatusOpen,
+		Priority:    2,
+		IssueType:   types.TypeEpic,
+	}
+	if err := store.CreateIssue(ctx, hub, "tester"); err != nil {
+		t.Fatalf("failed to create hub: %v", err)
+	}
+
+	const citers = 5
+	for i := 0; i < citers; i++ {
+		citer := &types.Issue{
+			ID:          fmt.Sprintf("claude-config-cite%d", i),
+			Title:       fmt.Sprintf("Downstream work %d", i),
+			Description: "Blocked by " + hubID + " until the rollout lands.",
+			Status:      types.StatusOpen,
+			Priority:    0,
+			IssueType:   types.TypeTask,
+		}
+		if err := store.CreateIssue(ctx, citer, "tester"); err != nil {
+			t.Fatalf("failed to create citer %d: %v", i, err)
+		}
+	}
+
+	results, err := store.SearchIssues(ctx, hubID, types.IssueFilter{})
+	if err != nil {
+		t.Fatalf("SearchIssues(%q): %v", hubID, err)
+	}
+	if len(results) != 1 || results[0].ID != hubID {
+		got := make([]string, len(results))
+		for i, r := range results {
+			got[i] = r.ID
+		}
+		t.Fatalf("SearchIssues(%q) = %v, want [%s]", hubID, got, hubID)
+	}
+}
+
+// TestSearchIssues_UnknownHyphenatedPrefixSearchesDescriptions is the other
+// half: a token this store has no prefix for is prose, whatever its shape, and
+// prose reaches descriptions. "use-after" is not a prefix any bead here carries,
+// so the probe declines and "use-after-free" searches bodies.
+func TestSearchIssues_UnknownHyphenatedPrefixSearchesDescriptions(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx, cancel := testContext(t)
+	defer cancel()
+
+	descOnly := &types.Issue{
+		ID:          "uhp-desc1",
+		Title:       "Audit the allocator",
+		Description: "Guard against a use-after-free in the pool reclaim path.",
+		Status:      types.StatusOpen,
+		Priority:    2,
+		IssueType:   types.TypeTask,
+	}
+	if err := store.CreateIssue(ctx, descOnly, "tester"); err != nil {
+		t.Fatalf("failed to create description-only bead: %v", err)
+	}
+	titleHit := &types.Issue{
+		ID:        "uhp-title1",
+		Title:     "Fix the use-after-free crash",
+		Status:    types.StatusOpen,
+		Priority:  1,
+		IssueType: types.TypeBug,
+	}
+	if err := store.CreateIssue(ctx, titleHit, "tester"); err != nil {
+		t.Fatalf("failed to create title-match bead: %v", err)
+	}
+
+	results, err := store.SearchIssues(ctx, "use-after-free", types.IssueFilter{})
+	if err != nil {
+		t.Fatalf("SearchIssues(use-after-free): %v", err)
+	}
+	found := map[string]bool{}
+	for _, r := range results {
+		found[r.ID] = true
+	}
+	if !found[descOnly.ID] || !found[titleHit.ID] {
+		got := make([]string, len(results))
+		for i, r := range results {
+			got[i] = r.ID
+		}
+		t.Fatalf("SearchIssues(use-after-free) = %v, want both %s and %s", got, descOnly.ID, titleHit.ID)
+	}
+}
+
+// TestSearchIssues_MixedCasePrefixCaseSensitivity pins that the ID/prose GATE
+// and the id MATCH CLAUSE agree on case, by asserting the full result SET for
+// each spelling of one ID.
+//
+// `bd init` derives the issue prefix from the directory name without
+// case-folding it, so a workspace in ~/code/MyProject mints MyProject-a3f8e9.
+// The store probe that classifies the query is case-sensitive, so only the
+// exact-cased spelling is an ID query — and the clause it selects must be
+// case-sensitive too. Folding the clause instead makes the two spellings take
+// different branches: the wrong-cased one falls to free text, whose predicate
+// covers descriptions, and the named bead comes back buried under every
+// higher-priority bead that merely cites it. A store holding only the named
+// bead cannot detect that; the citers are what make the two branches distinguishable.
+func TestSearchIssues_MixedCasePrefixCaseSensitivity(t *testing.T) {
+	store, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	ctx, cancel := testContext(t)
+	defer cancel()
+
+	const hubID = "MyProject-a3f8e9"
+
+	hub := &types.Issue{
+		ID:        hubID,
+		Title:     "Coordination hub",
+		Status:    types.StatusOpen,
+		Priority:  2,
+		IssueType: types.TypeEpic,
+	}
+	if err := store.CreateIssue(ctx, hub, "tester"); err != nil {
+		t.Fatalf("failed to create hub: %v", err)
+	}
+
+	// Citers outrank the hub, so under ORDER BY priority ASC they fill the
+	// window first wherever the predicate lets them in.
+	const citers = 5
+	citerIDs := make([]string, 0, citers)
+	for i := 0; i < citers; i++ {
+		citer := &types.Issue{
+			ID:          fmt.Sprintf("MyProject-cite%d", i),
+			Title:       fmt.Sprintf("Downstream work %d", i),
+			Description: "Blocked by " + hubID + " until the rollout lands.",
+			Status:      types.StatusOpen,
+			Priority:    0,
+			IssueType:   types.TypeTask,
+		}
+		if err := store.CreateIssue(ctx, citer, "tester"); err != nil {
+			t.Fatalf("failed to create citer %d: %v", i, err)
+		}
+		citerIDs = append(citerIDs, citer.ID)
+	}
+
+	// The exact-cased spelling is an ID query: the named bead, undiluted.
+	assertSearchIDSet(ctx, t, store, hubID, []string{hubID})
+
+	// Any other spelling is prose, and prose reaches descriptions — so it
+	// returns the citers and NOT the hub, whose id the case-sensitive
+	// free-text id predicate does not match either.
+	assertSearchIDSet(ctx, t, store, strings.ToLower(hubID), citerIDs)
+}
+
+// assertSearchIDSet fails unless SearchIssues(query) returns exactly want,
+// order-independent.
+func assertSearchIDSet(ctx context.Context, t *testing.T, store *DoltStore, query string, want []string) {
+	t.Helper()
+
+	results, err := store.SearchIssues(ctx, query, types.IssueFilter{})
+	if err != nil {
+		t.Fatalf("SearchIssues(%q): %v", query, err)
+	}
+	got := make([]string, len(results))
+	for i, r := range results {
+		got[i] = r.ID
+	}
+	sortedGot := append([]string(nil), got...)
+	sortedWant := append([]string(nil), want...)
+	sort.Strings(sortedGot)
+	sort.Strings(sortedWant)
+	if !reflect.DeepEqual(sortedGot, sortedWant) {
+		t.Errorf("SearchIssues(%q) = %v, want exactly %v", query, got, want)
+	}
+}
+
 // TestSearchIssues_ByExternalRef verifies two things:
 //  1. A free-text query like "BE-1521" (which looksLikeIssueID returns true for)
 //     matches an issue whose external_ref contains that string.
@@ -1992,7 +2184,8 @@ func TestSearchIssues_ByExternalRef(t *testing.T) {
 		t.Fatalf("failed to create issue: %v", err)
 	}
 
-	// Free-text ID-like query should match via external_ref LIKE.
+	// An ID-shaped token whose prefix this store does not use is free text,
+	// and free text spans external_ref.
 	results, err := store.SearchIssues(ctx, "BE-1521", types.IssueFilter{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

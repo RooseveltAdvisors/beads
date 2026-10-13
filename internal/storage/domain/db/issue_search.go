@@ -37,6 +37,11 @@ func missingOptionalWispTable(err error) bool {
 }
 
 func (r *issueSQLRepositoryImpl) searchAcrossIssuesAndWisps(ctx context.Context, query string, filter types.IssueFilter) (domain.SearchPage, error) {
+	filter, err := r.resolveIDQuery(ctx, query, filter)
+	if err != nil {
+		return domain.SearchPage{}, fmt.Errorf("search issues: %w", err)
+	}
+
 	if filter.Ephemeral != nil && *filter.Ephemeral {
 		page, err := r.searchTable(ctx, query, filter, wispsFilterTables)
 		if err != nil && !missingOptionalWispTable(err) {
@@ -474,6 +479,22 @@ func buildLabelDrivenSearch(filter types.IssueFilter, tables filterTables) sqlbu
 
 func buildIssueFilterClauses(query string, filter types.IssueFilter, tables filterTables) ([]string, []any, error) {
 	return sqlbuild.BuildIssueFilterClauses(query, filter, tables)
+}
+
+// resolveIDQuery classifies the text query against THIS repository's corpus —
+// the same single, shared classifier the issueops stack runs, so the two stacks
+// cannot disagree about whether a token is an issue ID or prose.
+//
+// It runs ONCE per search, at the entry point, against every plane the search
+// may read, and the verdict is then carried into both union legs. Classifying
+// inside a leg would let the issues leg and the wisps leg answer differently
+// for one query and merge ID semantics with prose semantics.
+func (r *issueSQLRepositoryImpl) resolveIDQuery(ctx context.Context, query string, filter types.IssueFilter) (types.IssueFilter, error) {
+	planes := []filterTables{issuesFilterTables, wispsFilterTables}
+	if filter.SkipWisps {
+		planes = planes[:1]
+	}
+	return issueops.ResolveIDQuery(ctx, r.runner, query, filter, planes...)
 }
 
 type idSrcPage struct {

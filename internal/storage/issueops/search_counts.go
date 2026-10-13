@@ -16,6 +16,11 @@ func SearchIssuesWithCountsInTx(ctx context.Context, tx *sql.Tx, query string, f
 		return nil, fmt.Errorf("search issues with counts: wisp dependency probe: %w", err)
 	}
 
+	filter, err = ResolveIDQuery(ctx, tx, query, filter, searchPlanes(filter)...)
+	if err != nil {
+		return nil, fmt.Errorf("search issues with counts: %w", err)
+	}
+
 	if filter.Ephemeral != nil && *filter.Ephemeral {
 		empty, probeErr := wispsTableEmptyOrMissingInTx(ctx, tx)
 		if probeErr != nil {
