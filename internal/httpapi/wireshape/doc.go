@@ -52,3 +52,4 @@
 // not treated as permission to start a fresh history silently. Never
 // hand-edit testdata/golden.json.
 package wireshape
+
