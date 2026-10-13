@@ -132,25 +132,35 @@
 
 100 54 TestEmbeddedSearchConcurrent
 
+100 55 TestEmbeddedSearchHyphenatedTermKnownLimitation
 100 55 TestEmbeddedUndefer
 
 100 56 TestEmbeddedDepNoCycleCheck
+100 56 TestEmbeddedRecurrenceSurvivesExportImport
 
+100 57 TestEmbeddedCreateDueSource
 100 57 TestEmbeddedQueryConcurrent
 
 100 58 TestEmbeddedDepAAddRejectionsAndBulk
+100 58 TestEmbeddedDueClearReason
 
 100 59 TestEmbeddedDeferAutoWake
+100 59 TestEmbeddedDueBackfill
 
 100 60 TestEmbeddedCommentsCLI
+100 60 TestEmbeddedDueTrigger
 
+100 61 TestEmbeddedDueSweepFiresAndEscalates
 100 61 TestEmbeddedUpdateRoutedStoreCommitsTargetHead
 
 100 62 TestEmbeddedReadyBlockersAndLabels
+100 62 TestEmbeddedRecurrenceCloseGuard
 
 100 63 TestEmbeddedDepAndLinkBatchAutoCommitDoesNotAdvanceHead
+100 63 TestEmbeddedRecurrenceSpawnOnClose
 
 100 64 TestEmbeddedGateWaiterCheckLifecycle
+100 64 TestEmbeddedRecurrenceCreate
 
 100 65 TestEmbeddedIfRevisionPreflightGoneIsPreconditionFailedOnEveryVerb
 100 65 TestEmbeddedSupersede

@@ -1,21 +1,21 @@
-# F5 S2 Variant A: integration-tagged _test.go files no longer analyzed by
-# nogo (vet or golangci-lint) in any Bazel lane.
 #
-# test:integration, test:doltserver-integration and test:doltserver-cmd all
-# pass --norun_validations (.bazelrc); the one lane that used to validate
-# the integration configuration now runs a narrow nogo-only step
-# (bazel-integration's "Nogo: integration library files") that builds only
-# //internal/testutil/integration, not these test binaries. See
-# engdocs/LINTING.md and f5-spec.md §3/§5 S2 for the accepted trade-off
-# (about 15-22 farm worker-h/day saved).
-#
-# One repo-relative path per line, sorted, derived from source by
-# scripts/nogo_lint_policy_test.go's TestNogoIntegrationStepCoversItsConfiguration
-# (go/build tag matching: files that MatchFile selects with the
 # "integration" build tag but are not selected without it, restricted to
+# (about 15-22 farm worker-h/day saved).
+# (bazel-integration's "Nogo: integration library files") that builds only
+# (go/build tag matching: files that MatchFile selects with the
+# //internal/testutil/integration, not these test binaries. See
+# F5 S2 Variant A: integration-tagged _test.go files no longer analyzed by
+# One repo-relative path per line, sorted, derived from source by
 # _test.go files).
+# engdocs/LINTING.md and f5-spec.md §3/§5 S2 for the accepted trade-off
+# nogo (vet or golangci-lint) in any Bazel lane.
+# pass --norun_validations (.bazelrc); the one lane that used to validate
+# scripts/nogo_lint_policy_test.go's TestNogoIntegrationStepCoversItsConfiguration
+# test:integration, test:doltserver-integration and test:doltserver-cmd all
+# the integration configuration now runs a narrow nogo-only step
 cmd/bd/ado_roundtrip_test.go
 cmd/bd/cli_fast_test.go
+cmd/bd/comment_tab_actor_embedded_test.go
 cmd/bd/contributor_routing_e2e_test.go
 cmd/bd/delete_test.go
 cmd/bd/doctor_health_integration_test.go
@@ -50,8 +50,8 @@ internal/storage/dolt/federation_test.go
 internal/storage/dolt/fresh_bootstrap_heal_integration_test.go
 internal/storage/dolt/git_remote_shared_server_test.go
 internal/storage/dolt/git_remote_test.go
-internal/storage/dolt/initschema_0067_versioned_beads_replay_test.go
-internal/storage/dolt/initschema_0069_datetime_precision_replay_test.go
+internal/storage/dolt/initschema_0069_versioned_beads_replay_test.go
+internal/storage/dolt/initschema_0071_datetime_precision_replay_test.go
 internal/storage/dolt/initschema_idempotent_test.go
 internal/storage/dolt/initschema_multiprocess_test.go
 internal/storage/dolt/lenient_open_dirty_tables_integration_test.go

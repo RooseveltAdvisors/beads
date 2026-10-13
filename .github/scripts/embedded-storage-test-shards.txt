@@ -374,6 +374,7 @@
 40 23 TestJournalContract
 
 40 24 TestBootstrapperContract
+40 24 TestDueClearGate_DoltEngine
 40 24 TestEmbeddedBatchCloserOutcomesMirrorItemsIndexForIndex
 40 24 TestEmbeddedClaimerReclaimsAcrossSpellingWithoutWriting
 40 24 TestEmbeddedConfigCommitStagesConfig

@@ -595,6 +595,7 @@ func (i *Issue) NormalizeOptionalTimestampsToUTC() {
 	for _, ts := range []**time.Time{
 		&i.StartedAt, &i.ClosedAt, &i.CompactedAt,
 		&i.DueAt, &i.DeferUntil, &i.LeaseExpiresAt, &i.HeartbeatAt,
+		&i.RepeatStart, &i.RepeatEnd,
 	} {
 		if *ts != nil {
 			utc := (*ts).UTC()
