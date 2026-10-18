@@ -669,6 +669,16 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 			if store != nil {
 				if issue, err := store.GetIssue(rootCtx, id); err == nil && issue != nil {
 					title = issue.Title
+					// The 24h due-miss grace push re-fires an overdue bead
+					// every day, which for a seat holding 200 overdue beads is
+					// 200 pings a day of the same "still overdue" fact. A
+					// NON-recurring bead therefore pings on its first miss and
+					// on each priority raise only; a recurring bead pings on
+					// every occurrence, which is the push the cadence exists
+					// for.
+					if issue.RepeatPattern == "" && !escalated[id] && issue.DueMissed > 1 {
+						continue
+					}
 				}
 			}
 			_, added, err := o.EnqueueUnique(seat.Assignee, id, kind, title)
