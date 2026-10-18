@@ -28,6 +28,8 @@ bd notify drain --seat <assignee> [--exec transport]
 - **Transports** = native Go herdr delivery (default), or custom `--exec`
 - **Attribution & Self-Comment Skip** = actor from `--actor`, else `BEADS_ACTOR`, else the **herdr tab label** (the captain names tabs for purpose, e.g. `portal AMD biller`), else `git config user.name`. Self-comments (actor == assignee) never enqueue outbox rows.
 - **No special seats** in beads or contrib scripts
+- **Due dedup** = the sweep skips a row when an unacked row already exists for the same seat, issue, and kind; unassigned due beads never enqueue
+- **Liveness** = `pending`, `drain`, and the comment-ping drain drop rows whose bead is closed or labelled `tasks-axi-held`, before any hold or delivery decision. Drain acks them, so removing the label restores only pings enqueued afterwards
 
 ## Removed anti-patterns
 
@@ -98,6 +100,7 @@ Actor identity is resolved in priority order:
 When a comment is added via `bd comment`:
 - If `author == assignee`, `notify.CommentAssigneeSeat` returns `"", false` and skips enqueueing.
 - If unassigned, skips enqueueing.
+- If the bead is closed, skips enqueueing.
 - Otherwise enqueues a comment notification for the assignee seat.
 
 ## Fleet tooling (`scripts/notify/`)
