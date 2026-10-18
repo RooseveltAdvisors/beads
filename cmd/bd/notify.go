@@ -651,9 +651,6 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 		return
 	}
 	seats := report.ByAssignee
-	if len(seats) == 0 && len(report.DueIDs) > 0 {
-		seats = []dueSweepSeat{{Assignee: notify.UnassignedSeat, IDs: report.DueIDs}}
-	}
 	escalated := map[string]bool{}
 	for _, id := range report.EscalatedIDs {
 		escalated[id] = true
@@ -726,8 +723,9 @@ func suppressNotifyRecord(rec notify.Record) bool {
 }
 
 // shouldSuppressNotifyIssue reports whether a queued row for issue must not be
-// delivered. Any row for a held bead is non-dispatchable, whatever its kind;
-// removing the label makes the bead's still-queued and future rows deliverable.
+// delivered. Any row for a held bead is non-dispatchable, whatever its kind.
+// A drain acks held rows, so removing the label restores only pings that are
+// re-enqueued afterwards, not rows already acked while the bead was held.
 func shouldSuppressNotifyIssue(issue *types.Issue, labels []string) bool {
 	if issue.Status == types.StatusClosed {
 		return true
