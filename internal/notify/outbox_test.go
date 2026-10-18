@@ -87,3 +87,30 @@ func TestEmptySeatBecomesUnassigned(t *testing.T) {
 		t.Fatalf("seat = %q", r.Seat)
 	}
 }
+
+func TestOutboxPendingForSeatIncludesOnlyOwnAndUnassigned(t *testing.T) {
+	beads := filepath.Join(t.TempDir(), ".beads")
+	if err := os.MkdirAll(beads, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	o, err := Open(beads)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range []struct{ seat, id string }{
+		{"alice", "fm-alice"},
+		{"bob", "fm-bob"},
+		{"", "fm-unassigned"},
+	} {
+		if _, err := o.Enqueue(rec.seat, rec.id, KindDue, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pending, err := o.PendingForSeat("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 2 || pending[0].IssueID != "fm-alice" || pending[1].IssueID != "fm-unassigned" {
+		t.Fatalf("alice pending = %+v, want alice and unassigned only", pending)
+	}
+}

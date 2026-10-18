@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/beads/internal/beads"
 	"github.com/steveyegge/beads/internal/notify"
 	"github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/steveyegge/beads/internal/types"
 	"github.com/steveyegge/beads/internal/ui"
 )
 
@@ -71,7 +72,7 @@ var notifyPendingCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		pending, err := o.Pending(seat)
+		pending, err := o.PendingForSeat(seat)
 		if err != nil {
 			return HandleError("%v", err)
 		}
@@ -330,6 +331,10 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 			var lastOK int64
 			var delivered int
 			for _, rec := range pending {
+				if suppressNotifyRecord(rec) {
+					lastOK = rec.Seq
+					continue
+				}
 				switch {
 				case execCmd != "":
 					if err := runNotifyExec(execCmd, rec); err != nil {
@@ -455,6 +460,12 @@ var notifyAckCmd = &cobra.Command{
 // pingCommentAssignee enqueues a pin-addressed notify for the bead's assignee
 // after a successful comment. Best-effort: never fails the comment.
 func pingCommentAssignee(assignee, issueID, issueTitle, author, text string) {
+	if store != nil {
+		issue, err := store.GetIssue(rootCtx, issueID)
+		if err == nil && issue != nil && issue.Status == types.StatusClosed {
+			return
+		}
+	}
 	seat, ok := notify.CommentAssigneeSeat(assignee, author)
 	if !ok {
 		return
@@ -631,9 +642,6 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 	}
 	var n int
 	for _, seat := range seats {
-		if isUnassignedNotifySeat(seat.Assignee) {
-			continue
-		}
 		for _, id := range seat.IDs {
 			kind := notify.KindDue
 			if escalated[id] {
@@ -655,6 +663,33 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 	if n > 0 && !jsonOutput {
 		fmt.Printf("  notify enqueued %d\n", n)
 	}
+}
+
+// suppressNotifyRecord drops stale due work at delivery time. The outbox is
+// durable, so a bead can close or enter a captain hold after its row is queued.
+func suppressNotifyRecord(rec notify.Record) bool {
+	if store == nil {
+		return false
+	}
+	issue, err := store.GetIssue(rootCtx, rec.IssueID)
+	return err == nil && shouldSuppressNotifyRecord(rec, issue)
+}
+
+func shouldSuppressNotifyRecord(rec notify.Record, issue *types.Issue) bool {
+	if issue == nil {
+		return false
+	}
+	if issue.Status == types.StatusClosed {
+		return true
+	}
+	if rec.Kind != notify.KindDue || len(issue.Metadata) == 0 {
+		return false
+	}
+	var metadata struct {
+		HoldKind string `json:"hold_kind"`
+	}
+	return json.Unmarshal(issue.Metadata, &metadata) == nil &&
+		strings.EqualFold(strings.TrimSpace(metadata.HoldKind), "captain")
 }
 
 // enqueueStaleClaimNotifies finds assigned in_progress work quiet longer than

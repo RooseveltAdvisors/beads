@@ -175,6 +175,39 @@ func (o *Outbox) Pending(seat string) ([]Record, error) {
 	return out, nil
 }
 
+// PendingForSeat returns a seat's own unacked rows plus the unassigned queue.
+// Unassigned work has no delivery target, but remains visible for triage.
+func (o *Outbox) PendingForSeat(seat string) ([]Record, error) {
+	seat = strings.TrimSpace(seat)
+	if seat == "" {
+		return o.Pending("")
+	}
+
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	acks, err := o.loadAcksLocked()
+	if err != nil {
+		return nil, err
+	}
+	all, err := o.readAllLocked()
+	if err != nil {
+		return nil, err
+	}
+	var out []Record
+	for _, rec := range all {
+		if !strings.EqualFold(rec.Seat, seat) && !strings.EqualFold(rec.Seat, UnassignedSeat) {
+			continue
+		}
+		if rec.Seq <= acks[strings.ToLower(rec.Seat)] {
+			continue
+		}
+		out = append(out, rec)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	return out, nil
+}
+
 // AckSeat marks all records for seat with seq <= upTo as delivered.
 func (o *Outbox) AckSeat(seat string, upTo int64) error {
 	o.mu.Lock()
