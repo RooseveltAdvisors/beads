@@ -72,7 +72,7 @@ var notifyPendingCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		pending, err := o.PendingForSeat(seat)
+		pending, err := o.Pending(seat)
 		if err != nil {
 			return HandleError("%v", err)
 		}
@@ -289,6 +289,13 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 			if len(pending) == 0 {
 				continue
 			}
+			live, err := liveNotifyPending(o, s, pending, !noAck)
+			if err != nil {
+				return HandleError("%v", err)
+			}
+			if len(live) == 0 {
+				continue
+			}
 
 			res := seatResult{Seat: s}
 			var inst notify.Instance
@@ -305,7 +312,7 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 							Session:        dec.Pin.Session,
 							PaneID:         dec.Pin.PaneID,
 							AgentSessionID: dec.Pin.AgentSessionID,
-							Pending:        len(pending),
+							Pending:        len(live),
 						}); err != nil {
 							return HandleError("hold: %v", err)
 						}
@@ -314,10 +321,10 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 					if !jsonOutput {
 						if dec.Escalate {
 							fmt.Printf("%s seat %s: %s (%d pending left); escalate\n",
-								ui.RenderWarn("!"), s, res.Error, len(pending))
+								ui.RenderWarn("!"), s, res.Error, len(live))
 						} else {
 							fmt.Printf("%s seat %s: %s (%d pending left); holding until idle\n",
-								ui.RenderAccent("*"), s, res.Error, len(pending))
+								ui.RenderAccent("*"), s, res.Error, len(live))
 						}
 					}
 					continue
@@ -330,11 +337,7 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 
 			var lastOK int64
 			var delivered int
-			for _, rec := range pending {
-				if suppressNotifyRecord(rec) {
-					lastOK = rec.Seq
-					continue
-				}
+			for _, rec := range live {
 				switch {
 				case execCmd != "":
 					if err := runNotifyExec(execCmd, rec); err != nil {
@@ -378,6 +381,7 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 				delivered++
 				lastOK = rec.Seq
 			}
+			lastOK = pending[len(pending)-1].Seq
 		finishSeat:
 			res.Delivered = delivered
 			if !noAck && lastOK > 0 {
@@ -492,13 +496,17 @@ func tryDrainCommentPing(o *notify.Outbox, seat string) {
 	if err != nil || len(pending) == 0 {
 		return
 	}
+	live, err := liveNotifyPending(o, seat, pending, true)
+	if err != nil || len(live) == 0 {
+		return
+	}
 	pins, err := o.LoadPins()
 	if err != nil {
 		return
 	}
 	pin, havePin := pins[strings.ToLower(strings.TrimSpace(seat))]
 	if !havePin || !pin.Valid() {
-		_ = o.SetHold(seat, notify.Hold{Reason: notify.HoldNoPin, Pending: len(pending)})
+		_ = o.SetHold(seat, notify.Hold{Reason: notify.HoldNoPin, Pending: len(live)})
 		return
 	}
 	discover := notify.HerdrDiscoverer{}
@@ -506,7 +514,7 @@ func tryDrainCommentPing(o *notify.Outbox, seat string) {
 	if err != nil {
 		_ = o.SetHold(seat, notify.Hold{
 			Reason: notify.HoldDeadPin, Session: pin.Session, PaneID: pin.PaneID,
-			AgentSessionID: pin.AgentSessionID, Pending: len(pending),
+			AgentSessionID: pin.AgentSessionID, Pending: len(live),
 		})
 		return
 	}
@@ -515,7 +523,7 @@ func tryDrainCommentPing(o *notify.Outbox, seat string) {
 		if dec.Escalate {
 			_ = o.SetHold(seat, notify.Hold{
 				Reason: dec.Reason, Session: dec.Pin.Session, PaneID: dec.Pin.PaneID,
-				AgentSessionID: dec.Pin.AgentSessionID, Pending: len(pending),
+				AgentSessionID: dec.Pin.AgentSessionID, Pending: len(live),
 			})
 		}
 		return
@@ -525,7 +533,7 @@ func tryDrainCommentPing(o *notify.Outbox, seat string) {
 	if mode == "" {
 		mode = notify.ModeForHarness(dec.Instance.Harness)
 	}
-	for _, rec := range pending {
+	for i, rec := range live {
 		prompt := notify.DefaultPrompt(rec)
 		if body := beadNotifyBody(rec.IssueID); body != "" {
 			prompt = prompt + "\n\n" + body
@@ -534,6 +542,9 @@ func tryDrainCommentPing(o *notify.Outbox, seat string) {
 			break
 		}
 		lastOK = rec.Seq
+		if i == len(live)-1 {
+			lastOK = pending[len(pending)-1].Seq
+		}
 	}
 	if lastOK > 0 {
 		_ = o.AckSeat(seat, lastOK)
@@ -642,6 +653,9 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 	}
 	var n int
 	for _, seat := range seats {
+		if isUnassignedNotifySeat(seat.Assignee) {
+			continue
+		}
 		for _, id := range seat.IDs {
 			kind := notify.KindDue
 			if escalated[id] {
@@ -653,11 +667,14 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 					title = issue.Title
 				}
 			}
-			if _, err := o.Enqueue(seat.Assignee, id, kind, title); err != nil {
+			_, added, err := o.EnqueueUnique(seat.Assignee, id, kind, title)
+			if err != nil {
 				fmt.Fprintf(os.Stderr, "notify: enqueue %s: %v\n", id, err)
 				continue
 			}
-			n++
+			if added {
+				n++
+			}
 		}
 	}
 	if n > 0 && !jsonOutput {
@@ -665,8 +682,26 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 	}
 }
 
-// suppressNotifyRecord drops stale due work at delivery time. The outbox is
-// durable, so a bead can close or enter a captain hold after its row is queued.
+// liveNotifyPending drops rows whose bead closed or entered a captain hold
+// after it was queued. Every drain path filters here before any hold or
+// delivery decision; when nothing live remains, the stale rows are acked and
+// the seat's hold cleared so they cannot re-hold or re-escalate the seat.
+func liveNotifyPending(o *notify.Outbox, seat string, pending []notify.Record, ack bool) ([]notify.Record, error) {
+	var live []notify.Record
+	for _, rec := range pending {
+		if !suppressNotifyRecord(rec) {
+			live = append(live, rec)
+		}
+	}
+	if len(live) > 0 || len(pending) == 0 || !ack {
+		return live, nil
+	}
+	if err := o.AckSeat(seat, pending[len(pending)-1].Seq); err != nil {
+		return nil, err
+	}
+	return nil, o.ClearHold(seat)
+}
+
 func suppressNotifyRecord(rec notify.Record) bool {
 	if store == nil {
 		return false
@@ -682,7 +717,7 @@ func shouldSuppressNotifyRecord(rec notify.Record, issue *types.Issue) bool {
 	if issue.Status == types.StatusClosed {
 		return true
 	}
-	if rec.Kind != notify.KindDue || len(issue.Metadata) == 0 {
+	if (rec.Kind != notify.KindDue && rec.Kind != notify.KindEscalate) || len(issue.Metadata) == 0 {
 		return false
 	}
 	var metadata struct {

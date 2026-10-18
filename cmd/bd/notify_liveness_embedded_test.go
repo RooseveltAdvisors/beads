@@ -19,7 +19,29 @@ func TestEmbeddedNotifyDrainSkipsClosedAndCaptainHeldDueBeads(t *testing.T) {
 	held := bdCreate(t, bd, dir, "Captain-held due", "--assignee", "alice", "--due", pastDue(),
 		"--metadata", `{"hold_kind":"captain"}`)
 	self := bdCreate(t, bd, dir, "Self comment", "--assignee", "firstmate")
+	live := bdCreate(t, bd, dir, "Live due", "--assignee", "alice", "--due", pastDue())
+	unassigned := bdCreate(t, bd, dir, "Unassigned due", "--due", pastDue())
 	bdDueSweep(t, bd, dir)
+	bdDueSweep(t, bd, dir)
+
+	pending, err := bdRunWithFlockRetry(t, bd, dir, "notify", "pending", "--seat", "alice")
+	if err != nil {
+		t.Fatalf("notify pending failed: %v\n%s", err, pending)
+	}
+	if n := strings.Count(string(pending), live.ID); n != 1 {
+		t.Fatalf("live due bead pending %d times, want 1:\n%s", n, pending)
+	}
+	if strings.Contains(string(pending), unassigned.ID) {
+		t.Fatalf("unassigned due bead leaked into alice's pending:\n%s", pending)
+	}
+	all, err := bdRunWithFlockRetry(t, bd, dir, "notify", "pending")
+	if err != nil {
+		t.Fatalf("notify pending (all) failed: %v\n%s", err, all)
+	}
+	if strings.Contains(string(all), unassigned.ID) {
+		t.Fatalf("unassigned due bead was enqueued:\n%s", all)
+	}
+
 	bdClose(t, bd, dir, closed.ID, "--force")
 	if out, err := bdRunWithFlockRetry(t, bd, dir, "comment", closed.ID, "closed comment", "--actor", "alice"); err != nil {
 		t.Fatalf("closed comment failed: %v\n%s", err, out)
@@ -36,7 +58,7 @@ func TestEmbeddedNotifyDrainSkipsClosedAndCaptainHeldDueBeads(t *testing.T) {
 		t.Fatalf("notify drain delivered suppressed rows:\n%s", out)
 	}
 
-	pending, err := bdRunWithFlockRetry(t, bd, dir, "notify", "pending", "--seat", "alice")
+	pending, err = bdRunWithFlockRetry(t, bd, dir, "notify", "pending", "--seat", "alice")
 	if err != nil {
 		t.Fatalf("notify pending failed: %v\n%s", err, pending)
 	}

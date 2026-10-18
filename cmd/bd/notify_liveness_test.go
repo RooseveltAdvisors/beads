@@ -18,6 +18,8 @@ func TestShouldSuppressNotifyRecord(t *testing.T) {
 		{name: "closed bead", issue: &types.Issue{Status: types.StatusClosed}, want: true},
 		{name: "closed comment", rec: notify.Record{Kind: notify.KindComment}, issue: &types.Issue{Status: types.StatusClosed}, want: true},
 		{name: "captain-held due bead", rec: notify.Record{Kind: notify.KindDue}, issue: &types.Issue{Metadata: json.RawMessage(`{"hold_kind":"captain"}`)}, want: true},
+		{name: "captain-held escalation", rec: notify.Record{Kind: notify.KindEscalate}, issue: &types.Issue{Metadata: json.RawMessage(`{"hold_kind":"captain"}`)}, want: true},
+		{name: "live due bead", rec: notify.Record{Kind: notify.KindDue}, issue: &types.Issue{Status: types.StatusOpen}},
 		{name: "captain-held comment", rec: notify.Record{Kind: notify.KindComment}, issue: &types.Issue{Metadata: json.RawMessage(`{"hold_kind":"captain"}`)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

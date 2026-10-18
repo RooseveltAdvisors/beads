@@ -88,7 +88,48 @@ func TestEmptySeatBecomesUnassigned(t *testing.T) {
 	}
 }
 
-func TestOutboxPendingForSeatIncludesOnlyOwnAndUnassigned(t *testing.T) {
+func TestOutboxEnqueueUniqueSkipsUnackedDuplicate(t *testing.T) {
+	beads := filepath.Join(t.TempDir(), ".beads")
+	if err := os.MkdirAll(beads, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	o, err := Open(beads)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enqueue := func(seat, id string, kind Kind) bool {
+		t.Helper()
+		_, added, err := o.EnqueueUnique(seat, id, kind, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return added
+	}
+	if !enqueue("alice", "fm-1", KindDue) {
+		t.Fatal("first due row not added")
+	}
+	if enqueue("Alice", "fm-1", KindDue) {
+		t.Fatal("duplicate unacked due row added")
+	}
+	if !enqueue("alice", "fm-1", KindEscalate) || !enqueue("bob", "fm-1", KindDue) || !enqueue("alice", "fm-2", KindDue) {
+		t.Fatal("distinct seat/issue/kind rows must be added")
+	}
+	pending, err := o.Pending("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 3 {
+		t.Fatalf("alice pending = %+v, want 3 rows", pending)
+	}
+	if err := o.AckSeat("alice", pending[len(pending)-1].Seq); err != nil {
+		t.Fatal(err)
+	}
+	if !enqueue("alice", "fm-1", KindDue) {
+		t.Fatal("due row must re-fire after ack")
+	}
+}
+
+func TestOutboxPendingIsExactSeat(t *testing.T) {
 	beads := filepath.Join(t.TempDir(), ".beads")
 	if err := os.MkdirAll(beads, 0o755); err != nil {
 		t.Fatal(err)
@@ -106,11 +147,11 @@ func TestOutboxPendingForSeatIncludesOnlyOwnAndUnassigned(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	pending, err := o.PendingForSeat("alice")
+	pending, err := o.Pending("alice")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pending) != 2 || pending[0].IssueID != "fm-alice" || pending[1].IssueID != "fm-unassigned" {
-		t.Fatalf("alice pending = %+v, want alice and unassigned only", pending)
+	if len(pending) != 1 || pending[0].IssueID != "fm-alice" {
+		t.Fatalf("alice pending = %+v, want alice only", pending)
 	}
 }
