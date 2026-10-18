@@ -76,7 +76,14 @@ var notifyPendingCmd = &cobra.Command{
 		if err != nil {
 			return HandleError("%v", err)
 		}
+		pending, err = liveNotifyPending(o, seat, pending, false)
+		if err != nil {
+			return HandleError("%v", err)
+		}
 		if jsonOutput {
+			if pending == nil {
+				pending = []notify.Record{}
+			}
 			return printJSON(pending)
 		}
 		if len(pending) == 0 {
@@ -682,10 +689,14 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 	}
 }
 
-// liveNotifyPending drops rows whose bead closed or entered a captain hold
-// after it was queued. Every drain path filters here before any hold or
-// delivery decision; when nothing live remains, the stale rows are acked and
-// the seat's hold cleared so they cannot re-hold or re-escalate the seat.
+// heldNotifyLabel marks a bead as held. Beads has no captain-kind hold
+// representation, so every held bead is treated as non-dispatchable.
+const heldNotifyLabel = "tasks-axi-held"
+
+// liveNotifyPending drops rows whose bead is closed or held. Every pending and
+// drain path filters here before any hold or delivery decision. With ack, a
+// seat whose rows are all stale has them acked and its hold cleared so they
+// cannot re-hold or re-escalate the seat.
 func liveNotifyPending(o *notify.Outbox, seat string, pending []notify.Record, ack bool) ([]notify.Record, error) {
 	var live []notify.Record
 	for _, rec := range pending {
@@ -707,24 +718,26 @@ func suppressNotifyRecord(rec notify.Record) bool {
 		return false
 	}
 	issue, err := store.GetIssue(rootCtx, rec.IssueID)
-	return err == nil && shouldSuppressNotifyRecord(rec, issue)
-}
-
-func shouldSuppressNotifyRecord(rec notify.Record, issue *types.Issue) bool {
-	if issue == nil {
+	if err != nil || issue == nil {
 		return false
 	}
+	labels, err := store.GetLabels(rootCtx, rec.IssueID)
+	return err == nil && shouldSuppressNotifyIssue(issue, labels)
+}
+
+// shouldSuppressNotifyIssue reports whether a queued row for issue must not be
+// delivered. Any row for a held bead is non-dispatchable, whatever its kind;
+// removing the label makes the bead's still-queued and future rows deliverable.
+func shouldSuppressNotifyIssue(issue *types.Issue, labels []string) bool {
 	if issue.Status == types.StatusClosed {
 		return true
 	}
-	if (rec.Kind != notify.KindDue && rec.Kind != notify.KindEscalate) || len(issue.Metadata) == 0 {
-		return false
+	for _, l := range labels {
+		if l == heldNotifyLabel {
+			return true
+		}
 	}
-	var metadata struct {
-		HoldKind string `json:"hold_kind"`
-	}
-	return json.Unmarshal(issue.Metadata, &metadata) == nil &&
-		strings.EqualFold(strings.TrimSpace(metadata.HoldKind), "captain")
+	return false
 }
 
 // enqueueStaleClaimNotifies finds assigned in_progress work quiet longer than
