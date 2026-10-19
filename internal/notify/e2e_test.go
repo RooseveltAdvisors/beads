@@ -21,7 +21,7 @@ func TestE2E_Journey(t *testing.T) {
 	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	outbox, err := Open(beadsDir)
+	outbox, err := openRegisteredTestOutbox(t, beadsDir)
 	if err != nil {
 		t.Fatal(err)
 	}

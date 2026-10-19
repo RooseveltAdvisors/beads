@@ -92,7 +92,7 @@ func displayStaleIssues(issues []*types.Issue, days int) {
 		fmt.Printf("%d. [%s] %s: %s\n", i+1, ui.RenderPriority(issue.Priority), ui.RenderID(issue.ID), issue.Title)
 		fmt.Printf("   Status: %s, Last updated: %d days ago\n", ui.RenderStatus(string(issue.Status)), daysStale)
 		if issue.Assignee != "" {
-			fmt.Printf("   Assignee: %s\n", issue.Assignee)
+			fmt.Printf("   Assignee: %s\n", seatDisplay(issue.Assignee))
 		}
 		fmt.Println()
 	}

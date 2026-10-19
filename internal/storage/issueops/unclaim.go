@@ -78,7 +78,7 @@ func UnclaimIssueInTx(ctx context.Context, tx DBTX, id string, actor string, for
 	// the one we read.
 	result, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE %s
-		SET assignee = '', status = 'open', updated_at = ?,
+		SET assignee = '', assignee_id = '', status = 'open', updated_at = ?,
 		    started_at = NULL, row_lock = ?
 		WHERE id = ? AND status IN ('open', 'in_progress') AND row_lock = ?
 	`, issueTable), now, freshRowLock(), id, oldIssue.RowVersion)
@@ -195,7 +195,7 @@ func UnclaimIssueIfAssigneeInTx(ctx context.Context, tx DBTX, id string, actor s
 	// without embedding a spelling-sensitive string comparison in SQL.
 	result, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE %s
-		SET assignee = '', status = 'open', updated_at = ?,
+		SET assignee = '', assignee_id = '', status = 'open', updated_at = ?,
 		    started_at = NULL, row_lock = ?
 		WHERE id = ? AND status IN ('open', 'in_progress') AND row_lock = ?
 	`, issueTable), now, freshRowLock(), id, oldIssue.RowVersion)

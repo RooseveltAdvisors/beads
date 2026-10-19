@@ -20,14 +20,15 @@ import (
 const migration0069Up = "0069_add_versioned_beads_schema.up.sql"
 const migration0069Down = "0069_add_versioned_beads_schema.down.sql"
 
-// TestLatestVersionIncludesMigration0069 pins the real next free slot this
+// TestLatestVersionIncludesMigration0070 pins the real next free slot this
 // phase claims. It is deliberately a hardcoded literal, not a comparison
-// against another derived value: schema.LatestVersion() drifting to 69 for
-// the wrong reason (an unrelated migration landing first) should still be
-// caught by this test failing to explain why 67 is versioned-beads-shaped,
-// which the CLI test below checks.
-func TestLatestVersionIncludesMigration0069(t *testing.T) {
-	const want = 69
+// against another derived value: schema.LatestVersion() drifting for the
+// wrong reason (an unrelated migration landing first) should still be caught
+// by this test failing to explain why its slot is versioned-beads-shaped,
+// which the CLI test below checks. Slot 0070 is the seat-identity
+// assignee_id migration (additive, both planes).
+func TestLatestVersionIncludesMigration0070(t *testing.T) {
+	const want = 70
 	if got := LatestVersion(); got != want {
 		t.Fatalf("LatestVersion() = %d, want %d (issue_versions/store_epoch/issues.current_revision migration slot claimed by be-hs42e.2)", got, want)
 	}

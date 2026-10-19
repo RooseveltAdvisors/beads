@@ -139,6 +139,15 @@ var funcNameExemptions = map[string]string{
 	// Reminting here would be pointless content-wise and would let a stale
 	// ExpectedVersion CAS reject a row it should still recognize.
 	"resolveOneConflictRow": "whole-row `theirs` adoption: the adopted row_lock already vouches for the (identical) adopted content",
+	// backfillSeatHistory re-keys audit rows (events, wisp_events, comments,
+	// wisp_comments, dependencies, wisp_dependencies, bd_events_journal,
+	// leases) whose actor/author/created_by/holder column is being migrated to
+	// a seat ID by `bd seat backfill`. Its %s-templated UPDATE never targets
+	// the issues or wisps table — those two planes are written by
+	// BackfillSeatIDsInTx, which stamps row_lock on every write — so there is
+	// no issues/wisps row whose lifecycle cells could zombie-merge behind a
+	// stale token.
+	"backfillSeatHistory": "seat-history backfill writes only aux audit tables; the issues/wisps plane stamps in BackfillSeatIDsInTx",
 }
 
 // TestAllIssueRowWritesStampRowLock is the load-bearing completeness guard for

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/steveyegge/beads/internal/seats"
 
 	"github.com/steveyegge/beads/internal/storage"
 )
@@ -32,6 +33,14 @@ import (
 //
 //nolint:gosec // G201: table name comes from WispTableRouting (hardcoded constants)
 func CheckExpectedFieldsInTx(ctx context.Context, tx DBTX, id string, expectedAssignee, expectedStatus *string) error {
+	ctx = SeatContext(ctx, tx)
+	if expectedAssignee != nil {
+		id, err := seats.ResolveContext(ctx, *expectedAssignee)
+		if err != nil {
+			return err
+		}
+		expectedAssignee = &id
+	}
 	if expectedAssignee == nil && expectedStatus == nil {
 		return nil
 	}

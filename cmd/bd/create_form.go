@@ -390,7 +390,7 @@ func printCreatedIssue(issue *types.Issue) {
 	fmt.Printf("  Priority: P%d\n", issue.Priority)
 	fmt.Printf("  Status:   %s\n", issue.Status)
 	if issue.Assignee != "" {
-		fmt.Printf("  Assignee: %s\n", issue.Assignee)
+		fmt.Printf("  Assignee: %s\n", seatDisplay(issue.Assignee))
 	}
 	if issue.Description != "" {
 		desc := issue.Description

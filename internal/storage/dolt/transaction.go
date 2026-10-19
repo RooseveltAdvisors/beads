@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -224,6 +225,8 @@ func (s *DoltStore) runDoltTransaction(ctx context.Context, commitMsg string, fn
 		}
 		defer ignoredCleanup()
 	}
+	clearSeats := issueops.ScopeSeatRegistryTransaction(regularTx, filepath.Join(s.beadsDir, "notify"))
+	defer clearSeats()
 	clearJournalScope := issueops.ScopeEventsJournalTransaction(regularTx, journalEnabled)
 	defer clearJournalScope()
 

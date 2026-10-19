@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"github.com/steveyegge/beads/internal/seats"
 	"os"
 	"strings"
 	"time"
@@ -168,7 +169,12 @@ func NodeID(ctx context.Context) string {
 // non-claimed snapshot — must delete the lease row (DeleteLeaseInTx). Wisps
 // are never leased (see testHeartbeatWisp) and never get a row here.
 func UpsertLeaseInTx(ctx context.Context, tx DBTX, id, holder string, now time.Time, ttl time.Duration) error {
-	_, err := tx.ExecContext(ctx, `
+	ctx = SeatContext(ctx, tx)
+	holder, err := seats.ResolveContext(ctx, holder)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO leases (issue_id, holder, granted_at, lease_expires_at, heartbeat_at, granted_node)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
@@ -300,6 +306,11 @@ func RestoreLeaseOnImportInTx(ctx context.Context, tx DBTX, issue *types.Issue, 
 //
 //nolint:gosec // G201: table names come from WispTableRouting (hardcoded constants)
 func HeartbeatIssueInTx(ctx context.Context, tx DBTX, id, actor string) error {
+	ctx = SeatContext(ctx, tx)
+	actor, err := seats.ResolveContext(ctx, actor)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	// granted_node is backfilled, never overwritten: a lease row whose
 	// provenance is unknown (granted before ignored migration 0016, or before
@@ -756,7 +767,7 @@ func ReclaimExpiredLeasesInTx(ctx context.Context, tx DBTX, cutoff time.Time, fi
 		// cell-merge with this write.
 		res, err = tx.ExecContext(ctx, `
 			UPDATE issues
-			SET status = 'open', assignee = NULL, started_at = NULL,
+			SET status = 'open', assignee = NULL, assignee_id = '', started_at = NULL,
 			    updated_at = ?, row_lock = ?
 			WHERE id = ? AND status = 'in_progress'
 		`, time.Now().UTC(), freshRowLock(), r.ID)

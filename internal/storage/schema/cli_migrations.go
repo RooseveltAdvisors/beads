@@ -53,6 +53,10 @@ package schema
 // DML instead of that pattern.
 func cliCompatibleMigrationSQL(name, sqlText string) string {
 	switch name {
+	case "0070_add_assignee_id.up.sql":
+		return "ALTER TABLE issues ADD COLUMN assignee_id VARCHAR(255) NOT NULL DEFAULT '';\nALTER TABLE wisps ADD COLUMN assignee_id VARCHAR(255) NOT NULL DEFAULT '';"
+	case "0030_wisp_assignee_id.up.sql":
+		return "SELECT 1;" // synced 0070 already added it on the fresh-bundle path
 	case "0008_create_child_counters.up.sql":
 		// Fresh bundle bakes the final FK shape that runtime reaches after
 		// 0039 drops the original FK and ignored migration 0002 re-adds it.

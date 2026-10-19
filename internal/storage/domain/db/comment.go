@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"github.com/steveyegge/beads/internal/seats"
 	"time"
 
 	"github.com/steveyegge/beads/internal/storage"
@@ -129,6 +130,12 @@ func (r *commentSQLRepositoryImpl) insertRecord(ctx context.Context, comment *ty
 		return nil, fmt.Errorf("db: CommentSQLRepository.InsertRecord: comment must not be nil")
 	}
 	copy := *comment
+	ctx = issueops.SeatContext(ctx, r.runner)
+	var resolveErr error
+	copy.Author, resolveErr = seats.ResolveContext(ctx, copy.Author)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
 	if copy.IssueID == "" {
 		return nil, fmt.Errorf("db: CommentSQLRepository.InsertRecord: issueID must not be empty")
 	}

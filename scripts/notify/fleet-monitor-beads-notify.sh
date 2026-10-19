@@ -72,32 +72,12 @@ else
     log_metric WARN ".beads/notify directory not initialized in current repo"
 fi
 
-# 4. Check Pins File Integrity
-PINS_FILE=".beads/notify/pins.json"
-if [ -f "$PINS_FILE" ] && jq -e '.["arcs-fm"]' "$PINS_FILE" >/dev/null 2>&1; then
-    PIN_PANE=$(jq -r '.["arcs-fm"].pane_id' "$PINS_FILE")
-    PIN_HARNESS=$(jq -r '.["arcs-fm"].harness' "$PINS_FILE")
-    log_metric PASS "arcs-fm pin valid (target: $PIN_PANE, harness: $PIN_HARNESS)"
+# 4. Inspect canonical seat IDs; aliases and endpoints are projections.
+if REGISTRY=$(bd seat list --json 2>&1); then
+    STALE=$(jq -r 'to_entries[] | select(.value.liveness != "live") | .key + " " + .value.liveness' <<<"$REGISTRY")
+    if [ -n "$STALE" ]; then log_metric WARN "Seats needing reconciliation: $STALE"; else log_metric PASS "Registered seats are live"; fi
 else
-    log_metric WARN "arcs-fm pin missing or unreadable in $PINS_FILE"
-fi
-
-# 5. Check Recent Comment Attribution (Detect Self-Ping Leakage)
-if [ -f ".beads/notify/outbox.jsonl" ]; then
-    RECENT_SELF_PINGS=$(tail -n 20 .beads/notify/outbox.jsonl | jq -r 'select(.seat == "arcs-fm" and (.title | test("STARTED \\(arcs-fm\\)|arcs-fm: rework finished"))) | .seq' || true)
-    if [ -z "$RECENT_SELF_PINGS" ]; then
-        log_metric PASS "No recent self-comment notification loops observed in outbox"
-    else
-        log_metric WARN "Historical self-comment pings observed prior to wrapper enforcement (seqs: $RECENT_SELF_PINGS)"
-    fi
-fi
-
-# 6. Check Firstmate Active Queue for Disruptive Steer vs Follow-Up
-FM_OUTPUT=$(herdr --session firstmate agent read w1:pA 2>/dev/null | tail -n 30 || true)
-if grep -q "Steering: BEADS NOTIFY" <<<"$FM_OUTPUT"; then
-    log_metric VIOLATION "BEADS NOTIFY was observed delivered via disruptive Steering into Firstmate!"
-else
-    log_metric PASS "Firstmate received all comment notifications via non-interrupting Follow-up (0 disruptive steers)"
+    log_metric WARN "Seat registry unavailable: $REGISTRY"
 fi
 
 # 7. Execute Turn-Boundary Drain

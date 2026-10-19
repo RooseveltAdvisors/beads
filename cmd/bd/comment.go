@@ -57,7 +57,7 @@ var commentCmd = &cobra.Command{
 Shorthand for 'bd comments add <id> "text"'.
 
 A comment on an assigned bead pings that assignee's pinned pane
-(.beads/notify/pins.json). Self-comments and unassigned beads do not ping.
+(.beads/notify/seats.json). Self-comments and unassigned beads do not ping.
 
 Examples:
   bd comment bd-123 "Working on this now"

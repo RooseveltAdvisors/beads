@@ -243,6 +243,8 @@ func (s *EmbeddedDoltStore) withConn(ctx context.Context, commit bool, fn func(t
 		err = fmt.Errorf("embeddeddolt: begin tx: %w", err)
 		return
 	}
+	clearSeats := issueops.ScopeSeatRegistryTransaction(tx, filepath.Join(s.beadsDir, "notify"))
+	defer clearSeats()
 	clearJournalScope := issueops.ScopeEventsJournalTransaction(tx, s.eventsJournalEnabled.Load())
 	defer clearJournalScope()
 

@@ -10,7 +10,7 @@
 #            (actor) is resolved by bd: --actor, BEADS_ACTOR, then the herdr
 #            tab label, then git user.name. Self-comments (actor == assignee)
 #            never self-notify; set BEADS_ACTOR only to override on purpose.
-# pins       .beads/notify/pins.json : seat -> {session, pane_id, agent_session_id, harness, ...}
+# pins       .beads/notify/seats.json : seat -> {session, pane_id, agent_session_id, harness, ...}
 #            This is the file bd itself drains against ("bd notify drain").
 #            Pins are written explicitly (bd-notify-pin set) and matched
 #            exactly; nothing here guesses a target from titles, cwd or focus.
@@ -20,7 +20,7 @@
 # delivery   `bd notify drain` owns the harness matrix (follow-up vs steer).
 #
 # Safety: this library never starts, kills or restarts any herdr session, pane
-# or agent. It only reads agent lists, writes pins.json, and submits text to an
+# or agent. It only reads agent lists, updates seats.json through bd, and submits text to an
 # already-running agent pane via the documented herdr contact commands.
 
 set -euo pipefail
@@ -53,63 +53,36 @@ bd_notify_dir() {
     printf '%s/.beads/notify\n' "$(bd_notify_repo_root)"
 }
 
-bd_notify_pins_file()    { printf '%s/pins.json\n'     "$(bd_notify_dir)"; }
-
-# ---------------------------------------------------------------------------
-# jq helpers
-# ---------------------------------------------------------------------------
+bd_notify_pins_file() { printf '%s/seats.json\n' "$(bd_notify_dir)"; }
 
 _jq() { command jq "$@"; }
 
-pin_get() { # $1 = seat  -> pin object (empty if absent)
-    local f
-    f="$(bd_notify_pins_file)" || return 0
-    [ -f "$f" ] || return 0
-    _jq -e --arg s "$1" '.[$s] // empty' "$f" 2>/dev/null || true
+seat_id() {
+    local name="$1"
+    bd seat list --json | _jq -er --arg name "$name" '
+      to_entries | map(select((.key | ascii_downcase) == ($name | ascii_downcase)
+        or any(.value.aliases[]?; ascii_downcase == ($name | ascii_downcase))))
+      | if length == 1 then .[0].key else error("unknown or ambiguous seat: " + $name) end'
 }
 
-
-# merge-write one seat's pin atomically (preserves other seats)
-pin_write() { # $1 seat  $2 session  $3 pane_id  $4 agent_session_id  $5 harness  $6 note
-    local seat="$1" session="$2" pane="$3" asid="${4:-}" harness="${5:-}" note="${6:-}"
-    local file tmp
-    file="$(bd_notify_pins_file)"
-    # One machine-wide seat -> target map: a repo may symlink its pins.json at
-    # the canonical file so the same seat resolves to the same pane everywhere.
-    # mktemp + mv would replace the symlink itself and silently fork the map
-    # again (that is how seat wiseman ended up with two different targets), so
-    # resolve the link and write through it.
-    if [ -L "$file" ]; then file="$(readlink -f "$file")"; fi
-    mkdir -p "$(dirname "$file")"
-    tmp="$(mktemp "$file.tmp.XXXXXX")"
-    if [ -s "$file" ] && _jq -e . "$file" >/dev/null 2>&1; then
-        _jq --arg s "$seat" --arg se "$session" --arg p "$pane" \
-            --arg a "$asid" --arg h "$harness" --arg n "$note" \
-            --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
-            .[$s] = ((.[$s] // {})
-                     + {session: $se, pane_id: $p, updated_at: $t})
-                  | .[$s].agent_session_id = (if $a == "" then .[$s].agent_session_id // "" else $a end)
-                  | .[$s].harness           = (if $h == "" then .[$s].harness // "" else $h end)
-                  | .[$s].note              = (if $n == "" then .[$s].note // "" else $n end)' \
-            "$file" > "$tmp"
-    else
-        _jq -n --arg s "$seat" --arg se "$session" --arg p "$pane" \
-              --arg a "$asid" --arg h "$harness" --arg n "$note" \
-              --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
-            {($s): {session: $se, pane_id: $p, agent_session_id: $a,
-                    harness: $h, note: $n, updated_at: $t}}' > "$tmp"
-    fi
-    mv "$tmp" "$file"
+pin_get() {
+    local id
+    id="$(seat_id "$1")"
+    bd seat list --json | _jq -e --arg id "$id" '.[$id]'
 }
 
-pin_delete() { # $1 seat
-    local file tmp
-    file="$(bd_notify_pins_file)" || return 0
-    [ -f "$file" ] || return 0
-    if [ -L "$file" ]; then file="$(readlink -f "$file")"; fi
-    tmp="$(mktemp "$file.tmp.XXXXXX")"
-    _jq 'del(.[$s])' --arg s "$1" "$file" > "$tmp"
-    mv "$tmp" "$file"
+pin_write() {
+    local id
+    id="$(seat_id "$1")"
+    local args=(seat register "$id" --session "$2" --pane "$3")
+    if [ -n "${4:-}" ]; then args+=(--agent-session "$4"); fi
+    bd "${args[@]}"
+}
+
+pin_delete() {
+    local id
+    id="$(seat_id "$1")"
+    bd seat unbind "$id"
 }
 
 # ---------------------------------------------------------------------------

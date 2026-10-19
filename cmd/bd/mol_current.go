@@ -529,7 +529,7 @@ func printMoleculeProgress(mol *MoleculeProgress) {
 	fmt.Printf("You're working on molecule %s\n", ui.RenderAccent(mol.MoleculeID))
 	fmt.Printf("  %s\n", mol.MoleculeTitle)
 	if mol.Assignee != "" {
-		fmt.Printf("  Assigned to: %s\n", mol.Assignee)
+		fmt.Printf("  Assigned to: %s\n", seatDisplay(mol.Assignee))
 	}
 	fmt.Println()
 
