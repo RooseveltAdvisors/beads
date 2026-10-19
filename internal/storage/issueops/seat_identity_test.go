@@ -31,3 +31,24 @@ func TestSeatWriteRejectsUnknownName(t *testing.T) {
 		t.Fatalf("identity copies drift: %+v", issue)
 	}
 }
+
+func TestLegacySeatWritesKeepAssigneeIDEmpty(t *testing.T) {
+	ctx := seats.WithRegistry(context.Background(), seats.Registry{})
+	issue := &types.Issue{Assignee: "alice", AssigneeID: "jon"}
+	if err := ResolveIssueSeats(ctx, issue); err != nil {
+		t.Fatal(err)
+	}
+	if issue.AssigneeID != "" || issue.Assignee != "alice" {
+		t.Fatalf("legacy insert kept a diverging assignee_id: %+v", issue)
+	}
+	updates := map[string]any{"assignee": "alice"}
+	if err := ResolveSeatUpdates(ctx, updates); err != nil {
+		t.Fatal(err)
+	}
+	if id, ok := updates["assignee_id"]; !ok || id != "" {
+		t.Fatalf("legacy reassignment left assignee_id stale: %+v", updates)
+	}
+	if got := SeatAssigneeID(ctx, "jon"); got != "" {
+		t.Fatalf("legacy claim would write assignee_id %q", got)
+	}
+}

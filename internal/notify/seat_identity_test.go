@@ -111,3 +111,36 @@ func TestSeatReconcilerMarksStaleAndRebindsExactSession(t *testing.T) {
 		t.Fatalf("exact session not rebound: %+v", s)
 	}
 }
+
+func TestSeatBackfillKeepsAckedCooldownHistory(t *testing.T) {
+	o, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	var legacy []byte
+	for i, issue := range []string{"bd-acked", "bd-pending"} {
+		line, err := json.Marshal(Record{Seq: int64(i + 1), Seat: "old-worker", IssueID: issue, Kind: KindStaleClaim, CreatedAt: now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		legacy = append(legacy, append(line, '\n')...)
+	}
+	if err := os.WriteFile(filepath.Join(o.Dir(), OutboxFile), legacy, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.AckSeat("old-worker", 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Backfill(identityRegistry(t), true, false); err != nil {
+		t.Fatal(err)
+	}
+	recent, err := o.HasRecent("bd-acked", KindStaleClaim, time.Now().Add(-time.Hour))
+	if err != nil || !recent {
+		t.Fatalf("backfill dropped acked cooldown history: %v %v", recent, err)
+	}
+	pending, err := o.Pending("seat:worker")
+	if err != nil || len(pending) != 1 || pending[0].IssueID != "bd-pending" {
+		t.Fatalf("acked row resurfaced or pending lost: %+v %v", pending, err)
+	}
+}

@@ -119,7 +119,7 @@ func ClaimIssueInTx(ctx context.Context, tx DBTX, id string, actor string) (*Cla
 	if assigneeOK {
 		var result sql.Result
 		if oldIssue.StartedAt == nil {
-			args := append([]interface{}{actor, actor, now, now}, rowLockArgs...)
+			args := append([]interface{}{actor, SeatAssigneeID(ctx, actor), now, now}, rowLockArgs...)
 			args = append(args, id, oldIssue.RowVersion)
 			args = append(args, statusArgs...)
 			result, err = tx.ExecContext(ctx, fmt.Sprintf(`
@@ -128,7 +128,7 @@ func ClaimIssueInTx(ctx context.Context, tx DBTX, id string, actor string) (*Cla
 				WHERE id = ? AND row_lock = ? AND status IN (%s)
 			`, issueTable, rowLockClause, statusPlaceholders), args...)
 		} else {
-			args := append([]interface{}{actor, actor, now}, rowLockArgs...)
+			args := append([]interface{}{actor, SeatAssigneeID(ctx, actor), now}, rowLockArgs...)
 			args = append(args, id, oldIssue.RowVersion)
 			args = append(args, statusArgs...)
 			result, err = tx.ExecContext(ctx, fmt.Sprintf(`

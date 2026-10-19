@@ -37,7 +37,7 @@ func (o *Outbox) Backfill(r seats.Registry, apply, flush bool) ([]RekeyRow, erro
 		return nil, err
 	}
 	var report []RekeyRow
-	var pending []Record
+	var acked, pending []Record
 	changed, unresolved := false, false
 	var highest int64
 	for _, rec := range all {
@@ -45,6 +45,7 @@ func (o *Outbox) Backfill(r seats.Registry, apply, flush bool) ([]RekeyRow, erro
 			highest = rec.Seq
 		}
 		if rec.Seq <= acks[strings.ToLower(rec.Seat)] {
+			acked = append(acked, rec)
 			continue
 		}
 		row := RekeyRow{Seq: rec.Seq, IssueID: rec.IssueID, Name: rec.Seat, Action: "unchanged"}
@@ -92,11 +93,13 @@ func (o *Outbox) Backfill(r seats.Registry, apply, flush bool) ([]RekeyRow, erro
 			highest = seq
 		}
 	}
-	var data []byte
 	for i := range pending {
 		highest++
 		pending[i].Seq = highest
-		line, err := json.Marshal(pending[i])
+	}
+	var data []byte
+	for _, rec := range append(acked, pending...) {
+		line, err := json.Marshal(rec)
 		if err != nil {
 			return report, err
 		}

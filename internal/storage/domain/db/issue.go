@@ -503,7 +503,7 @@ func (r *issueSQLRepositoryImpl) Claim(ctx context.Context, id, actor string, op
 	if assigneeOK {
 		var res sql.Result
 		if startedWasZero {
-			args := append([]any{actor, actor, now, now}, rowLockArgs...)
+			args := append([]any{actor, issueops.SeatAssigneeID(ctx, actor), now, now}, rowLockArgs...)
 			args = append(args, id, oldIssue.RowVersion)
 			args = append(args, statusArgs...)
 			//nolint:gosec // G201: table is one of two hardcoded constants
@@ -513,7 +513,7 @@ func (r *issueSQLRepositoryImpl) Claim(ctx context.Context, id, actor string, op
 				WHERE id = ? AND row_lock = ? AND (%s)
 			`, table, rowLockClause, statusPredicate), args...)
 		} else {
-			args := append([]any{actor, actor, now}, rowLockArgs...)
+			args := append([]any{actor, issueops.SeatAssigneeID(ctx, actor), now}, rowLockArgs...)
 			args = append(args, id, oldIssue.RowVersion)
 			args = append(args, statusArgs...)
 			//nolint:gosec // G201: table is one of two hardcoded constants

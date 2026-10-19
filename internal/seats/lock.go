@@ -1,12 +1,18 @@
 package seats
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/steveyegge/beads/internal/lockfile"
 )
+
+// lockWait bounds how long a writer queues behind another; the critical
+// sections are short file rewrites.
+const lockWait = 10 * time.Second
 
 // LockFile serializes JSON-file updates across processes. This protects the
 // registry/outbox files, not the database or its engine. The lock inode is
@@ -19,9 +25,17 @@ func LockFile(path string) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := lockfile.FlockExclusiveNonBlock(f); err != nil {
-		_ = f.Close()
-		return nil, fmt.Errorf("identity files busy (%s): %w; retry after the current writer", path, err)
+	deadline := time.Now().Add(lockWait)
+	for {
+		err = lockfile.FlockExclusiveNonBlock(f)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, lockfile.ErrLockBusy) || time.Now().After(deadline) {
+			_ = f.Close()
+			return nil, fmt.Errorf("identity files busy (%s): %w; retry after the current writer", path, err)
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 	return func() {
 		if err := f.Close(); err != nil {

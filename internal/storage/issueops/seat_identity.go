@@ -17,6 +17,7 @@ func ResolveIssueSeats(ctx context.Context, issue *types.Issue) error {
 	}
 	r, strict := seats.FromContext(ctx)
 	if !strict || !seats.Strict(r) {
+		issue.AssigneeID = ""
 		return nil
 	}
 	assignment := issue.AssigneeID
@@ -77,6 +78,9 @@ func ResolveSeatUpdates(ctx context.Context, updates map[string]interface{}) err
 	}
 	r, strict := seats.FromContext(ctx)
 	if !strict || !seats.Strict(r) {
+		if _, ok := updates["assignee"]; ok {
+			updates["assignee_id"] = ""
+		}
 		return nil
 	}
 	if _, supplied := updates["assignee_id"]; supplied {
@@ -101,4 +105,13 @@ func ResolveSeatUpdates(ctx context.Context, updates map[string]interface{}) err
 		}
 	}
 	return nil
+}
+
+// SeatAssigneeID is the assignee_id written beside assignee: the seat ID in a
+// strict workspace, empty in a legacy one so the two columns never diverge.
+func SeatAssigneeID(ctx context.Context, assignee string) string {
+	if r, ok := seats.FromContext(ctx); ok && seats.Strict(r) {
+		return assignee
+	}
+	return ""
 }

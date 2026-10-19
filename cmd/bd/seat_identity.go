@@ -34,10 +34,6 @@ func bindSeatIdentity(cmd *cobra.Command, beadsDir string, write bool) error {
 	if !seats.Strict(r) {
 		return nil
 	}
-	// Migration must be able to report historic unknown names without an actor.
-	if cmd == seatBackfillCmd {
-		return nil
-	}
 	for _, key := range []string{"assignee", "owner", "if-assignee"} {
 		flag := cmd.Flags().Lookup(key)
 		if flag == nil || flag.Value.String() == "" {

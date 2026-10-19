@@ -1,6 +1,7 @@
 package seats
 
 import (
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -55,4 +56,18 @@ func TestSeatRestartKeepsIdentity(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(loaded, r) {
 		t.Fatalf("round trip: %v %v", loaded, err)
 	}
+}
+
+func TestLockFileWaitsForCurrentWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "outbox.lock")
+	release, err := LockFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.AfterFunc(100*time.Millisecond, release)
+	second, err := LockFile(path)
+	if err != nil {
+		t.Fatalf("contended writer failed instead of waiting: %v", err)
+	}
+	second()
 }
