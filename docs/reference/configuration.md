@@ -5,9 +5,6 @@ description: Complete reference for bd configuration across config.yaml and data
 
 Complete configuration reference for beads.
 
-Last reviewed: 2026-10-12
-
-Freshness source: `cmd/bd/main.go`, `cmd/bd/config.go`, and `internal/configfile/`, and `internal/storage/issueops/due_required.go`.
 Last reviewed: 2026-10-18
 
 Freshness source: `cmd/bd/main.go`, `cmd/bd/config.go`, `internal/configfile/`, `internal/storage/issueops/due_required.go`, and `internal/storage/issueops/queue_cap.go`.
