@@ -1424,7 +1424,9 @@ func (s *DoltStore) SetEventsJournalEnabled(enabled bool) {
 }
 
 func (s *DoltStore) scopeEventsJournalTransaction(tx *sql.Tx) func() {
-	return issueops.ScopeEventsJournalTransaction(tx, s.eventsJournalEnabled.Load())
+	clearSeats := issueops.ScopeSeatRegistryTransaction(tx, filepath.Join(s.beadsDir, "notify"))
+	clearJournal := issueops.ScopeEventsJournalTransaction(tx, s.eventsJournalEnabled.Load())
+	return func() { clearSeats(); clearJournal() }
 }
 
 // SetVersionedHistoryEnabled activates dual-write issue-version history for

@@ -775,7 +775,7 @@ guarded and resumable. **Initial P1 scope: eight replicated tables in five files
 `NNNN` migration slots: slot
 0067 is occupied by the merged versioned-beads Phase 1 migration (`issue_versions`,
 the `store_epoch` singleton, `issues.current_revision`); slot 0068 is reserved
-by its still-open Phase 2 (`0070_add_attribution_status`,
+by its still-open Phase 2 (`0071_add_attribution_status`,
 `issue_versions.attribution_status` and byte-preserving `durable_state` LONGBLOB
 storage; the `version_id` and participation
 steps remain deferred at the §0a pin),

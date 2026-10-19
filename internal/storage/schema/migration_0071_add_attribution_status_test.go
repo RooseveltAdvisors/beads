@@ -24,8 +24,8 @@ import (
 // content-derived token hashes. The writer now stores the RFC 8785 (JCS)
 // canonical bytes; the table is empty in this era, so no data converts.
 
-const migration0070Up = "0070_add_attribution_status.up.sql"
-const migration0070Down = "0070_add_attribution_status.down.sql"
+const migration0070Up = "0071_add_attribution_status.up.sql"
+const migration0070Down = "0071_add_attribution_status.down.sql"
 
 // TestMigration0068AddsAttributionStatus is a pure-Go, DB-independent check
 // of the frozen migration bytes themselves — it runs even where no `dolt`

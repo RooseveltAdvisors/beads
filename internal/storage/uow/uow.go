@@ -2,6 +2,7 @@ package uow
 
 import (
 	"context"
+	"github.com/steveyegge/beads/internal/storage/issueops"
 
 	"github.com/steveyegge/beads/internal/storage/domain"
 	"github.com/steveyegge/beads/internal/storage/domain/db"
@@ -131,4 +132,8 @@ func (u *baseUOW) EventsJournalUseCase() domain.EventsJournalUseCase {
 		u.eventsJournalUseCase = domain.NewEventsJournalUseCase(db.NewEventsJournalSQLRepository(u.tx.Runner()))
 	}
 	return u.eventsJournalUseCase
+}
+
+func (u *baseUOW) IdentityContext(ctx context.Context) context.Context {
+	return issueops.SeatContext(ctx, u.tx.Runner())
 }

@@ -184,6 +184,10 @@ func importIssuesCore(ctx context.Context, _ string, store storage.DoltStorage, 
 		// rows it restores were authored elsewhere, and the backfill that gives
 		// legacy rows a due date is itself an import.
 		SkipDueRequired: true,
+		// Import is equally exempt from the queue ceilings (queue_cap.go):
+		// restoring a repository's beads legitimately overfills one assignee's
+		// queue, and the ceiling exists to stop intake, not a restore.
+		SkipQueueCap: true,
 		OnSkippedDependency: func(issueID, dependsOnID, reason string) {
 			skipped := fmt.Sprintf("%s -> %s: %s", issueID, dependsOnID, reason)
 			if _, ok := skippedDependencySet[skipped]; ok {

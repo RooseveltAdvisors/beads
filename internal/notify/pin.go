@@ -3,6 +3,7 @@ package notify
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/steveyegge/beads/internal/seats"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +13,7 @@ import (
 const (
 	// PinsFile is the exact seat → herdr target map. Delivery never
 	// discovers a pane; it only uses this file.
-	PinsFile = "pins.json"
+	PinsFile = "pins.json" // Legacy migration input only.
 	// HoldsFile records seats whose drain held for parent escalation.
 	HoldsFile = "holds.json"
 
@@ -38,6 +39,7 @@ const (
 // Pin is an exact delivery target. Session+pane_id and/or agent_session_id
 // must match a live herdr instance with no scoring or lookalike fallback.
 type Pin struct {
+	Liveness       string `json:"liveness,omitempty"`
 	Session        string `json:"session,omitempty"`
 	PaneID         string `json:"pane_id,omitempty"`
 	AgentSessionID string `json:"agent_session_id,omitempty"`
@@ -57,7 +59,7 @@ func (p Pin) Matches(inst Instance) bool {
 		return false
 	}
 	if s := strings.TrimSpace(p.Session); s != "" {
-		if !strings.EqualFold(s, strings.TrimSpace(inst.Session)) {
+		if s != strings.TrimSpace(inst.Session) {
 			return false
 		}
 	}
@@ -99,7 +101,7 @@ type Delivery struct {
 //   - pi, cursor, codex: safe follow-up.
 //   - others: hold-until-idle.
 func DecideDelivery(seat string, pins map[string]Pin, live []Instance) Delivery {
-	seat = strings.TrimSpace(strings.ToLower(seat))
+	seat = strings.TrimSpace(seat)
 	if seat == "" || seat == UnassignedSeat {
 		return Delivery{Reason: HoldNoPin, Classification: ExitNoPin}
 	}
@@ -109,6 +111,9 @@ func DecideDelivery(seat string, pins map[string]Pin, live []Instance) Delivery 
 	pin, ok := pins[seat]
 	if !ok || !pin.Valid() {
 		return Delivery{Pin: pin, Reason: HoldNoPin, Escalate: true, Classification: ExitNoPin}
+	}
+	if pin.Liveness == seats.Stale || pin.Liveness == seats.Dead {
+		return Delivery{Pin: pin, Reason: HoldDeadPin, Escalate: true, Classification: ExitDeadPin}
 	}
 	inst, found := FindPinnedInstance(pin, live)
 	if !found {
@@ -193,40 +198,71 @@ func DecideDelivery(seat string, pins map[string]Pin, live []Instance) Delivery 
 
 // FindPinnedInstance returns the live instance that exactly matches pin.
 func FindPinnedInstance(pin Pin, live []Instance) (Instance, bool) {
+	var match Instance
+	found := false
 	for _, inst := range live {
 		if pin.Matches(inst) {
-			return inst, true
+			if found {
+				return Instance{}, false
+			}
+			match, found = inst, true
 		}
 	}
-	return Instance{}, false
+	return match, found
 }
 
-// LoadPins reads dir/pins.json. A missing file is an empty map, not an error.
+// LoadPins projects the registry's exact endpoints into the delivery pin
+// shape. When seats.json is ABSENT (workspace not yet migrated) it falls back
+// to the legacy pins.json so an un-migrated workspace keeps delivering instead
+// of degrading to an exit-5 hold. A missing pins.json is an empty map, not an
+// error.
 func LoadPins(dir string) (map[string]Pin, error) {
-	path := filepath.Join(dir, PinsFile)
-	data, err := os.ReadFile(path) //nolint:gosec // G304: dir is the outbox path; PinsFile is a constant
+	if _, err := os.Stat(filepath.Join(dir, seats.File)); err != nil {
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
+		return loadLegacyPins(dir)
+	}
+	r, err := seats.Load(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]Pin{}, nil
-		}
-		return nil, fmt.Errorf("notify: read pins: %w", err)
+		return nil, err
 	}
-	raw := map[string]Pin{}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("notify: parse pins: %w", err)
-	}
-	out := make(map[string]Pin, len(raw))
-	for k, v := range raw {
-		key := strings.ToLower(strings.TrimSpace(k))
-		if key == "" || key == UnassignedSeat {
-			continue
-		}
-		out[key] = v
+	out := make(map[string]Pin, len(r))
+	for id, seat := range r {
+		out[id] = Pin{Session: seat.Endpoint.Session, PaneID: seat.Endpoint.PaneID, AgentSessionID: seat.Endpoint.AgentSessionID, Liveness: seat.Liveness}
 	}
 	return out, nil
 }
 
-// LoadPins reads this outbox's pins.json.
+// legacyPin is one entry of the pre-migration pins.json map.
+type legacyPin struct {
+	Session        string `json:"session"`
+	PaneID         string `json:"pane_id"`
+	AgentSessionID string `json:"agent_session_id"`
+}
+
+// loadLegacyPins reads the old pins.json read path, kept so an un-migrated
+// workspace degrades to working rather than to a no-pin hold.
+func loadLegacyPins(dir string) (map[string]Pin, error) {
+	data, err := os.ReadFile(filepath.Join(dir, PinsFile)) //nolint:gosec // fixed legacy file in the notify dir
+	if os.IsNotExist(err) {
+		return map[string]Pin{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read pins: %w", err)
+	}
+	raw := map[string]legacyPin{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parse pins: %w", err)
+	}
+	out := make(map[string]Pin, len(raw))
+	for key, entry := range raw {
+		out[key] = Pin{Session: entry.Session, PaneID: entry.PaneID, AgentSessionID: entry.AgentSessionID, Source: "legacy-pins"}
+	}
+	return out, nil
+}
+
+// LoadPins reads this outbox's registry endpoints.
 func (o *Outbox) LoadPins() (map[string]Pin, error) {
 	return LoadPins(o.dir)
 }
@@ -246,6 +282,11 @@ type Hold struct {
 func (o *Outbox) SetHold(seat string, h Hold) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	release, lockErr := seats.LockFile(filepath.Join(o.dir, "outbox.lock"))
+	if lockErr != nil {
+		return lockErr
+	}
+	defer release()
 	seat = strings.ToLower(strings.TrimSpace(seat))
 	if seat == "" {
 		return fmt.Errorf("notify: hold requires a seat")
@@ -265,6 +306,11 @@ func (o *Outbox) SetHold(seat string, h Hold) error {
 func (o *Outbox) Holds() (map[string]Hold, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	release, lockErr := seats.LockFile(filepath.Join(o.dir, "outbox.lock"))
+	if lockErr != nil {
+		return nil, lockErr
+	}
+	defer release()
 	return o.loadHoldsLocked()
 }
 
@@ -272,6 +318,11 @@ func (o *Outbox) Holds() (map[string]Hold, error) {
 func (o *Outbox) ClearHold(seat string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	release, lockErr := seats.LockFile(filepath.Join(o.dir, "outbox.lock"))
+	if lockErr != nil {
+		return lockErr
+	}
+	defer release()
 	seat = strings.ToLower(strings.TrimSpace(seat))
 	if seat == "" {
 		return fmt.Errorf("notify: clear hold requires a seat")

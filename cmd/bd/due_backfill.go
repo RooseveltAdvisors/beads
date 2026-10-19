@@ -388,6 +388,11 @@ func truncateForReport(s string, max int) string {
 }
 
 func printJSON(v any) error {
+	var projectionErr error
+	v, projectionErr = projectSeatJSON(v)
+	if projectionErr != nil {
+		return projectionErr
+	}
 	encoded, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return HandleError("encoding report: %v", err)

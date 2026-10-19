@@ -2,6 +2,7 @@ package uow
 
 import (
 	"context"
+	"github.com/steveyegge/beads/internal/seats"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -38,6 +39,8 @@ func TestProviderImplementsEventsJournalConfigurer(t *testing.T) {
 func TestBeginTxScopesJournalActivationToThePinnedConn(t *testing.T) {
 	p, mock := newMockTxProvider(t)
 	p.SetEventsJournalEnabled(true)
+	p.seatDir = t.TempDir()
+	require.NoError(t, seats.Save(p.seatDir, seats.Registry{"test-actor": {Aliases: []string{"test-actor"}, Liveness: seats.Dead}}))
 
 	mock.ExpectExec("START TRANSACTION").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("UPDATE bd_events_seq SET next_seq").WillReturnResult(sqlmock.NewResult(0, 1))

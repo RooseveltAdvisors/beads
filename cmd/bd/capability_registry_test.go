@@ -279,7 +279,17 @@ func TestProxyCapabilityRegistryReasonsAreAssignedIndividually(t *testing.T) {
 		"notify pending": true,
 		"notify resolve": true,
 		"notify seats":   true,
-		"branch":         true, "diff": true, "flatten": true,
+		// Reviewed 2026-10-13 during the upstream sync merge (repro-5at): the
+		// seat registry is clone-local (.beads/seats.json), so all seven seat
+		// commands are design refusals over the proxy.
+		"seat backfill":    true,
+		"seat import-pins": true,
+		"seat list":        true,
+		"seat reconcile":   true,
+		"seat register":    true,
+		"seat rename":      true,
+		"seat unbind":      true,
+		"branch":           true, "diff": true, "flatten": true,
 		"conflicts": true, "conflicts list": true, "conflicts show": true, "conflicts resolve": true,
 		"vc": true, "vc merge": true, "vc commit": true, "vc status": true,
 		"federation": true, "federation sync": true, "federation status": true,

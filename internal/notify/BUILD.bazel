@@ -3,15 +3,19 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "notify",
     srcs = [
+        "backfill.go",
         "comment.go",
         "delivery.go",
         "herdr.go",
         "herdr_tab_actor.go",
         "outbox.go",
         "pin.go",
+        "pins_import.go",
+        "seats.go",
     ],
     importpath = "github.com/steveyegge/beads/internal/notify",
     visibility = ["//:__subpackages__"],
+    deps = ["//internal/seats"],
 )
 
 go_test(
@@ -20,13 +24,17 @@ go_test(
         "comment_test.go",
         "delivery_test.go",
         "e2e_test.go",
+        "fixture_test.go",
         "herdr_tab_actor_test.go",
         "main_test.go",
         "outbox_test.go",
         "pin_test.go",
+        "pins_fallback_test.go",
         "prompt_test.go",
+        "seat_identity_test.go",
     ],
     embed = [":notify"],
+    deps = ["//internal/seats"],
 )
 
 # --- begin repo_files (managed by tools/bazel/go_srcs.py; run `make bazel-sync`) ---

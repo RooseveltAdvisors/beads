@@ -41,7 +41,8 @@ type Issue struct {
 	IsBlocked bool `json:"is_blocked,omitempty"`
 
 	// ===== Assignment =====
-	Assignee         string `json:"assignee,omitempty"`
+	Assignee         string `json:"assignee,omitempty"` // Display projection; identity is AssigneeID.
+	AssigneeID       string `json:"assignee_id,omitempty"`
 	Owner            string `json:"owner,omitempty"` // Human owner for CV attribution (git author email)
 	EstimatedMinutes *int   `json:"estimated_minutes,omitempty"`
 
@@ -284,6 +285,7 @@ func (i *Issue) ComputeContentHash() string {
 	w.str(string(i.Status))
 	w.int(i.Priority)
 	w.str(string(i.IssueType))
+	w.str(i.AssigneeID)
 	w.str(i.Assignee)
 	w.str(i.Owner)
 	w.str(i.CreatedBy)

@@ -196,7 +196,11 @@ func ValidateScalarUpdates(ctx context.Context, tx DBTX, updates map[string]inte
 // that wants the config read only when it matters calls with nil first and
 // re-evaluates with the loaded aliases on refusal.
 func AuthorizeAssigneeTransferWithPools(before *types.Issue, request publicops.UpdateRequest, pools []string) error {
-	if !request.Patch.Assignee.Set || actorMatches(request.Patch.Assignee.Value, before.Assignee) || request.ExpectedAssignee != nil || request.ForceAssigneeTransfer || before.Status != types.StatusInProgress || before.Assignee == "" || actorMatches(before.Assignee, request.Actor) {
+	sameActor := actorMatches
+	if before.AssigneeID != "" {
+		sameActor = func(a, b string) bool { return a == b }
+	}
+	if !request.Patch.Assignee.Set || sameActor(request.Patch.Assignee.Value, before.Assignee) || request.ExpectedAssignee != nil || request.ForceAssigneeTransfer || before.Status != types.StatusInProgress || before.Assignee == "" || sameActor(before.Assignee, request.Actor) {
 		return nil
 	}
 	// Exact-string membership, deliberately not actorMatches (ga-v2k49, same

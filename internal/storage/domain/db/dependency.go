@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/steveyegge/beads/internal/seats"
 	"strings"
 	"time"
 
@@ -69,6 +70,12 @@ func (r *dependencySQLRepositoryImpl) pickDepTargetColumn(ctx context.Context, i
 }
 
 func (r *dependencySQLRepositoryImpl) Insert(ctx context.Context, dep *types.Dependency, actor string, opts domain.DepInsertOpts) error {
+	ctx = issueops.SeatContext(ctx, r.runner)
+	var resolveErr error
+	actor, resolveErr = seats.ResolveContext(ctx, actor)
+	if resolveErr != nil {
+		return resolveErr
+	}
 	if dep == nil {
 		return errors.New("db: DependencySQLRepository.Insert: dep must not be nil")
 	}

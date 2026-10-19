@@ -11,13 +11,15 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/beads/internal/beads"
 	"github.com/steveyegge/beads/internal/notify"
+	seatregistry "github.com/steveyegge/beads/internal/seats"
 	"github.com/steveyegge/beads/internal/storage/issueops"
 	"github.com/steveyegge/beads/internal/types"
 	"github.com/steveyegge/beads/internal/ui"
+	"path/filepath"
 )
 
 // notifyCmd is the beads-owned delivery surface. Time (due sweep) enqueues;
-// drain delivers only to an exact pin in .beads/notify/pins.json.
+// drain delivers only to an exact pin in .beads/notify/seats.json.
 var notifyCmd = &cobra.Command{
 	Use:   "notify",
 	Short: "Seat-addressed notify outbox (beads-owned delivery)",
@@ -28,7 +30,7 @@ bd due sweep enqueues one row per fired bead under its assignee seat
 (.beads/notify/). bd comment and bd comments add enqueue a comment ping
 for the assignee (skipping self-comments and unassigned beads).
 bd notify drain delivers that seat only to the exact herdr
-target recorded in .beads/notify/pins.json (session + pane id, or agent
+target recorded in .beads/notify/seats.json (session + pane id, or agent
 session id). Delivery uses the pinned pane's harness follow-up submit
 when verified (so a due fire does not steer mid-turn), holds until idle
 for unverified mid-turn harnesses, and uses Enter/steer otherwise.
@@ -71,6 +73,12 @@ var notifyPendingCmd = &cobra.Command{
 		o, err := openNotifyOutbox()
 		if err != nil {
 			return err
+		}
+		if strings.TrimSpace(seat) != "" {
+			seat, err = o.ResolveSeat(seat)
+			if err != nil {
+				return err
+			}
 		}
 		pending, err := o.Pending(seat)
 		if err != nil {
@@ -125,7 +133,7 @@ var notifySeatsCmd = &cobra.Command{
 var notifyResolveCmd = &cobra.Command{
 	Use:   "resolve",
 	Short: "Human diagnostic: show a seat's exact pin and whether it is live",
-	Long: `Show the authoritative pin for a seat (from .beads/notify/pins.json)
+	Long: `Show the authoritative pin for a seat (from .beads/notify/seats.json)
 and whether that exact target is live in herdr.
 
 Delivery is exact: pinned target live -> deliver there; no pin or dead pin
@@ -147,7 +155,11 @@ target by hand with bd-notify-pin set <seat> <session> <pane>.`,
 			if perr != nil {
 				return HandleError("pins: %v", perr)
 			}
-			pin, pinned = pins[strings.ToLower(strings.TrimSpace(seat))]
+			seat, perr = o.ResolveSeat(seat)
+			if perr != nil {
+				return perr
+			}
+			pin, pinned = pins[seat]
 			if pinned && !pin.Valid() {
 				pinned = false
 			}
@@ -177,7 +189,7 @@ target by hand with bd-notify-pin set <seat> <session> <pane>.`,
 			fmt.Printf("%s seat %s pin: %s %s (%s)\n",
 				ui.RenderAccent("*"), seat, pin.Session, pin.PaneID, live)
 		} else {
-			fmt.Printf("%s seat %s: no pin in .beads/notify/pins.json (drain will hold and escalate)\n",
+			fmt.Printf("%s seat %s: no pin in .beads/notify/seats.json (drain will hold and escalate)\n",
 				ui.RenderWarn("!"), seat)
 		}
 		return nil
@@ -197,7 +209,7 @@ var notifyDrainCmd = &cobra.Command{
 	Long: `Drain pending notify rows for one seat, the current actor, or --all assigned seats.
 
 Default transport is herdr, exact-pin only:
-  1. Load .beads/notify/pins.json (seat → session+pane_id or agent_session_id)
+  1. Load .beads/notify/seats.json (seat → session+pane_id or agent_session_id)
   2. Discover live herdr agents
   3. If the pinned target is live, deliver with that pane's harness mode:
      follow_up (pi Option+Enter, cursor/codex Tab), hold-until-idle for
@@ -239,6 +251,17 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 			return err
 		}
 
+		if !all {
+			seat, err = o.ResolveSeat(seat)
+			if err != nil {
+				return err
+			}
+		}
+		releaseDrain, err := seatregistry.LockFile(filepath.Join(o.Dir(), "drain.lock"))
+		if err != nil {
+			return err
+		}
+		defer releaseDrain()
 		var seats []string
 		if all {
 			seats, err = o.Seats()
@@ -485,6 +508,14 @@ func pingCommentAssignee(assignee, issueID, issueTitle, author, text string) {
 	if err != nil {
 		return
 	}
+	seat, err = o.ResolveSeat(seat)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "notify: %v\n", err)
+		return
+	}
+	if authorID, resolveErr := o.ResolveSeat(author); resolveErr == nil && authorID == seat {
+		return
+	}
 	title := notify.CommentPingTitle(issueTitle, author, text)
 	if _, err := o.Enqueue(seat, issueID, notify.KindComment, title); err != nil {
 		fmt.Fprintf(os.Stderr, "notify: enqueue comment ping: %v\n", err)
@@ -496,6 +527,12 @@ func pingCommentAssignee(assignee, issueID, issueTitle, author, text string) {
 // tryDrainCommentPing delivers pending rows for seat through the exact pin.
 // No pin → hold+escalate without herdr discovery. Tests skip herdr entirely.
 func tryDrainCommentPing(o *notify.Outbox, seat string) {
+	release, err := seatregistry.LockFile(filepath.Join(o.Dir(), "drain.lock"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "notify: %v\n", err)
+		return
+	}
+	defer release()
 	if os.Getenv("BEADS_TEST_MODE") != "" {
 		return
 	}
@@ -583,7 +620,7 @@ func holdError(dec notify.Delivery) string {
 	case notify.HoldUntilIdle:
 		return fmt.Sprintf("target %s (%s) is working; holding until idle", dec.Instance.PaneID, dec.Instance.Harness)
 	default:
-		return "no pin in .beads/notify/pins.json"
+		return "no pin in .beads/notify/seats.json"
 	}
 }
 

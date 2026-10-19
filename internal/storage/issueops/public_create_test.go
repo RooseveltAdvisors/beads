@@ -85,7 +85,7 @@ func TestPublicCreateIssueFieldClassificationIsComplete(t *testing.T) {
 		"MolType": true, "WorkType": true, "EventKind": true, "Actor": true, "Target": true, "Payload": true,
 	}
 	ignored := map[string]bool{
-		"ContentHash": true, "LeaseExpiresAt": true, "HeartbeatAt": true, "LeaseGrantedNode": true, "RowVersion": true,
+		"AssigneeID": true, "ContentHash": true, "LeaseExpiresAt": true, "HeartbeatAt": true, "LeaseGrantedNode": true, "RowVersion": true,
 		"CompactionLevel": true, "CompactedAt": true, "CompactedAtCommit": true, "OriginalSize": true,
 		"IDPrefix": true, "PrefixOverride": true, "IsLitePartial": true,
 		// IsBlocked is the persisted readiness projection, computed from the

@@ -153,6 +153,15 @@ var funcNameExemptions = map[string]string{
 	// captured and could cause a legitimate subsequent CAS check to fail as a
 	// spurious lost update.
 	"RecordVersionInTx": "runs after the primary mutation already minted a fresh row_lock in the same transaction; reminting here would double-bump the token and invalidate the RowVersion/CAS value already returned to that mutation's caller",
+	// backfillSeatHistory re-keys audit rows (events, wisp_events, comments,
+	// wisp_comments, dependencies, wisp_dependencies, bd_events_journal,
+	// leases) whose actor/author/created_by/holder column is being migrated to
+	// a seat ID by `bd seat backfill`. Its %s-templated UPDATE never targets
+	// the issues or wisps table — those two planes are written by
+	// BackfillSeatIDsInTx, which stamps row_lock on every write — so there is
+	// no issues/wisps row whose lifecycle cells could zombie-merge behind a
+	// stale token.
+	"backfillSeatHistory": "seat-history backfill writes only aux audit tables; the issues/wisps plane stamps in BackfillSeatIDsInTx",
 }
 
 // TestAllIssueRowWritesStampRowLock is the load-bearing completeness guard for

@@ -18,6 +18,7 @@ import (
 
 	"github.com/steveyegge/beads/internal/configfile"
 	"github.com/steveyegge/beads/internal/debug"
+	"github.com/steveyegge/beads/internal/seats"
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/storage/dbproxy/proxy"
 	"github.com/steveyegge/beads/internal/storage/dbproxy/util"
@@ -33,6 +34,7 @@ const (
 )
 
 type doltSQLProvider struct {
+	seatDir       string
 	defaultBranch string
 	db            *sql.DB
 	// serverEndpoint is the exact transport endpoint used by the migration
@@ -121,6 +123,7 @@ func classifyInitSchemaError(err error) error {
 type ProviderOption func(*providerOptions)
 
 type providerOptions struct {
+	seatDir string
 	// preview opens for a command that promised not to mutate anything
 	// (--dry-run, --inspect). Such a command must reach its own RunE before
 	// anything writes, so the open may neither CREATE DATABASE nor run
@@ -153,6 +156,11 @@ type providerOptions struct {
 }
 
 // WithPreview opens the provider for a non-mutating preview command.
+// WithSeatsDirectory binds exact identity resolution to every UOW.
+func WithSeatsDirectory(dir string) ProviderOption {
+	return func(o *providerOptions) { o.seatDir = dir }
+}
+
 func WithPreview() ProviderOption {
 	return func(o *providerOptions) { o.preview = true }
 }
@@ -211,16 +219,18 @@ func (p *doltSQLProvider) BeginTx(ctx context.Context) (Tx, error) {
 		return nil, fmt.Errorf("uow: failed to start transaction: %w", err)
 	}
 
-	// Bind journal and versioned-history activation to the connection this unit
-	// of work is pinned to, AFTER START TRANSACTION so the seq allocation's
-	// UPDATE and the SELECT that must observe it are inside one transaction on
-	// one session. Both scopes are released when the connection is
-	// (doltServerTx.releaseConn / poisonConn), so an entry cannot outlive its
-	// transaction. The blocked-recheck scope is bound and released the same
-	// way; Commit takes what it recorded once the transaction has committed.
+	// Bind journal, versioned-history, seat-registry and blocked-recheck
+	// activation to the connection this unit of work is pinned to, AFTER START
+	// TRANSACTION so the seq allocation's UPDATE and the SELECT that must
+	// observe it are inside one transaction on one session. All scopes are
+	// released when the connection is (doltServerTx.releaseConn / poisonConn),
+	// so an entry cannot outlive its transaction. Blocked-recheck's Commit
+	// takes what it recorded once the transaction has committed.
+	clearSeats := issueops.ScopeSeatRegistryTransaction(conn, p.seatDir)
+	clearJournal := issueops.ScopeEventsJournalTransaction(conn, p.eventsJournalEnabled.Load())
 	return &doltServerTx{
 		conn:              conn,
-		clearJournalScope: issueops.ScopeEventsJournalTransaction(conn, p.eventsJournalEnabled.Load()),
+		clearJournalScope: func() { clearSeats(); clearJournal() },
 		clearVersionScope: issueops.ScopeVersionedHistoryTransaction(conn, p.versionedHistoryEnabled.Load()),
 		clearRecheckScope: issueops.ScopeBlockedRecheckTransaction(conn),
 	}, nil
@@ -851,6 +861,9 @@ func openPool(dsn string, prove func(*sql.DB) error) (*sql.DB, error) {
 }
 
 func openAndInitSchema(ctx context.Context, ep proxy.Endpoint, database, rootUser, rootPassword, tlsConfigName string, teamServer bool, expectedProjectID string, opts providerOptions) (UnitOfWorkProvider, error) {
+	if opts.seatDir == "" {
+		opts.seatDir = seats.Directory(ctx)
+	}
 	newProvider := func(pool *sql.DB) *doltSQLProvider {
 		return &doltSQLProvider{
 			defaultBranch:     defaultBranch,
@@ -859,6 +872,7 @@ func openAndInitSchema(ctx context.Context, ep proxy.Endpoint, database, rootUse
 			teamServer:        teamServer,
 			expectedProjectID: expectedProjectID,
 			preview:           opts.preview,
+			seatDir:           opts.seatDir,
 			readOnly:          opts.readOnly,
 			proxiedServerMode: opts.proxiedServerMode,
 		}

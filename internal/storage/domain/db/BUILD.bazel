@@ -28,6 +28,7 @@ go_library(
     visibility = ["//:__subpackages__"],
     deps = [
         "//internal/config",
+        "//internal/seats",
         "//internal/storage",
         "//internal/storage/dberrors",
         "//internal/storage/depid",

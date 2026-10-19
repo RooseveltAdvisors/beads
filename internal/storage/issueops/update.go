@@ -16,7 +16,7 @@ import (
 // IsAllowedUpdateField checks if a field name is valid for issue updates.
 func IsAllowedUpdateField(key string) bool {
 	allowed := map[string]bool{
-		"status": true, "priority": true, "title": true, "assignee": true, "owner": true,
+		"status": true, "priority": true, "title": true, "assignee": true, "assignee_id": true, "owner": true,
 		"description": true, "design": true, "acceptance_criteria": true, "notes": true,
 		"issue_type": true, "estimated_minutes": true, "external_ref": true, "spec_id": true,
 		"started_at": true,
@@ -365,7 +365,11 @@ func UpdateIssueWithoutEventInTx(ctx context.Context, tx DBTX, id string, update
 // mints once after the last patch, so the version's durable_state carries the
 // patched labels and edges rather than the pre-patch row.
 func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string]interface{}, actor string, recordEvent bool, mintVersion bool) (*UpdateResult, error) {
+	ctx = SeatContext(ctx, tx)
 	updates = cloneUpdateFields(updates)
+	if err := ResolveSeatUpdates(ctx, updates); err != nil {
+		return nil, err
+	}
 	// Pop the override before anything reads the map as a set of columns. It
 	// has to come out ahead of the no-op filter too: the filter keeps every key
 	// it does not recognize, so a surviving override would reach the field
@@ -739,6 +743,8 @@ func issueFieldMatches(issue *types.Issue, key string, value interface{}) (bool,
 		return matchesIssueType(issue.IssueType, value), nil
 	case "assignee":
 		return matchesString(issue.Assignee, value), nil
+	case "assignee_id":
+		return matchesString(issue.AssigneeID, value), nil
 	case "owner":
 		return matchesString(issue.Owner, value), nil
 	case "estimated_minutes":

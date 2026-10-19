@@ -192,7 +192,7 @@ var commentsAddCmd = &cobra.Command{
 	Long: `Add a comment to an issue.
 
 A comment on an assigned bead pings that assignee's pinned pane
-(.beads/notify/pins.json). Self-comments and unassigned beads do not ping.
+(.beads/notify/seats.json). Self-comments and unassigned beads do not ping.
 
 Examples:
   # Add a comment

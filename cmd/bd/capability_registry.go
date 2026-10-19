@@ -265,6 +265,16 @@ var proxyCapabilityRegistry = []capabilityRow{
 	refusedPath("notify pending", "proxy.notify.local-only", ProxyReasonDesign, ""),
 	refusedPath("notify resolve", "proxy.notify.local-only", ProxyReasonDesign, ""),
 	refusedPath("notify seats", "proxy.notify.local-only", ProxyReasonDesign, ""),
+	// The seat registry is clone-local state under .beads/seats.json: it names
+	// who may hold an assignee_id in THIS clone, and the backfill re-keys local
+	// audit rows against it. All seven refuse over the proxy by design.
+	refusedPath("seat backfill", "proxy.seat.local-only", ProxyReasonDesign, ""),
+	refusedPath("seat import-pins", "proxy.seat.local-only", ProxyReasonDesign, ""),
+	refusedPath("seat list", "proxy.seat.local-only", ProxyReasonDesign, ""),
+	refusedPath("seat reconcile", "proxy.seat.local-only", ProxyReasonDesign, ""),
+	refusedPath("seat register", "proxy.seat.local-only", ProxyReasonDesign, ""),
+	refusedPath("seat rename", "proxy.seat.local-only", ProxyReasonDesign, ""),
+	refusedPath("seat unbind", "proxy.seat.local-only", ProxyReasonDesign, ""),
 
 	// --- backup / restore ---------------------------------------------------
 	// CALL DOLT_BACKUP(...) is pure SQL over a connection proxied mode already

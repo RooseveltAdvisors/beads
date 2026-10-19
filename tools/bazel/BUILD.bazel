@@ -239,6 +239,7 @@ release_cross_build(
         "//internal/recipes:recipes",
         "//internal/remotecache:remotecache",
         "//internal/routing:routing",
+        "//internal/seats:seats",
         "//internal/storage/backendnames:backendnames",
         "//internal/storage/backends:backends",
         "//internal/storage/batchbench:batchbench",

@@ -53,6 +53,10 @@ package schema
 // DML instead of that pattern.
 func cliCompatibleMigrationSQL(name, sqlText string) string {
 	switch name {
+	case "0070_add_assignee_id.up.sql":
+		return "ALTER TABLE issues ADD COLUMN assignee_id VARCHAR(255) NOT NULL DEFAULT '';\nALTER TABLE wisps ADD COLUMN assignee_id VARCHAR(255) NOT NULL DEFAULT '';"
+	case "0030_wisp_assignee_id.up.sql":
+		return "SELECT 1;" // synced 0070 already added it on the fresh-bundle path
 	case "0008_create_child_counters.up.sql":
 		// Fresh bundle bakes the final FK shape that runtime reaches after
 		// 0039 drops the original FK and ignored migration 0002 re-adds it.
@@ -136,7 +140,7 @@ func cliCompatibleMigrationSQL(name, sqlText string) string {
 		// Upstream versioned-beads Phase 1 (its own 0067, kept at 0067 here too) -
 		// not collide with house recurrence/due_missed already on fleet DBs.
 		return cliMigration0069AddVersionedBeadsSchema
-	case "0070_add_attribution_status.up.sql":
+	case "0071_add_attribution_status.up.sql":
 		// Direct DDL for the same reason as 0067: the source migration's
 		// PREPARE guards (INFORMATION_SCHEMA probes) are what make the raw
 		// .up.sql idempotent when replayed onto an already-migrated store,
@@ -146,7 +150,7 @@ func cliCompatibleMigrationSQL(name, sqlText string) string {
 		// yet, and still has durable_state as the JSON type 0067 gave it, so
 		// both of 0068's steps always fire on a fresh bundle.
 		return cliMigration0070AddAttributionStatus
-	case "0071_widen_issue_versions_datetime_precision.up.sql":
+	case "0072_widen_issue_versions_datetime_precision.up.sql":
 		// Direct DDL for the same reason as 0068: the source migration's
 		// PREPARE guards (DATETIME_PRECISION probes) are what make the raw
 		// .up.sql idempotent when replayed onto an already-widened store,

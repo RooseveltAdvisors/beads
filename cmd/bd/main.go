@@ -996,7 +996,7 @@ func resolveActorIdentity(withTabLabel bool) string {
 	if actorExplicit && strings.TrimSpace(actor) != "" {
 		return actor
 	}
-	if withTabLabel {
+	if withTabLabel && !commandSeatBound() {
 		if tabActor := notify.HerdrTabActor(); tabActor != "" {
 			return tabActor
 		}
@@ -1026,6 +1026,9 @@ func resolveActorIdentity(withTabLabel bool) string {
 // This is the foundation for HOP CV (curriculum vitae) chains per Decision 008.
 // Unlike actor (which tracks who executed), owner tracks the human responsible.
 func getOwner() string {
+	if commandSeatBound() {
+		return actor
+	}
 	// Check GIT_AUTHOR_EMAIL first - this is set during git commit operations
 	if authorEmail := os.Getenv("GIT_AUTHOR_EMAIL"); authorEmail != "" {
 		return authorEmail
@@ -1791,6 +1794,9 @@ var rootCmd = &cobra.Command{
 		previewMode := isPreviewCommand(cmd)
 		policy := effectiveRootStorePolicy(cmd.Name(), readonlyMode)
 		useReadOnly := policy.readOnly || previewMode
+		if err := bindSeatIdentity(cmd, beadsDir, !useReadOnly); err != nil {
+			return HandleError("%v", err)
+		}
 
 		// dc-6jaq: consult the migration freeze marker here, before any of
 		// this hook's own store-touching side effects — trackBdVersion below

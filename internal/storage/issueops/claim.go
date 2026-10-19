@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/steveyegge/beads/internal/seats"
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/types"
 	publicops "github.com/steveyegge/beads/issueops"
@@ -46,6 +47,12 @@ func ClaimIssueInTx(ctx context.Context, tx DBTX, id string, actor string) (*Cla
 //
 //nolint:gosec // G201: table names come from WispTableRouting (hardcoded constants)
 func claimIssueInTx(ctx context.Context, tx DBTX, id string, actor string, mintVersion bool) (*ClaimResult, error) {
+	ctx = SeatContext(ctx, tx)
+	var resolveErr error
+	actor, resolveErr = seats.ResolveContext(ctx, actor)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
 	// The CAS below writes assignee = actor. actor is user-settable (--actor /
 	// BEADS_ACTOR), so bound it against the VARCHAR(255) assignee column up front
 	// and return a typed ErrFieldTooLong rather than a raw backend error.
@@ -100,7 +107,11 @@ func claimIssueInTx(ctx context.Context, tx DBTX, id string, actor string, mintV
 	// config value, not a Gas Town identity that gets respelled per layer, so
 	// there is no cross-spelling variant to reconcile — canonicalizing it
 	// could only blur two administratively-distinct pool names into one.
-	assigneeOK := oldIssue.Assignee == "" || actorMatches(oldIssue.Assignee, actor) || slices.Contains(pools, oldIssue.Assignee)
+	sameActor := actorMatches
+	if oldIssue.AssigneeID != "" {
+		sameActor = func(a, b string) bool { return a == b }
+	}
+	assigneeOK := oldIssue.Assignee == "" || sameActor(oldIssue.Assignee, actor) || slices.Contains(pools, oldIssue.Assignee)
 
 	// Conditional UPDATE: only attempted while the issue was still claimable
 	// as of oldIssue, and even then CASed on row_lock rather than re-checking
@@ -120,21 +131,21 @@ func claimIssueInTx(ctx context.Context, tx DBTX, id string, actor string, mintV
 	if assigneeOK {
 		var result sql.Result
 		if oldIssue.StartedAt == nil {
-			args := append([]interface{}{actor, now, now}, rowLockArgs...)
+			args := append([]interface{}{actor, SeatAssigneeID(ctx, actor), now, now}, rowLockArgs...)
 			args = append(args, id, oldIssue.RowVersion)
 			args = append(args, statusArgs...)
 			result, err = tx.ExecContext(ctx, fmt.Sprintf(`
 				UPDATE %s
-				SET assignee = ?, status = 'in_progress', updated_at = ?, started_at = ?, %s
+				SET assignee = ?, assignee_id = ?, status = 'in_progress', updated_at = ?, started_at = ?, %s
 				WHERE id = ? AND row_lock = ? AND status IN (%s)
 			`, issueTable, rowLockClause, statusPlaceholders), args...)
 		} else {
-			args := append([]interface{}{actor, now}, rowLockArgs...)
+			args := append([]interface{}{actor, SeatAssigneeID(ctx, actor), now}, rowLockArgs...)
 			args = append(args, id, oldIssue.RowVersion)
 			args = append(args, statusArgs...)
 			result, err = tx.ExecContext(ctx, fmt.Sprintf(`
 				UPDATE %s
-				SET assignee = ?, status = 'in_progress', updated_at = ?, %s
+				SET assignee = ?, assignee_id = ?, status = 'in_progress', updated_at = ?, %s
 				WHERE id = ? AND row_lock = ? AND status IN (%s)
 			`, issueTable, rowLockClause, statusPlaceholders), args...)
 		}
@@ -156,7 +167,7 @@ func claimIssueInTx(ctx context.Context, tx DBTX, id string, actor string, mintV
 		// including a spelling difference across layers (ga-wzl83) — treat as
 		// success. This supports agent retry workflows where claim may be
 		// called multiple times after transient failures (GH#8).
-		if actorMatches(assignee, actor) && currentStatus == types.StatusInProgress {
+		if sameActor(assignee, actor) && currentStatus == types.StatusInProgress {
 			return &ClaimResult{OldIssue: oldIssue, IsWisp: isWisp}, nil
 		}
 		// The refusal carries the state that lost the CAS, read just above in
@@ -171,7 +182,7 @@ func claimIssueInTx(ctx context.Context, tx DBTX, id string, actor string, mintV
 		// wraps, which errors.Is, ParseClaimConflict and the proxied batch
 		// exit code all key on.
 		refusal := fmt.Errorf("%w%s%s", storage.ErrNotClaimable, storage.NotClaimableStatusFragment, currentStatus)
-		if assignee != "" && !actorMatches(assignee, actor) {
+		if assignee != "" && !sameActor(assignee, actor) {
 			switch {
 			// A pool-assigned issue reaches here only when the CAS lost for a
 			// non-assignee reason (status changed underneath us): report the

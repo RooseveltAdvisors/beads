@@ -54,6 +54,7 @@ go_library(
         "relations.go",
         "releaser.go",
         "schema.go",
+        "seat_identity.go",
         "slots.go",
         "statistics.go",
         "stats_reporter.go",
@@ -71,6 +72,7 @@ go_library(
     deps = [
         "//internal/config",
         "//internal/memoryapi",
+        "//internal/seats",
         "//internal/storage",
         "//internal/storage/domain",
         "//internal/storage/issueops",

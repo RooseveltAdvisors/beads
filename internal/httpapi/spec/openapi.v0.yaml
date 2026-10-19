@@ -6800,6 +6800,9 @@ components:
         assignee:
           type: string
           description: The actor currently holding the issue, if any.
+        assignee_id:
+          type: string
+          description: Immutable registered seat identity; assignee is its display projection.
         owner:
           type: string
         estimated_minutes:
@@ -7229,6 +7232,7 @@ components:
         issue_type: { type: string }
         is_blocked: { type: boolean }
         assignee: { type: string }
+        assignee_id: { type: string, description: Immutable registered seat identity. }
         owner: { type: string }
         estimated_minutes: { type: integer }
         created_at: { type: string, format: date-time }
@@ -7345,6 +7349,7 @@ components:
         issue_type: { type: string }
         is_blocked: { type: boolean }
         assignee: { type: string }
+        assignee_id: { type: string, description: Immutable registered seat identity. }
         owner: { type: string }
         estimated_minutes: { type: integer }
         created_at: { type: string, format: date-time }
@@ -7588,6 +7593,7 @@ components:
         issue_type: { type: string }
         is_blocked: { type: boolean }
         assignee: { type: string }
+        assignee_id: { type: string, description: Immutable registered seat identity. }
         owner: { type: string }
         estimated_minutes: { type: integer }
         created_at: { type: string, format: date-time }
@@ -7679,6 +7685,7 @@ components:
         issue_type: { type: string }
         is_blocked: { type: boolean }
         assignee: { type: string }
+        assignee_id: { type: string, description: Immutable registered seat identity. }
         owner: { type: string }
         estimated_minutes: { type: integer }
         created_at: { type: string, format: date-time }

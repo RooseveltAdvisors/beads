@@ -1,4 +1,4 @@
--- Migration 0070: Phase 2 dual-write schema for versioned beads (be-hs42e.3
+-- Migration 0071: Phase 2 dual-write schema for versioned beads (be-hs42e.3
 -- / gastownhall/beads#6135), step 6 of design section 16.3 (be-dt74u
 -- amendment, be-hs42e.3's design field), plus step 7 -- the durable_state
 -- LONGBLOB retype added at review, which has its own header further down.

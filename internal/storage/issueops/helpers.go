@@ -64,7 +64,7 @@ func TableRouting(issue *types.Issue) (issueTable, eventTable string) {
 // concurrent reclaim/close on the same row (see freshRowLock in lease.go).
 var issueUpsertColumns = []string{
 	"content_hash", "title", "description", "design", "acceptance_criteria",
-	"notes", "status", "priority", "issue_type", "assignee",
+	"notes", "status", "priority", "issue_type", "assignee", "assignee_id",
 	"estimated_minutes", "started_at", "closed_at", "external_ref",
 	"source_repo", "close_reason", "closed_by_session", "metadata",
 	"row_lock", "updated_at",
@@ -145,7 +145,7 @@ func issueInsertSQL(table string, rows int, suffix string) string {
 			await_type, await_id, timeout_ns, waiters,
 			due_at, defer_until, repeat_pattern, repeat_start, repeat_end, due_source, due_missed,
 			metadata,
-			row_lock, storage_class
+			row_lock, storage_class, assignee_id
 		) VALUES %s
 		%s
 	`, table, strings.Join(tuples, ", "), suffix)
@@ -163,7 +163,7 @@ const issueInsertRow = `(
 			?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?,
 			?,
-			?, ?
+			?, ?, ?
 		)`
 
 // issueInsertArgs binds issue to issueInsertRow. row_lock is minted fresh
@@ -180,12 +180,16 @@ func issueInsertArgs(issue *types.Issue) []any {
 		issue.AwaitType, issue.AwaitID, issue.Timeout.Nanoseconds(), FormatJSONStringArray(issue.Waiters),
 		issue.DueAt, issue.DeferUntil, issue.RepeatPattern, issue.RepeatStart, issue.RepeatEnd, string(issue.DueSource), issue.DueMissed,
 		JSONMetadata(issue.Metadata),
-		freshRowLock(), NullString(string(issue.StorageClass.Normalize())),
+		freshRowLock(), NullString(string(issue.StorageClass.Normalize())), issue.AssigneeID,
 	}
 }
 
 //nolint:gosec // G201: table is a hardcoded constant ("issues" or "wisps")
 func executeIssueInsert(ctx context.Context, tx DBTX, table string, issue *types.Issue, suffix string) error {
+	ctx = SeatContext(ctx, tx)
+	if err := ResolveIssueSeats(ctx, issue); err != nil {
+		return err
+	}
 	_, err := tx.ExecContext(ctx, issueInsertSQL(table, 1, suffix), issueInsertArgs(issue)...)
 	if err != nil {
 		return fmt.Errorf("insert issue into %s: %w", table, err)

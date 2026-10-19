@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/steveyegge/beads/internal/seats"
 	"strings"
 	"time"
 
@@ -249,6 +250,12 @@ func GetCommentCountsInTx(ctx context.Context, tx *sql.Tx, issueIDs []string) (m
 //
 //nolint:gosec // G201: table names come from hardcoded constants
 func AddIssueCommentInTx(ctx context.Context, tx *sql.Tx, issueID, author, text string) (*types.Comment, error) {
+	ctx = SeatContext(ctx, tx)
+	var resolveErr error
+	author, resolveErr = seats.ResolveContext(ctx, author)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
 	return addIssueCommentInTx(ctx, tx, issueID, author, text, time.Now().UTC().Truncate(time.Second), true)
 }
 

@@ -166,6 +166,7 @@ var beadDMLExemptions = map[string]string{
 	// mutation once (a create/rename/promote/delete emits a single row).
 	"InsertIssueIntoTable":                   "raw issue insert; the calling create entry point journals the create",
 	"InsertIssueIfNew":                       "raw issue insert; the calling create entry point journals the create",
+	"BackfillSeatIDsInTx":                    "explicit identity migration; reports each historic string without manufacturing activity",
 	"InsertIssueStrictInTx":                  "raw issue insert; the calling create/persistence-move entry point journals it",
 	"InsertDerivedComment":                   "raw comment insert; the calling comment/create entry point journals it",
 	"PersistLabels":                          "constituent label write of a create; the create entry point journals it",

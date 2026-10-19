@@ -66,7 +66,7 @@ type TxReadFunc[T any] func(ctx context.Context, uw UnitOfWork) (T, error)
 // RunTx is RunTxResult for work that produces no result.
 func RunTx(ctx context.Context, p UnitOfWorkProvider, work TxFunc) error {
 	_, err := RunTxResult(ctx, p, func(ctx context.Context, uw UnitOfWork) (struct{}, string, error) {
-		commitMsg, err := work(ctx, uw)
+		commitMsg, err := work(identityContext(ctx, uw), uw)
 		return struct{}{}, commitMsg, err
 	})
 	return err
@@ -149,7 +149,7 @@ func RunTxResultWithin[T any](ctx context.Context, p UnitOfWorkProvider, maxElap
 		}
 		defer closeAttempt(ctx, uw)
 
-		r, commitMsg, err := work(ctx, uw)
+		r, commitMsg, err := work(identityContext(ctx, uw), uw)
 		if err != nil {
 			if isSerializationError(err) {
 				return fail(err)
@@ -210,7 +210,7 @@ func RunTxEphemeral[T any](ctx context.Context, p UnitOfWorkProvider, work TxRea
 		}
 		defer closeAttempt(ctx, uw)
 
-		r, err := work(ctx, uw)
+		r, err := work(identityContext(ctx, uw), uw)
 		if err != nil {
 			if isSerializationError(err) {
 				return err
@@ -240,5 +240,14 @@ func RunTxRead[T any](ctx context.Context, p UnitOfWorkProvider, work TxReadFunc
 	}
 	defer closeAttempt(ctx, uw)
 
-	return work(ctx, uw)
+	return work(identityContext(ctx, uw), uw)
+}
+
+func identityContext(ctx context.Context, uw UnitOfWork) context.Context {
+	if bound, ok := uw.(interface {
+		IdentityContext(context.Context) context.Context
+	}); ok {
+		return bound.IdentityContext(ctx)
+	}
+	return ctx
 }

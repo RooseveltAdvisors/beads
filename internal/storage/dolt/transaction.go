@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -239,6 +240,8 @@ func (s *DoltStore) runDoltTransactionRecording(ctx context.Context, commitMsg s
 		}
 		defer ignoredCleanup()
 	}
+	clearSeats := issueops.ScopeSeatRegistryTransaction(regularTx, filepath.Join(s.beadsDir, "notify"))
+	defer clearSeats()
 	clearJournalScope := issueops.ScopeEventsJournalTransaction(regularTx, journalEnabled)
 	defer clearJournalScope()
 	// Versioned history binds to the SAME regular transaction the mutation runs
