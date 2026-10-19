@@ -67,6 +67,11 @@ func (o *importer) ImportBatch(ctx context.Context, request publicops.ImportBatc
 				// Exempt from the mandatory-due invariant for the reason the
 				// classic import path states (cmd/bd/import_shared.go).
 				SkipDueRequired: true,
+				// The queue ceilings are an intake stop, not a restore stop:
+				// queue_cap.go says imports bypass via SkipQueueCap, and an
+				// imported row's queue position is a property of the caller
+				// restoring it (same exemption class as SkipDueRequired).
+				SkipQueueCap: true,
 				OnSkippedDependency: func(issueID, dependsOnID, reason string) {
 					key := issueID + "\x00" + dependsOnID + "\x00" + reason
 					if _, ok := skippedSeen[key]; ok {
