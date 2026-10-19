@@ -2062,6 +2062,12 @@
     },
     {
       "schema": "Issue",
+      "member": "assignee_id",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "Issue",
       "member": "await_id",
       "type": "string",
       "required": false
@@ -2480,6 +2486,12 @@
     {
       "schema": "IssueDetails",
       "member": "assignee",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "IssueDetails",
+      "member": "assignee_id",
       "type": "string",
       "required": false
     },
@@ -3116,6 +3128,12 @@
     },
     {
       "schema": "IssueWithCounts",
+      "member": "assignee_id",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "IssueWithCounts",
       "member": "await_id",
       "type": "string",
       "required": false
@@ -3524,6 +3542,12 @@
     {
       "schema": "IssueWithDependencyMetadata",
       "member": "assignee",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "IssueWithDependencyMetadata",
+      "member": "assignee_id",
       "type": "string",
       "required": false
     },
@@ -4717,6 +4741,12 @@
     {
       "schema": "TreeNode",
       "member": "assignee",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "TreeNode",
+      "member": "assignee_id",
       "type": "string",
       "required": false
     },
