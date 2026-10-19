@@ -263,6 +263,12 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 		if n == 0 {
 			continue // rescued concurrently — leave it be
 		}
+		// The reschedule moved durable state (due_at, due_missed, sometimes
+		// priority), so it versions like every other mutator - the same call
+		// WakeExpiredDefersInTx makes for the rows it wakes.
+		if err := RecordVersionInTx(ctx, tx, c.id, DueTriggerActor); err != nil {
+			return fired, escalated, fmt.Errorf("version due reschedule %s: %w", c.id, err)
+		}
 		// The event carries the miss count, so a consumer reading the rail
 		// sees a first miss and a third one as different facts without
 		// re-reading the bead.
@@ -533,6 +539,10 @@ func SpawnRecurrenceInTx(ctx context.Context, tx DBTX, id, actor string) (SpawnR
 		return result, fmt.Errorf("spawn recurrence for %s: insert %s: %w", id, newID, err)
 	}
 	result.ID = newID
+	// The spawned occurrence is a NEW bead; it versions like any create.
+	if err := RecordVersionInTx(ctx, tx, newID, actor); err != nil {
+		return result, fmt.Errorf("spawn recurrence for %s: version %s: %w", id, newID, err)
+	}
 	result.ChangedTables = map[string]bool{"issues": true, "events": true}
 	// Labels live in their own table, so the row insert above does not carry
 	// them. A recurring chore's label set is part of what the work IS — the

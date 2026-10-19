@@ -49,6 +49,11 @@ func init() {
 	registerContractLeg(contractLeg{name: "dolt", wiringRoot: "internal/storage/dolt"})
 	registerContractLeg(contractLeg{name: "embeddeddolt", wiringRoot: "internal/storage/embeddeddolt"})
 	registerContractLeg(contractLeg{name: "uow", wiringRoot: "internal/storage/uow"})
+	registerContractLeg(contractLeg{
+		name:            "http",
+		wiringRoot:      "internal/httpclient",
+		adoptionCeiling: 0,
+	})
 }
 
 // contractLeg is one registered backend leg: what the lock calls it, where its
@@ -102,7 +107,14 @@ func registerContractLeg(leg contractLeg) {
 // reason the leg table does: a leg registered by a distribution built on top of
 // this repository has to be able to bring its waivers with it, in its own file,
 // without editing a literal this repository owns.
-var unwiredContractEntrypoints = map[string]map[string]string{}
+var unwiredContractEntrypoints = map[string]map[string]string{
+	// The http backend refuses comment deletion with a typed error until a
+	// delete-comment route exists (see internal/httpclient/commenter.go), so
+	// the delete contract case cannot run there. Everything else wires.
+	"http": {
+		"RunCommenterDeletesComment": "http backend refuses delete with a typed error until a delete-comment route exists",
+	},
+}
 
 // duplicateContractLegWaivers records every waiver registered twice for one
 // leg. A second registration is refused rather than merged: silently taking one
