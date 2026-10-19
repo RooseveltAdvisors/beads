@@ -64,7 +64,7 @@ func TestPRCIGateRequiresPolicyAndLintWrappers(t *testing.T) {
 func TestPRComplexityReportIsAdvisoryAndBestEffort(t *testing.T) {
 	workflow := readCIWorkflow(t, "pr.yml")
 	job := workflow.job(t, "complexity-report")
-	if job.RunsOn != "ubuntu-latest" || job.TimeoutMinutes != 0 || job.ContinueOnError {
+	if job.RunsOn.String() != "ubuntu-latest" || job.TimeoutMinutes != 0 || job.ContinueOnError {
 		t.Errorf("complexity job must have no job timeout/continue-on-error: runs-on=%q timeout=%d continue=%v", job.RunsOn, job.TimeoutMinutes, job.ContinueOnError)
 	}
 	if contains(job.Needs, "ci-gate") {
@@ -98,7 +98,7 @@ func TestPRWorkflowExercisesWindowsBenchmarkEnvScrubbing(t *testing.T) {
 	workflow := readCIWorkflow(t, "pr.yml")
 	job := workflow.job(t, "pr-preflight-platforms")
 
-	if job.RunsOn != "${{ matrix.os }}" {
+	if job.RunsOn.String() != "${{ matrix.os }}" {
 		t.Errorf("pr-preflight-platforms runs-on = %q, want matrix.os", job.RunsOn)
 	}
 	if got := job.Strategy.Matrix.OS; !equalStrings(got, []string{"ubuntu-latest", "macos-latest", "windows-latest"}) {
@@ -145,7 +145,7 @@ func TestPRWorkflowExercisesWindowsBenchmarkEnvScrubbing(t *testing.T) {
 func TestPRCIGateRequiresJSWasmHookExecution(t *testing.T) {
 	workflow := readCIWorkflow(t, "pr.yml")
 	job := workflow.job(t, "check-cmd-bd-puregeo-tests")
-	if job.RunsOn != "ubuntu-latest" {
+	if job.RunsOn.String() != "ubuntu-latest" {
 		t.Errorf("js/wasm hook job runs-on = %q, want ubuntu-latest", job.RunsOn)
 	}
 	if job.If != "" {
@@ -225,7 +225,7 @@ func TestPRCIGateRequiresGeneratedHookTimeoutProcessBoundary(t *testing.T) {
 
 	workflow := readCIWorkflow(t, "pr.yml")
 	job := workflow.job(t, jobName)
-	if job.RunsOn != "${{ matrix.os }}" || !equalStrings(job.Strategy.Matrix.OS, []string{"ubuntu-latest", "macos-latest", "windows-latest"}) {
+	if job.RunsOn.String() != "${{ matrix.os }}" || !equalStrings(job.Strategy.Matrix.OS, []string{"ubuntu-latest", "macos-latest", "windows-latest"}) {
 		t.Errorf("generated-hook process job is not the required three-host matrix: runs-on=%q os=%v", job.RunsOn, job.Strategy.Matrix.OS)
 	}
 	if job.TimeoutMinutes != 20 {
@@ -318,7 +318,7 @@ func TestMacOSTestJobsReuseWorkspaceBDBinary(t *testing.T) {
 	}
 
 	prMacOS := workflows["pr.yml"].job(t, "test-macos")
-	if prMacOS.RunsOn != macOSRunner {
+	if prMacOS.RunsOn.String() != macOSRunner {
 		t.Errorf("pr macOS test runner = %q, want %q", prMacOS.RunsOn, macOSRunner)
 	}
 	assertStepRunsExactly(t, prMacOS, "Build", buildCommand)
@@ -362,7 +362,7 @@ func TestMacOSTestJobsReuseWorkspaceBDBinary(t *testing.T) {
 func TestPRPreflightPlatformsRunsTestScriptPrebuiltBinaryContract(t *testing.T) {
 	workflow := readCIWorkflow(t, "pr.yml")
 	job := workflow.job(t, "pr-preflight-platforms")
-	if job.RunsOn != "${{ matrix.os }}" {
+	if job.RunsOn.String() != "${{ matrix.os }}" {
 		t.Errorf("pr-preflight-platforms runs-on = %q, want matrix.os", job.RunsOn)
 	}
 	if job.If != "" || job.TimeoutMinutes != 20 {
@@ -399,7 +399,7 @@ func TestRepositoryTextEOLPolicyWorkflow(t *testing.T) {
 	workflow := readCIWorkflow(t, "pr.yml")
 	job := workflow.job(t, "check-doc-freshness-platforms")
 
-	if want := "${{ matrix.os }}"; job.RunsOn != want {
+	if want := "${{ matrix.os }}"; job.RunsOn.String() != want {
 		t.Errorf("check-doc-freshness-platforms runs-on = %q, want %q", job.RunsOn, want)
 	}
 	wantMatrix := map[string]string{
@@ -662,7 +662,7 @@ func TestPRRiskGateReachesFullServerDoltStorageSuite(t *testing.T) {
 	workflow := readCIWorkflow(t, "pr-risk.yml")
 	job := workflow.job(t, jobName)
 
-	if job.RunsOn != "ubuntu-latest" {
+	if job.RunsOn.String() != "ubuntu-latest" {
 		t.Errorf("%s runs-on = %q, want ubuntu-latest", jobName, job.RunsOn)
 	}
 	if job.TimeoutMinutes != 20 {
@@ -1048,7 +1048,7 @@ func assertGoCacheWriter(t *testing.T, workflow ciWorkflow, wantJob, wantRunner,
 	var writers []string
 	for jobName, job := range workflow.Jobs {
 		for _, step := range job.Steps {
-			if job.RunsOn == wantRunner && actionFamily(step.Uses) == cacheSaveActionFamily && step.Name == wantStep && step.If == wantCondition {
+			if job.RunsOn.String() == wantRunner && actionFamily(step.Uses) == cacheSaveActionFamily && step.Name == wantStep && step.If == wantCondition {
 				writers = append(writers, jobName+"/"+step.Name)
 			}
 		}
@@ -1123,7 +1123,7 @@ type ciWorkflow struct {
 type ciWorkflowJob struct {
 	Needs           ciWorkflowStringList `yaml:"needs"`
 	Steps           []ciWorkflowStep     `yaml:"steps"`
-	RunsOn          string               `yaml:"runs-on"`
+	RunsOn          ciWorkflowRunsOn     `yaml:"runs-on"`
 	If              string               `yaml:"if"`
 	ContinueOnError bool                 `yaml:"continue-on-error"`
 	TimeoutMinutes  int                  `yaml:"timeout-minutes"`
@@ -1160,6 +1160,27 @@ type ciWorkflowStep struct {
 	TimeoutMinutes  int               `yaml:"timeout-minutes"`
 	Env             map[string]string `yaml:"env"`
 	With            map[string]string `yaml:"with"`
+}
+
+// ciWorkflowRunsOn decodes `runs-on`: GitHub takes either one label (a
+// scalar) or a label array (the runner must match all of them). The tests
+// reason over the label set as one line, so an array joins with ", ".
+type ciWorkflowRunsOn string
+
+// String renders the label set the tests compare against.
+func (r ciWorkflowRunsOn) String() string { return string(r) }
+
+func (r *ciWorkflowRunsOn) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		*r = ciWorkflowRunsOn(node.Value)
+		return nil
+	}
+	var list []string
+	if err := node.Decode(&list); err != nil {
+		return err
+	}
+	*r = ciWorkflowRunsOn(strings.Join(list, ", "))
+	return nil
 }
 
 type ciWorkflowStringList []string
