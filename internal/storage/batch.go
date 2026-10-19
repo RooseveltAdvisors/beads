@@ -32,6 +32,11 @@ type BatchCreateOptions struct {
 	// SkipDependencyValidationErrors skips dependency validation failures that
 	// legacy imports tolerated, such as cycles or self-dependencies.
 	SkipDependencyValidationErrors bool
+	// SkipQueueCap exempts this batch from the queue ceilings
+	// (config `create.max-open-per-assignee` / `create.max-open-total`,
+	// issueops.ValidateQueueCap). It is the import/backfill escape: restoring a
+	// repository's beads legitimately overfills one assignee's queue.
+	SkipQueueCap bool
 	// SkipDueRequired exempts this batch from the mandatory-due invariant
 	// (config `due.required`, issueops.ValidateDueRequired). It is set by the
 	// import paths ONLY: an import restores rows that already exist somewhere
