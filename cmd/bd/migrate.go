@@ -665,6 +665,15 @@ func handleSchemaMigrate() error {
 		// git-hook health check keep reporting a version mismatch after the
 		// operator has done everything the refusal told them to.
 		stampWorkspaceVersionAfterMigrate(store)
+	} else if workspaceVersionMarkerStale(store) {
+		// The schema was already current when this release arrived (an
+		// earlier release or a deploy lane applied the migrations), so
+		// nothing applied here and the branch above never ran. The marker
+		// still names the old release, and this command is the one the
+		// consent guidance points at - so it must bring the marker forward
+		// too. Same best-effort contract as the branch above.
+		commandDidWrite.Store(true)
+		stampWorkspaceVersionAfterMigrate(store)
 	}
 
 	if jsonOutput {
@@ -690,6 +699,18 @@ func handleSchemaMigrate() error {
 // already succeeded and been reported, so a marker write that fails must not
 // turn a successful migration into a failed command. A stale marker is a
 // cosmetic doctor warning; a false "schema migration failed" is not.
+// workspaceVersionMarkerStale reports whether the workspace's recorded
+// bd_version marker differs from this binary's version. A mismatch is the
+// cosmetic warning `bd migrate --inspect` prints: the schema may be current
+// while the marker still names the release that last wrote the workspace.
+func workspaceVersionMarkerStale(store storage.DoltStorage) bool {
+	current, err := store.GetLocalMetadata(rootCtx, "bd_version")
+	if err != nil {
+		return false
+	}
+	return current != Version
+}
+
 func stampWorkspaceVersionAfterMigrate(store storage.DoltStorage) {
 	reconciler, err := store.VersionReconciler()
 	if err != nil {

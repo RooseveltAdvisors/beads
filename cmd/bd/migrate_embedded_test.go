@@ -312,6 +312,49 @@ func TestEmbeddedMigrate(t *testing.T) {
 		}
 	})
 
+	t.Run("migrate_schema_stamps_marker_when_schema_current", func(t *testing.T) {
+		// The schema is already current on a fresh init, so migrate schema
+		// applies nothing. A stale bd_version marker must still heal: this
+		// command is the one the consent guidance points at (regression: the
+		// stamp used to run only when applied > 0).
+		dir, beadsDir, _ := bdInit(t, bd, "--prefix", "st")
+		setMigrateJSONConfigFalse(t, beadsDir)
+		const staleVersion = "0.0.0"
+		withEmbeddedMigrateSQL(t, beadsDir, "st", func(db *sql.DB) error {
+			result, err := db.ExecContext(t.Context(), "UPDATE local_metadata SET value = ? WHERE `key` = ?", staleVersion, "bd_version")
+			if err != nil {
+				return fmt.Errorf("set stale bd_version: %w", err)
+			}
+			if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+				return fmt.Errorf("set stale bd_version affected %d rows, %v; want 1", rows, err)
+			}
+			return nil
+		})
+
+		out := bdMigrateJSON(t, bd, dir, "schema")
+		var result map[string]interface{}
+		if err := json.Unmarshal([]byte(out), &result); err != nil {
+			t.Fatalf("bd --format=json migrate schema returned invalid JSON: %v\n%s", err, out)
+		}
+		if got, ok := result["status"].(string); !ok || got != "current" {
+			t.Errorf("migrate schema status = %#v, want current (no migration should apply)", result["status"])
+		}
+		if got, ok := result["applied"].(float64); !ok || got != 0 {
+			t.Errorf("migrate schema applied = %#v, want 0", result["applied"])
+		}
+
+		var version string
+		withEmbeddedMigrateSQL(t, beadsDir, "st", func(db *sql.DB) error {
+			if err := db.QueryRowContext(t.Context(), "SELECT value FROM local_metadata WHERE `key` = ?", "bd_version").Scan(&version); err != nil {
+				return fmt.Errorf("read bd_version: %w", err)
+			}
+			return nil
+		})
+		if version != Version {
+			t.Errorf("migrate schema left bd_version = %q, want %q (stale marker must heal when the schema is already current)", version, Version)
+		}
+	})
+
 	t.Run("migrate_sync_persists_and_noops", func(t *testing.T) {
 		dir, beadsDir, _ := bdInit(t, bd, "--prefix", "ms")
 		setMigrateJSONConfigFalse(t, beadsDir)
