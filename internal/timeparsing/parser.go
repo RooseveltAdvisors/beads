@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/olebedev/when"
@@ -24,20 +23,22 @@ import (
 // THE UNIT MAP IS FIXED AND UNAMBIGUOUS: min/minute(s) = minutes,
 // m/mo = MONTHS. A bare +30m is 30 months, not 30 minutes - the mistake this
 // exists to prevent was a +30m due date landing in 2029.
-var compactDurationRe = regexp.MustCompile(`^(?i)([+-]?)(\d+)(min|mins|minute|minutes|mo|[hdwmy])$`)
+var compactDurationRe = regexp.MustCompile(`^([+-]?)(\d+)(min|[hdwmy])$`)
 
 // ParseCompactDuration parses compact duration syntax and returns the resulting time.
 //
-// Format: [+-]?(\d+)([hdwmy])
+// Format: [+-]?(\d+)(min|[hdwmy])
 //
 // Units:
+//   - min = minutes
 //   - h = hours
 //   - d = days
 //   - w = weeks
-//   - m = months
+//   - m = months (NOT minutes; use "min" for minutes)
 //   - y = years
 //
 // Examples:
+//   - "+30min" -> now + 30 minutes
 //   - "+6h" -> now + 6 hours
 //   - "-1d" -> now - 1 day
 //   - "+2w" -> now + 2 weeks
@@ -53,7 +54,7 @@ func ParseCompactDuration(s string, now time.Time) (time.Time, error) {
 
 	sign := matches[1]
 	amountStr := matches[2]
-	unit := strings.ToLower(matches[3])
+	unit := matches[3]
 
 	amount, err := strconv.Atoi(amountStr)
 	if err != nil {
@@ -80,9 +81,9 @@ func applyDuration(base time.Time, amount int, unit string) time.Time {
 		return base.AddDate(0, 0, amount)
 	case "w":
 		return base.AddDate(0, 0, amount*7)
-	case "min", "mins", "minute", "minutes":
+	case "min":
 		return base.Add(time.Duration(amount) * time.Minute)
-	case "m", "mo":
+	case "m":
 		return addMonthsClamped(base, amount)
 	case "y":
 		return addMonthsClamped(base, 12*amount)
@@ -206,5 +207,5 @@ func ParseRelativeTime(s string, now time.Time) (time.Time, error) {
 		return t.UTC(), nil
 	}
 
-	return time.Time{}, fmt.Errorf("cannot parse time expression: %q (examples: +6h, tomorrow, 2025-01-15)", s)
+	return time.Time{}, fmt.Errorf("cannot parse time expression: %q (examples: +30min, +6h, tomorrow, 2025-01-15)", s)
 }

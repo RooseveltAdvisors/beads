@@ -435,14 +435,21 @@ func noteDuplicateCollisions(ctx context.Context, s storage.DoltStorage, created
 }
 
 func addCollisionComment(ctx context.Context, s storage.DoltStorage, issueID, text string) error {
+	// The collision note is a system write: when no actor is set (a test, or
+	// a call outside the CLI's pre-run), give it a defined author rather than
+	// letting an empty one refuse the comment away silently.
+	author := actor
+	if strings.TrimSpace(author) == "" {
+		author = "bd-dedup"
+	}
 	if s != nil {
-		_, err := addCommentDirect(ctx, s, issueID, actor, text)
+		_, err := addCommentDirect(ctx, s, issueID, author, text)
 		return err
 	}
 	commenter, err := proxiedCommenter()
 	if err != nil {
 		return err
 	}
-	_, err = commenter.AddComment(ctx, issueops.AddCommentRequest{Author: actor, IssueID: issueID, Text: text})
+	_, err = commenter.AddComment(ctx, issueops.AddCommentRequest{Author: author, IssueID: issueID, Text: text})
 	return err
 }

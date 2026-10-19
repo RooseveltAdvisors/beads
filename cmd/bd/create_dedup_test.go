@@ -653,6 +653,15 @@ func TestCreateDedup_DryRunUnopenableRepoWarns(t *testing.T) {
 // the new issue gets a comment naming the collision and neither is deleted.
 func TestCreateDedup_PostInsertCollisionComment(t *testing.T) {
 	clearDedupCheckEnv(t)
+	// Pin the dedup switch ON for this process: the gate reads the config
+	// singleton, and a neighboring test that set it off must not decide this
+	// one's verdict (test-ordering pollution cost this test three CI runs).
+	config.ResetForTesting()
+	if err := config.Initialize(); err != nil {
+		t.Fatalf("config.Initialize: %v", err)
+	}
+	config.Set("create.dedup-check", true)
+	t.Cleanup(config.ResetForTesting)
 	tmpDir := t.TempDir()
 	s := newTestStore(t, filepath.Join(tmpDir, ".beads", "beads.db"))
 	ctx := context.Background()

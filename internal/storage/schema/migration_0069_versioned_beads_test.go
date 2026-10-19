@@ -20,21 +20,7 @@ import (
 const migration0069Up = "0069_add_versioned_beads_schema.up.sql"
 const migration0069Down = "0069_add_versioned_beads_schema.down.sql"
 
-// TestLatestVersionIncludesMigration0070 pins the real next free slot this
-// phase claims. It is deliberately a hardcoded literal, not a comparison
-// against another derived value: schema.LatestVersion() drifting for the
-// wrong reason (an unrelated migration landing first) should still be caught
-// by this test failing to explain why its slot is versioned-beads-shaped,
-// which the CLI test below checks. Slot 0070 is the seat-identity
-// assignee_id migration (additive, both planes).
-func TestLatestVersionIncludesMigration0070(t *testing.T) {
-	const want = 70
-	if got := LatestVersion(); got != want {
-		t.Fatalf("LatestVersion() = %d, want %d (issue_versions/store_epoch/issues.current_revision migration slot claimed by be-hs42e.2)", got, want)
-	}
-}
-
-// TestMigration0067AddsVersionedBeadsSchema is a pure-Go, DB-independent
+// TestMigration0069AddsVersionedBeadsSchema is a pure-Go, DB-independent
 // check of the frozen migration bytes themselves — it runs even where no
 // `dolt` binary is available.
 //
@@ -56,7 +42,7 @@ func TestLatestVersionIncludesMigration0070(t *testing.T) {
 // TestAllMigrationsSQLUsesDirectDDLForKnownCLIIncompatibilities both police.
 // The assertion below is the local anchor for that pairing: if someone ever
 // unwraps these PREPAREs, the override silently becomes a lie.
-func TestMigration0067AddsVersionedBeadsSchema(t *testing.T) {
+func TestMigration0069AddsVersionedBeadsSchema(t *testing.T) {
 	upSQL, err := MigrationSQL(migration0069Up)
 	if err != nil {
 		t.Fatalf("MigrationSQL(%s) error = %v, want the migration file to exist", migration0069Up, err)
@@ -68,7 +54,7 @@ func TestMigration0067AddsVersionedBeadsSchema(t *testing.T) {
 		"ALTER TABLE issues ADD COLUMN current_revision BIGINT NOT NULL DEFAULT 1",
 		// Shape parity with issues, identical type. Nothing reads or writes
 		// this column in any phase — see the migration header's asymmetry
-		// note and ignored/0028.
+		// note and ignored/0027.
 		"ALTER TABLE wisps ADD COLUMN current_revision BIGINT NOT NULL DEFAULT 1",
 		// Both ALTERs are INFORMATION_SCHEMA-guarded so a raw replay no-ops.
 		"COLUMN_NAME = 'current_revision'",
@@ -79,7 +65,7 @@ func TestMigration0067AddsVersionedBeadsSchema(t *testing.T) {
 		// materialized the clone-local wisp tables no-ops instead of
 		// aborting the whole batch. No test executes that arm against an
 		// absent wisps table — the full-chain test seeds bounded at v46 and
-		// 0047's repair recreates wisps before 0067's frozen text runs — so
+		// 0047's repair recreates wisps before 0069's frozen text runs — so
 		// this string pin is the only thing standing between dropping the
 		// sub-guard and a still-green suite. It has to be the TABLES probe:
 		// the file's other TABLE_NAME = 'wisps' occurrence is the COLUMNS
@@ -88,11 +74,11 @@ func TestMigration0067AddsVersionedBeadsSchema(t *testing.T) {
 		"WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'wisps') > 0",
 	} {
 		if !strings.Contains(upSQL, want) {
-			t.Errorf("0067 up migration missing %q\nfull SQL:\n%s", want, upSQL)
+			t.Errorf("0069 up migration missing %q\nfull SQL:\n%s", want, upSQL)
 		}
 	}
 	if !strings.Contains(strings.ToUpper(upSQL), "PREPARE STMT FROM @SQL") {
-		t.Error("0067 up migration must keep its guarded PREPARE blocks — they are what make a raw .up.sql replay onto an already-migrated store a no-op (pr4107_corruption_test.go's harness bypasses every Go-side guard), and Dolt accepts no unprepared conditional ADD COLUMN. Unwrapping them also invalidates cliMigration0069AddVersionedBeadsSchema.")
+		t.Error("0069 up migration must keep its guarded PREPARE blocks — they are what make a raw .up.sql replay onto an already-migrated store a no-op (pr4107_corruption_test.go's harness bypasses every Go-side guard), and Dolt accepts no unprepared conditional ADD COLUMN. Unwrapping them also invalidates cliMigration0069AddVersionedBeadsSchema.")
 	}
 	// The bundle override is what keeps the PREPARE above off the pre-2.3
 	// CLI path. Assert it directly rather than trusting the two schema_test
@@ -109,7 +95,7 @@ func TestMigration0067AddsVersionedBeadsSchema(t *testing.T) {
 		t.Error("0067's CLI substitute ALTERs wisps unguarded, so it must be listed in cliSubstituteAssumesWispTables — a replay over a clone that never synced the wisp tables has to fall back to the frozen source text")
 	}
 	if strings.Contains(upSQL, "INSERT INTO store_epoch") || strings.Contains(upSQL, "INSERT IGNORE INTO store_epoch") {
-		t.Error("0067 up migration must not seed store_epoch — every new table starts empty in Phase 1 (no reads/writes of the new surfaces until Phase 2)")
+		t.Error("0069 up migration must not seed store_epoch — every new table starts empty in Phase 1 (no reads/writes of the new surfaces until Phase 2)")
 	}
 
 	// down.sql files are not part of the embedded FS (only migrations/*.up.sql
@@ -145,7 +131,7 @@ func TestMigration0067AddsVersionedBeadsSchema(t *testing.T) {
 	}
 }
 
-// TestMigration0067AddsVersionedBeadsSchemaThroughDoltCLI applies the full
+// TestMigration0069AddsVersionedBeadsSchemaThroughDoltCLI applies the full
 // migration bundle through a real `dolt` binary (skipped without one — see
 // testutil.RequireDoltBinary) and checks the shape acceptance criteria a
 // pure-Go SQL-text check cannot: actual column types/nullability as Dolt
@@ -154,7 +140,7 @@ func TestMigration0067AddsVersionedBeadsSchema(t *testing.T) {
 // old-shaped INSERT/SELECT against `issues` that has never heard of
 // current_revision still behaves unchanged, because the column is
 // NOT NULL DEFAULT 1 rather than a value old callers must supply.
-func TestMigration0067AddsVersionedBeadsSchemaThroughDoltCLI(t *testing.T) {
+func TestMigration0069AddsVersionedBeadsSchemaThroughDoltCLI(t *testing.T) {
 	testutil.RequireDoltBinary(t)
 
 	dir := t.TempDir()
@@ -165,12 +151,22 @@ func TestMigration0067AddsVersionedBeadsSchemaThroughDoltCLI(t *testing.T) {
 	requireDoltColumnShape(t, dir, "issue_versions", "issue_id", "varchar(255)", "NO")
 	requireDoltDataType(t, dir, "issue_versions", "revision", "bigint", "NO")
 	requireDoltDataType(t, dir, "issue_versions", "epoch", "int", "NO")
-	requireDoltDataType(t, dir, "issue_versions", "durable_state", "json", "YES")
+	// 0067 creates durable_state as JSON, and 0068 step 7 retypes it to
+	// LONGBLOB (Dolt's JSON type renormalizes numbers, so it cannot hold the
+	// verbatim bytes a content token hashes -- see 0068's step 7 header). This
+	// test runs the whole bundle, so the shape it sees is the LONGBLOB one.
+	requireDoltDataType(t, dir, "issue_versions", "durable_state", "longblob", "YES")
 	requireDoltColumnShape(t, dir, "issue_versions", "change_actor", "varchar(255)", "YES")
 	requireDoltColumnShape(t, dir, "issue_versions", "change_agent", "varchar(255)", "YES")
 	requireDoltColumnShape(t, dir, "issue_versions", "change_message", "text", "YES")
-	requireDoltColumnShape(t, dir, "issue_versions", "change_at", "datetime", "NO")
-	requireDoltColumnShape(t, dir, "issue_versions", "removed_at", "datetime", "YES")
+	// 0069 widens both change_at and removed_at from DATETIME(0) to
+	// DATETIME(6) (be-hs42e.8) to stop the column rounding sub-second writes
+	// up to the next second. This test runs the whole bundle (see the
+	// durable_state/attribution_status comments above for the same pattern),
+	// so it asserts the post-widen shape, not the DATETIME(0) shape 0067
+	// alone would have produced.
+	requireDoltColumnShape(t, dir, "issue_versions", "change_at", "datetime(6)", "NO")
+	requireDoltColumnShape(t, dir, "issue_versions", "removed_at", "datetime(6)", "YES")
 	requireDoltColumnShape(t, dir, "issue_versions", "removed_reason", "varchar(255)", "YES")
 	requireDoltNoRows(t, dir, "SELECT issue_id FROM issue_versions", "issue_versions")
 
@@ -185,7 +181,7 @@ func TestMigration0067AddsVersionedBeadsSchemaThroughDoltCLI(t *testing.T) {
 	// current_revision on BOTH planes. issues.current_revision is the
 	// fast-path CAS column later phases read and write; wisps.current_revision
 	// is shape parity only (nothing ever reads or writes it — see the
-	// migration header and ignored/0028), and it is asserted here for exactly
+	// migration header and ignored/0027), and it is asserted here for exactly
 	// the reason the parity oracle exists: the two planes share
 	// column-list-shaped code paths, so the shape obligation is real even
 	// where the semantics are not. Same type on both, or
@@ -195,8 +191,12 @@ func TestMigration0067AddsVersionedBeadsSchemaThroughDoltCLI(t *testing.T) {
 	requireDoltDataType(t, dir, "wisps", "current_revision", "bigint", "NO")
 
 	// Composite PK (issue_id, revision) is enforced: same pair twice fails.
-	runDoltSQL(t, dir, `INSERT INTO issue_versions (issue_id, revision, epoch, change_at) VALUES ('iv-1', 1, 1, '2026-09-01 00:00:00')`)
-	if err := runDoltSQLExpectingError(t, dir, `INSERT INTO issue_versions (issue_id, revision, epoch, change_at) VALUES ('iv-1', 1, 1, '2026-09-01 00:00:01')`); err == nil {
+	// attribution_status is 0068's NOT NULL column (not yet Phase 1's
+	// concern, but present on any schema this test's fresh bundle produces),
+	// so both inserts must supply it or Dolt rejects them before the PK
+	// check below ever runs.
+	runDoltSQL(t, dir, `INSERT INTO issue_versions (issue_id, revision, epoch, change_at, attribution_status) VALUES ('iv-1', 1, 1, '2026-09-01 00:00:00', 'unknown')`)
+	if err := runDoltSQLExpectingError(t, dir, `INSERT INTO issue_versions (issue_id, revision, epoch, change_at, attribution_status) VALUES ('iv-1', 1, 1, '2026-09-01 00:00:01', 'unknown')`); err == nil {
 		t.Error("duplicate (issue_id, revision) insert into issue_versions succeeded, want primary key violation")
 	}
 

@@ -57,6 +57,7 @@ func TestCommenterContract(t *testing.T) {
 	})
 	t.Run("DeletesComment", func(t *testing.T) {
 		conformance.RunCommenterDeletesComment(t, ctx, fixture)
+		conformance.RunCommenterLeavesTheAnchorIssueUntouched(t, ctx, fixture)
 	})
 	t.Run("RefusesBlankText", func(t *testing.T) {
 		conformance.RunCommenterRefusesBlankText(t, ctx, fixture)
