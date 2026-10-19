@@ -146,8 +146,8 @@ func TestBazelFarmWorkflowSecurity(t *testing.T) {
 	auth := workflow.job(t, "authorize")
 	const wantAuthIf = "github.event.pull_request.base.repo.full_name == github.repository && " +
 		"github.event.pull_request.head.repo.full_name != github.repository"
-	if auth.If != wantAuthIf || auth.RunsOn != "ubuntu-latest" || len(auth.Needs) != 0 {
-		t.Errorf("authorize if=%q runs-on=%q needs=%v; want the fork prefilter %q on ubuntu-latest", auth.If, auth.RunsOn, auth.Needs, wantAuthIf)
+	if auth.If != wantAuthIf || auth.RunsOn.String() != "ubuntu-latest" || len(auth.Needs) != 0 {
+		t.Errorf("authorize if=%q runs-on=%q needs=%v; want the fork prefilter %q on ubuntu-latest", auth.If, auth.RunsOn.String(), auth.Needs, wantAuthIf)
 	}
 	if auth.TimeoutMinutes <= 0 || auth.TimeoutMinutes > 10 {
 		t.Errorf("authorize timeout-minutes = %d, want 1..10", auth.TimeoutMinutes)
@@ -197,7 +197,7 @@ func TestBazelFarmWorkflowSecurity(t *testing.T) {
 	// the four RBE secrets and the event's pinned head SHA.
 	farm := workflow.job(t, "farm")
 	if farm.Uses != "./.github/workflows/"+bazelWorkflowName || !reflect.DeepEqual([]string(farm.Needs), []string{"authorize"}) ||
-		farm.If != "${{ needs.authorize.outputs.allowed == 'true' }}" || farm.RunsOn != "" || len(farm.Steps) != 0 {
+		farm.If != "${{ needs.authorize.outputs.allowed == 'true' }}" || farm.RunsOn.String() != "" || len(farm.Steps) != 0 {
 		t.Errorf("farm uses=%q needs=%v if=%q; want a call of ./.github/workflows/%s needing authorize, if allowed == 'true'",
 			farm.Uses, farm.Needs, farm.If, bazelWorkflowName)
 	}

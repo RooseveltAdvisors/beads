@@ -166,9 +166,9 @@ func TestReleaseCrossCompileRunsInItsOwnBazelLane(t *testing.T) {
 	// Not pure's runs-on: pure reads the remote repo contents cache in mode
 	// cache (ubuntu-24.04, bazelRRCCacheReaderRunsOn), the release lane does
 	// not (its target platforms are not seeded).
-	if cross.RunsOn != bazelLaneRunsOn || cross.If != pure.If || !slices.Equal(cross.Needs, pure.Needs) {
+	if cross.RunsOn.String() != bazelLaneRunsOn || cross.If != pure.If || !slices.Equal(cross.Needs, pure.Needs) {
 		t.Errorf("%s runs-on/if/needs = %q / %q / %v, want %q / %s's %q / %v",
-			bazelReleaseCrossJobName, cross.RunsOn, cross.If, cross.Needs, bazelLaneRunsOn, bazelPureJobName, pure.If, pure.Needs)
+			bazelReleaseCrossJobName, cross.RunsOn.String(), cross.If, cross.Needs, bazelLaneRunsOn, bazelPureJobName, pure.If, pure.Needs)
 	}
 	run := cross.step(t, stepName).Run
 	for _, required := range []string{
@@ -303,8 +303,8 @@ func TestPRComplexityReportIsAdvisoryAndBestEffort(t *testing.T) {
 	// (TestSameRepoBlacksmithRunners requires one of every moved job) that is
 	// a backstop against a stuck runner, not a realistic ceiling - every
 	// step underneath still carries its own tight timeout/continue-on-error.
-	if job.RunsOn != sameRepoBlacksmith2vcpu || job.TimeoutMinutes != 60 || job.ContinueOnError {
-		t.Errorf("advisory-reports job must run on same-repo Blacksmith with a backstop timeout/no job continue-on-error: runs-on=%q timeout=%d continue=%v", job.RunsOn, job.TimeoutMinutes, job.ContinueOnError)
+	if job.RunsOn.String() != sameRepoBlacksmith2vcpu || job.TimeoutMinutes != 60 || job.ContinueOnError {
+		t.Errorf("advisory-reports job must run on same-repo Blacksmith with a backstop timeout/no job continue-on-error: runs-on=%q timeout=%d continue=%v", job.RunsOn.String(), job.TimeoutMinutes, job.ContinueOnError)
 	}
 	if contains(job.Needs, "ci-gate") {
 		t.Errorf("complexity report unexpectedly depends on ci-gate: %v", job.Needs)
@@ -377,8 +377,8 @@ func TestPRWorkflowRequiresNativeInitGatewayCredential(t *testing.T) {
 
 	workflow := readCIWorkflow(t, "pr.yml")
 	job := workflow.job(t, jobName)
-	if job.RunsOn != platformsMatrixRunsOn || !equalStrings(matrixIncludeHosts(job.Strategy.Matrix.Include), []string{"macos-latest", "windows-latest"}) {
-		t.Errorf("credential shell boundary requires the native macOS/Windows matrix: runner=%q include=%v", job.RunsOn, job.Strategy.Matrix.Include)
+	if job.RunsOn.String() != platformsMatrixRunsOn || !equalStrings(matrixIncludeHosts(job.Strategy.Matrix.Include), []string{"macos-latest", "windows-latest"}) {
+		t.Errorf("credential shell boundary requires the native macOS/Windows matrix: runner=%q include=%v", job.RunsOn.String(), job.Strategy.Matrix.Include)
 	}
 	if job.If != "" || job.ContinueOnError {
 		t.Errorf("credential process job is bypassable: if=%q continue-on-error=%v", job.If, job.ContinueOnError)
@@ -451,8 +451,8 @@ func TestPRPreflightPlatformsRunStepsUseRestoredGoBuildCache(t *testing.T) {
 func TestMainMacOSTestJobRestoresBlacksmithMacOSSaverCaches(t *testing.T) {
 	workflow := readCIWorkflow(t, "main.yml")
 	job := workflow.job(t, "test")
-	if want := "${{ '" + blacksmithMacOSLabel + "' }}"; job.RunsOn != want {
-		t.Errorf("main.yml test runs-on = %q, want %q", job.RunsOn, want)
+	if want := "${{ '" + blacksmithMacOSLabel + "' }}"; job.RunsOn.String() != want {
+		t.Errorf("main.yml test runs-on = %q, want %q", job.RunsOn.String(), want)
 	}
 	if job.TimeoutMinutes == 0 {
 		t.Error("main.yml test has no timeout-minutes")
@@ -479,8 +479,8 @@ func TestPRWorkflowExercisesWindowsBenchmarkEnvScrubbing(t *testing.T) {
 	workflow := readCIWorkflow(t, "pr.yml")
 	job := workflow.job(t, "pr-preflight-platforms")
 
-	if job.RunsOn != platformsMatrixRunsOn {
-		t.Errorf("pr-preflight-platforms runs-on = %q, want the per-leg Blacksmith label", job.RunsOn)
+	if job.RunsOn.String() != platformsMatrixRunsOn {
+		t.Errorf("pr-preflight-platforms runs-on = %q, want the per-leg Blacksmith label", job.RunsOn.String())
 	}
 	if got := matrixIncludeHosts(job.Strategy.Matrix.Include); !equalStrings(got, []string{"macos-latest", "windows-latest"}) {
 		t.Errorf("pr-preflight-platforms matrix os = %v, want the macOS and Windows hosts (Linux runs under Bazel)", got)
@@ -644,8 +644,8 @@ func TestPRCIGateRequiresGeneratedHookTimeoutProcessBoundary(t *testing.T) {
 
 	workflow := readCIWorkflow(t, "pr.yml")
 	job := workflow.job(t, jobName)
-	if job.RunsOn != platformsMatrixRunsOn || !equalStrings(matrixIncludeHosts(job.Strategy.Matrix.Include), []string{"macos-latest", "windows-latest"}) {
-		t.Errorf("generated-hook process job is not the required macOS/Windows matrix: runs-on=%q include=%v", job.RunsOn, job.Strategy.Matrix.Include)
+	if job.RunsOn.String() != platformsMatrixRunsOn || !equalStrings(matrixIncludeHosts(job.Strategy.Matrix.Include), []string{"macos-latest", "windows-latest"}) {
+		t.Errorf("generated-hook process job is not the required macOS/Windows matrix: runs-on=%q include=%v", job.RunsOn.String(), job.Strategy.Matrix.Include)
 	}
 	if job.TimeoutMinutes != 20 {
 		t.Errorf("generated-hook process job timeout = %d minutes, want 20", job.TimeoutMinutes)
@@ -777,8 +777,8 @@ func TestNightlyRunsNoGoTestOnARunner(t *testing.T) {
 func TestPRPreflightPlatformsRunsTestScriptPrebuiltBinaryContract(t *testing.T) {
 	workflow := readCIWorkflow(t, "pr.yml")
 	job := workflow.job(t, "pr-preflight-platforms")
-	if job.RunsOn != platformsMatrixRunsOn {
-		t.Errorf("pr-preflight-platforms runs-on = %q, want the per-leg Blacksmith label", job.RunsOn)
+	if job.RunsOn.String() != platformsMatrixRunsOn {
+		t.Errorf("pr-preflight-platforms runs-on = %q, want the per-leg Blacksmith label", job.RunsOn.String())
 	}
 	if job.If != "" || job.TimeoutMinutes != 20 {
 		t.Errorf("pr-preflight-platforms condition/timeout = %q/%d, want unconditional/20",
@@ -817,8 +817,8 @@ func TestRepositoryTextEOLPolicyWorkflow(t *testing.T) {
 	workflow := readCIWorkflow(t, "pr.yml")
 	job := workflow.job(t, "check-doc-freshness-platforms")
 
-	if want := platformsMatrixRunsOn; job.RunsOn != want {
-		t.Errorf("check-doc-freshness-platforms runs-on = %q, want %q", job.RunsOn, want)
+	if want := platformsMatrixRunsOn; job.RunsOn.String() != want {
+		t.Errorf("check-doc-freshness-platforms runs-on = %q, want %q", job.RunsOn.String(), want)
 	}
 	// The Linux leg runs in Bazel (TestDocFreshnessLinuxLegRunsInBazel);
 	// macOS and Windows have no remote workers and stay here.
@@ -1386,7 +1386,7 @@ func assertGoCacheWriter(t *testing.T, workflow ciWorkflow, wantJob, wantRunner,
 	var writers []string
 	for jobName, job := range workflow.Jobs {
 		for _, step := range job.Steps {
-			if job.RunsOn == wantRunner && actionFamily(step.Uses) == cacheSaveActionFamily && step.Name == wantStep && step.If == wantCondition {
+			if job.RunsOn.String() == wantRunner && actionFamily(step.Uses) == cacheSaveActionFamily && step.Name == wantStep && step.If == wantCondition {
 				writers = append(writers, jobName+"/"+step.Name)
 			}
 		}
@@ -1939,8 +1939,8 @@ func TestBazelWorkflowJobsAndExecutionMode(t *testing.T) {
 	// GitHub-hosted. Pinned again, verbatim, by TestSameRepoBlacksmithRunners.
 	if rbe, ok := workflow.Jobs[bazelRBEJobName]; !ok {
 		t.Fatalf("%s has no %s job", bazelWorkflowName, bazelRBEJobName)
-	} else if rbe.RunsOn != wantRBERunsOn {
-		t.Errorf("%s runs-on = %q, want %q", bazelRBEJobName, rbe.RunsOn, wantRBERunsOn)
+	} else if rbe.RunsOn.String() != wantRBERunsOn {
+		t.Errorf("%s runs-on = %q, want %q", bazelRBEJobName, rbe.RunsOn.String(), wantRBERunsOn)
 	}
 	for name, job := range workflow.Jobs {
 		if name == bazelRBEJobName {
@@ -1999,8 +1999,8 @@ func TestBazelWorkflowJobsAndExecutionMode(t *testing.T) {
 			// setup-bazel env otherwise.
 			wantJobIf = bazelDoltRaceJobIf
 		}
-		if job.RunsOn != wantJobRunsOn {
-			t.Errorf("%s runs-on = %q, want %q", name, job.RunsOn, wantJobRunsOn)
+		if job.RunsOn.String() != wantJobRunsOn {
+			t.Errorf("%s runs-on = %q, want %q", name, job.RunsOn.String(), wantJobRunsOn)
 		}
 		if job.If != wantJobIf {
 			t.Errorf("%s if = %q, want %q", name, job.If, wantJobIf)
@@ -2142,8 +2142,8 @@ func TestSameRepoBlacksmithRunners(t *testing.T) {
 			if !ok {
 				t.Fatalf("%s has no %s job", file, name)
 			}
-			if job.RunsOn != wantRunsOn {
-				t.Errorf("%s %s runs-on = %q, want %q", file, name, job.RunsOn, wantRunsOn)
+			if job.RunsOn.String() != wantRunsOn {
+				t.Errorf("%s %s runs-on = %q, want %q", file, name, job.RunsOn.String(), wantRunsOn)
 			}
 			if wantName := wantGateName[file][name]; wantName != "" && job.Name != wantName {
 				t.Errorf("%s %s name = %q, want %q", file, name, job.Name, wantName)
@@ -2170,8 +2170,8 @@ func TestSameRepoBlacksmithRunners(t *testing.T) {
 			if allowed[name] != "" {
 				continue
 			}
-			if strings.Contains(job.RunsOn, "blacksmith-") {
-				t.Errorf("%s job %s runs-on %q names a Blacksmith label; only %v may", file, name, job.RunsOn, allowed)
+			if strings.Contains(job.RunsOn.String(), "blacksmith-") {
+				t.Errorf("%s job %s runs-on %q names a Blacksmith label; only %v may", file, name, job.RunsOn.String(), allowed)
 			}
 		}
 	}
@@ -2197,7 +2197,7 @@ func TestBlacksmithJobsReadNoSecrets(t *testing.T) {
 	for _, file := range []string{"pr.yml", "pr-risk.yml"} {
 		workflow := readCIWorkflow(t, file)
 		for name, job := range workflow.Jobs {
-			if !strings.Contains(job.RunsOn, "blacksmith-") {
+			if !strings.Contains(job.RunsOn.String(), "blacksmith-") {
 				continue
 			}
 			if secretRef.MatchString(job.If) {
@@ -4644,9 +4644,9 @@ func TestBazelRBEJobDecidesOnce(t *testing.T) {
 	// ubuntu-latest otherwise) - a separate concern from the RBE mode
 	// decision (remote/cache/local/skip), which still lives solely in the
 	// decide step's outputs below.
-	if len(job.Needs) != 0 || job.If != "" || job.RunsOn != wantRBERunsOn || len(job.Env) != 0 {
+	if len(job.Needs) != 0 || job.If != "" || job.RunsOn.String() != wantRBERunsOn || len(job.Env) != 0 {
 		t.Errorf("%s: needs %v, if %q, runs-on %q, env %v; want no needs, if or env, on %q",
-			bazelRBEJobName, job.Needs, job.If, job.RunsOn, job.Env, wantRBERunsOn)
+			bazelRBEJobName, job.Needs, job.If, job.RunsOn.String(), job.Env, wantRBERunsOn)
 	}
 	wantOutputs := map[string]string{
 		"enabled": "${{ steps.decide.outputs.enabled }}",

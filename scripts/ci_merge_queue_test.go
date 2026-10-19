@@ -126,7 +126,7 @@ func TestMergeQueueRequiredGatesRunOnMergeGroup(t *testing.T) {
 		// (same-repo trust). GitHub-hosted ubuntu-latest also qualifies: the
 		// labels moved there on 2026-10-13 while the blacksmith pool queued
 		// jobs for hours.
-		if got := mustEvalGHRunsOn(t, gate.RunsOn, mergeGroupCtx(1, nil)); !strings.HasPrefix(got, "blacksmith-") && got != "ubuntu-latest" {
+		if got := mustEvalGHRunsOn(t, gate.RunsOn.String(), mergeGroupCtx(1, nil)); !strings.HasPrefix(got, "blacksmith-") && got != "ubuntu-latest" {
 			t.Errorf("%s ci-gate runs-on for merge_group = %q, want a Blacksmith runner or ubuntu-latest", name, got)
 		}
 		event := regexp.MustCompile(`github\.event_name|github\.event\.|github\.base_ref|github\.head_ref`)
@@ -286,7 +286,7 @@ func TestMergeQueueBazelRunsRemotely(t *testing.T) {
 		if out["mode"] != c.mode || log != "" {
 			t.Errorf("rbe on merge_group (%s): mode %q (mint asked: %q), want %s without asking rbe-fork", c.name, out["mode"], log, c.mode)
 		}
-		if got := mustEvalGHRunsOn(t, rbe.RunsOn, ctx); !strings.HasPrefix(got, "blacksmith-") && got != "ubuntu-latest" {
+		if got := mustEvalGHRunsOn(t, rbe.RunsOn.String(), ctx); !strings.HasPrefix(got, "blacksmith-") && got != "ubuntu-latest" {
 			t.Errorf("rbe runs-on for merge_group = %q, want a Blacksmith runner or ubuntu-latest", got)
 		}
 	}

@@ -47,7 +47,7 @@ func TestBlacksmithReachablePRJobsDisableDefaultCachingActions(t *testing.T) {
 	for _, file := range []string{"pr.yml", "pr-risk.yml"} {
 		workflow := readCIWorkflow(t, file)
 		for jobName, job := range workflow.Jobs {
-			if !strings.Contains(job.RunsOn, "blacksmith-") {
+			if !strings.Contains(job.RunsOn.String(), "blacksmith-") {
 				continue
 			}
 			for _, step := range job.Steps {
@@ -257,8 +257,8 @@ func TestBlacksmithMacOSSaverMatchesPRLegs(t *testing.T) {
 	mainWF := readCIWorkflow(t, "main.yml")
 	saver := mainWF.job(t, "blacksmith-macos-go-build-cache")
 
-	if want := "${{ '" + blacksmithMacOSLabel + "' }}"; saver.RunsOn != want {
-		t.Errorf("blacksmith-macos-go-build-cache runs-on = %q, want %q", saver.RunsOn, want)
+	if want := "${{ '" + blacksmithMacOSLabel + "' }}"; saver.RunsOn.String() != want {
+		t.Errorf("blacksmith-macos-go-build-cache runs-on = %q, want %q", saver.RunsOn.String(), want)
 	}
 	if saver.TimeoutMinutes == 0 {
 		t.Error("blacksmith-macos-go-build-cache has no timeout-minutes")
@@ -274,7 +274,7 @@ func TestBlacksmithMacOSSaverMatchesPRLegs(t *testing.T) {
 				continue
 			}
 			macOSLegs++
-			if got := mustEvalGHRunsOn(t, job.RunsOn, map[string]string{"matrix.runner": leg.Runner, "matrix.os": leg.OS}); got != blacksmithMacOSLabel {
+			if got := mustEvalGHRunsOn(t, job.RunsOn.String(), map[string]string{"matrix.runner": leg.Runner, "matrix.os": leg.OS}); got != blacksmithMacOSLabel {
 				t.Errorf("pr.yml %s macOS leg resolves to %q, want the saver's %q", jobName, got, blacksmithMacOSLabel)
 			}
 		}

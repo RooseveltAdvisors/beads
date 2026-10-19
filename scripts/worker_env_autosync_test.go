@@ -81,8 +81,8 @@ func TestWorkerEnvAutosyncWorkflowPermissionsAreMinimal(t *testing.T) {
 	if !reflect.DeepEqual(job.Permissions, wantJobPerms) {
 		t.Errorf("%s job %s permissions = %v, want %v (contents:read alone; both write roles come from the minted App tokens)", workerEnvAutosyncWorkflow, workerEnvAutosyncJob, job.Permissions, wantJobPerms)
 	}
-	if job.RunsOn != "ubuntu-latest" {
-		t.Errorf("%s job %s runs-on = %q, want ubuntu-latest", workerEnvAutosyncWorkflow, workerEnvAutosyncJob, job.RunsOn)
+	if job.RunsOn.String() != "ubuntu-latest" {
+		t.Errorf("%s job %s runs-on = %q, want ubuntu-latest", workerEnvAutosyncWorkflow, workerEnvAutosyncJob, job.RunsOn.String())
 	}
 	if job.If != "github.repository == 'gastownhall/beads'" {
 		t.Errorf("%s job %s if = %q, want the fork guard github.repository == 'gastownhall/beads'", workerEnvAutosyncWorkflow, workerEnvAutosyncJob, job.If)

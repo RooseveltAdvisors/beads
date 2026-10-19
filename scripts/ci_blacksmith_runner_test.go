@@ -612,12 +612,12 @@ func TestBlacksmithBazelRunnerSizes(t *testing.T) {
 					want = label
 				}
 			}
-			if got := mustEvalGHRunsOn(t, job.RunsOn, ctx); got != want {
+			if got := mustEvalGHRunsOn(t, job.RunsOn.String(), ctx); got != want {
 				t.Errorf("%s runs-on under mode %s = %q, want %q", name, mode, got, want)
 			}
 		}
 		wantWorkers := "8"
-		if mustEvalGHRunsOn(t, workflow.job(t, bazelPackageMCPJobName).RunsOn, ctx) == "ubuntu-latest" {
+		if mustEvalGHRunsOn(t, workflow.job(t, bazelPackageMCPJobName).RunsOn.String(), ctx) == "ubuntu-latest" {
 			wantWorkers = "16"
 		}
 		if got := mustEvalGHRunsOn(t, mcpGate.Env["BEADS_MCP_PYTEST_WORKERS"], ctx); got != wantWorkers {

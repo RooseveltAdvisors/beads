@@ -30,7 +30,7 @@ type ciWorkflowJob struct {
 	Permissions     any                   `yaml:"permissions"`
 	Needs           ciWorkflowStringList  `yaml:"needs"`
 	Steps           []ciWorkflowStep      `yaml:"steps"`
-	RunsOn          string                `yaml:"runs-on"`
+	RunsOn          ciWorkflowRunsOn      `yaml:"runs-on"`
 	If              string                `yaml:"if"`
 	ContinueOnError bool                  `yaml:"continue-on-error"`
 	TimeoutMinutes  int                   `yaml:"timeout-minutes"`
@@ -91,6 +91,27 @@ type ciWorkflowStep struct {
 	TimeoutMinutes  int               `yaml:"timeout-minutes"`
 	Env             map[string]string `yaml:"env"`
 	With            map[string]string `yaml:"with"`
+}
+
+// ciWorkflowRunsOn decodes `runs-on`: GitHub takes either one label (a
+// scalar) or a label array (the runner must match all of them). The tests
+// reason over the label set as one line, so an array joins with ", ".
+type ciWorkflowRunsOn string
+
+// String renders the label set the tests compare against.
+func (r ciWorkflowRunsOn) String() string { return string(r) }
+
+func (r *ciWorkflowRunsOn) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		*r = ciWorkflowRunsOn(node.Value)
+		return nil
+	}
+	var list []string
+	if err := node.Decode(&list); err != nil {
+		return err
+	}
+	*r = ciWorkflowRunsOn(strings.Join(list, ", "))
+	return nil
 }
 
 type ciWorkflowStringList []string

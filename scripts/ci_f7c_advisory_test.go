@@ -179,7 +179,7 @@ func TestBlacksmithAdvisoryJobsReadNoSecrets(t *testing.T) {
 	for _, file := range blacksmithAdvisoryWorkflows {
 		workflow := readCIWorkflow(t, file)
 		for name, job := range workflow.Jobs {
-			if !strings.Contains(job.RunsOn, "blacksmith-") {
+			if !strings.Contains(job.RunsOn.String(), "blacksmith-") {
 				continue
 			}
 			t.Run(file+"/"+name, func(t *testing.T) {
@@ -267,8 +267,8 @@ func TestF7cAdvisorySameRepoBlacksmithExpressionSemantics(t *testing.T) {
 				if c.wantBlacksmith {
 					want = j.blacksmithLabel
 				}
-				if got := mustEvalGHRunsOn(t, job.RunsOn, ctx); got != want {
-					t.Errorf("%s/%s real runs-on %q evaluated under %+v = %q, want %q", j.file, j.job, job.RunsOn, c, got, want)
+				if got := mustEvalGHRunsOn(t, job.RunsOn.String(), ctx); got != want {
+					t.Errorf("%s/%s real runs-on %q evaluated under %+v = %q, want %q", j.file, j.job, job.RunsOn.String(), c, got, want)
 				}
 			})
 		}
@@ -439,7 +439,7 @@ func TestBlacksmithReachableAdvisoryJobsNeverSaveACache(t *testing.T) {
 					if !ghExprTruthyDefaultTrue(job.If, ctx) {
 						return // job cannot even run under this event
 					}
-					label := resolveRunsOnLabel(job.RunsOn, ctx)
+					label := resolveRunsOnLabel(job.RunsOn.String(), ctx)
 					if !strings.HasPrefix(label, "blacksmith-") {
 						return // doesn't land on Blacksmith under this context
 					}

@@ -299,7 +299,7 @@ func TestBazelDoltRaceShadowRunsOnlyInRemotePRCalls(t *testing.T) {
 	}
 	// The runner is the lanes' ternary, which picks Blacksmith only in mode
 	// remote: the only mode the job runs in.
-	if job.RunsOn != bazelLaneRunsOn {
-		t.Errorf("%s runs-on = %q, want %q", bazelDoltRaceJobName, job.RunsOn, bazelLaneRunsOn)
+	if job.RunsOn.String() != bazelLaneRunsOn {
+		t.Errorf("%s runs-on = %q, want %q", bazelDoltRaceJobName, job.RunsOn.String(), bazelLaneRunsOn)
 	}
 }
