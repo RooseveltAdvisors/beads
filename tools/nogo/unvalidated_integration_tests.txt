@@ -51,7 +51,7 @@ internal/storage/dolt/fresh_bootstrap_heal_integration_test.go
 internal/storage/dolt/git_remote_shared_server_test.go
 internal/storage/dolt/git_remote_test.go
 internal/storage/dolt/initschema_0069_versioned_beads_replay_test.go
-internal/storage/dolt/initschema_0071_datetime_precision_replay_test.go
+internal/storage/dolt/initschema_0072_datetime_precision_replay_test.go
 internal/storage/dolt/initschema_idempotent_test.go
 internal/storage/dolt/initschema_multiprocess_test.go
 internal/storage/dolt/lenient_open_dirty_tables_integration_test.go

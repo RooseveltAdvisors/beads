@@ -173,6 +173,12 @@ var versionExemptions = map[string]string{
 	// durable issue state a version records.
 	"TouchIssueActivityInTx": "comment-driven anchor activity; last_touched is not durable_state",
 
+	// the seat backfill (bd seat backfill) re-keys actor/author columns to
+	// seat IDs across audit rows and the issues/wisps planes: it migrates
+	// identity, it does not change what the work IS, so there is no new
+	// durable_state to record.
+	"BackfillSeatIDsInTx": "one-time seat-identity backfill; identity columns are not durable_state",
+
 	// is_blocked — derived readiness state, recomputed from the graph, never
 	// a mutation of the bead in its own right.
 	"RecomputeIsBlockedInTx":           "is_blocked is derived state",
