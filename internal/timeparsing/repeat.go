@@ -51,7 +51,7 @@ func ParseRepeat(s string) (Repeat, error) {
 		if err != nil || amount <= 0 {
 			return Repeat{}, fmt.Errorf("repeat interval %q must be positive", s)
 		}
-		return Repeat{raw: s, amount: amount, unit: matches[3]}, nil
+		return Repeat{raw: s, amount: amount, unit: strings.ToLower(matches[3])}, nil
 	}
 	if fields := strings.Fields(s); len(fields) == 5 {
 		cron, err := parseCron(fields)
@@ -119,7 +119,7 @@ func (r Repeat) NextFrom(t, anchor time.Time) (time.Time, error) {
 	switch {
 	case r.cron != nil:
 		return r.cron.next(t)
-	case r.unit == "m" || r.unit == "y":
+	case r.unit == "m" || r.unit == "mo" || r.unit == "y":
 		next := applyDuration(t, r.amount, r.unit)
 		day := anchor.Day()
 		if last := daysInMonth(next); day > last {

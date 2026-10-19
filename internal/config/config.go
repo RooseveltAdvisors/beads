@@ -300,6 +300,13 @@ func Initialize() error {
 	//
 	//	bd config set due.required true
 	v.SetDefault("due.required", false)
+	// Queue ceilings (issueops.ValidateQueueCap): the structural stop on
+	// backlog growth. A create past either ceiling refuses; --force (or
+	// SkipQueueCap on a batch) bypasses deliberately, and 0 turns a ceiling
+	// off. Defaults are guesses meant to be raised by a workspace that can
+	// honestly work more, not lowered by one that wants the number hidden.
+	v.SetDefault("create.max-open-per-assignee", 100)
+	v.SetDefault("create.max-open-total", 500)
 
 	// Comment progress on close. House default ON; upstream contrib should
 	// ship false so adopters opt in. Scope is assignee-set only (issueops).

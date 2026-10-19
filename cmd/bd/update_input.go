@@ -181,7 +181,7 @@ func gatherUpdateInput(ctx context.Context, cmd *cobra.Command) (*updateInput, e
 		} else {
 			t, err := timeparsing.ParseRelativeTime(dueStr, time.Now())
 			if err != nil {
-				return nil, HandleErrorRespectJSON("invalid --due format %q. Examples: +6h, tomorrow, next monday, 2025-01-15", dueStr)
+				return nil, HandleErrorRespectJSON("invalid --due format %q. Examples: +6h, +30min, tomorrow, next monday, 2025-01-15 (m = months: +1m is one month; for minutes use min)", dueStr)
 			}
 			in.fields["due_at"] = t
 		}

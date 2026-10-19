@@ -5,9 +5,9 @@ description: Complete reference for bd configuration across config.yaml and data
 
 Complete configuration reference for beads.
 
-Last reviewed: 2026-09-12
+Last reviewed: 2026-10-18
 
-Freshness source: `cmd/bd/main.go`, `cmd/bd/config.go`, `internal/configfile/`, and `internal/storage/issueops/due_required.go`.
+Freshness source: `cmd/bd/main.go`, `cmd/bd/config.go`, `internal/configfile/`, `internal/storage/issueops/due_required.go`, and `internal/storage/issueops/queue_cap.go`.
 
 beads has two complementary configuration systems:
 
@@ -88,7 +88,7 @@ The full namespaces routed to YAML are:
 
 Plus these individual keys:
 
-`no-db`, `json`, `db`, `actor`, `identity`, `no-push`, `no-git-ops`, `agent.profile`, `create.require-description`, `create.dedup-check`, `due.required`, `import.auto`, `import.path`, `prime.max-memories`, `prime.max-memory-chars`, `recurrence.close_guard`, and the secret keys `github.token`, `gitlab.token`, `jira.api_token`, `ado.pat`, `linear.api_key`, `linear.oauth_client_id`, `linear.oauth_client_secret`.
+`no-db`, `json`, `db`, `actor`, `identity`, `no-push`, `no-git-ops`, `agent.profile`, `create.require-description`, `create.dedup-check`, `create.max-open-per-assignee`, `create.max-open-total`, `due.required`, `import.auto`, `import.path`, `prime.max-memories`, `prime.max-memory-chars`, `recurrence.close_guard`, and the secret keys `github.token`, `gitlab.token`, `jira.api_token`, `ado.pat`, `linear.api_key`, `linear.oauth_client_id`, `linear.oauth_client_secret`.
 
 Any key whose name contains `api_key`, `api-key`, `secret`, `token`, or `password` is treated as a secret: it is refused on git-tracked `config.yaml` files unless you pass `--force-git-tracked`. Prefer exporting the value as an environment variable instead (e.g. `LINEAR_API_KEY`).
 
@@ -118,6 +118,8 @@ Any key whose name contains `api_key`, `api-key`, `secret`, `token`, or `passwor
 | `create.dedup-check` | — | `BD_CREATE_DEDUP_CHECK` | `true` | Block `bd create` (including markdown and graph batches) when an open, in-progress, or blocked issue has a near-identical title; bypass per call with `--allow-duplicate` or `--force` |
 | `recurrence.close_guard` | — | `BD_RECURRENCE_CLOSE_GUARD` | `true` | Refuse to close any recurring bead (`bd close`, `--force` included, and `bd update --status closed`), because each close files a new row. End the series with `bd update <id> --repeat ""` first, or set this to `false` to let closes spawn the next instance |
 | `due.required` | — | `BD_DUE_REQUIRED` | `false` | Require a due date on new work (opt-in; see [below](#mandatory-due-dates)) |
+| `create.max-open-per-assignee` | — | `BD_CREATE_MAX_OPEN_PER_ASSIGNEE` | `100` | Queue ceiling: refuse a create when the assignee already holds this many open beads (open/in_progress/blocked). `0` turns it off. `bd import` skips it |
+| `create.max-open-total` | — | `BD_CREATE_MAX_OPEN_TOTAL` | `500` | Queue ceiling: refuse a create when the store already holds this many open beads. `0` turns it off |
 | `validation.on-create` | — | `BD_VALIDATION_ON_CREATE` | `none` | Template validation: `none`, `warn`, `error` |
 | `validation.on-close` | — | `BD_VALIDATION_ON_CLOSE` | `none` | Template validation on close |
 | `validation.on-sync` | — | `BD_VALIDATION_ON_SYNC` | `none` | Template validation before sync |
