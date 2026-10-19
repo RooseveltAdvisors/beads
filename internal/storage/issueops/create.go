@@ -138,6 +138,11 @@ func CreateIssueInTxWithResult(ctx context.Context, tx DBTX, bc *BatchContext, i
 		StampExplicitDueSource(issue)
 		AnchorRecurrence(issue)
 	}
+	// The queue ceilings run beside the mandatory-due invariant for the same
+	// reason it does: this is the one body every non-public create reaches.
+	if err := ValidateQueueCap(ctx, tx, bc, issue); err != nil {
+		return result, err
+	}
 	issueTable, eventTable, skip, err := prepareCreateIssueInTx(ctx, tx, bc, issue, actor)
 	if err != nil || skip {
 		return result, err

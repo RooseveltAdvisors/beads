@@ -267,3 +267,34 @@ func TestParseCompactDuration_PreservesTimezone(t *testing.T) {
 		t.Errorf("timezone not preserved: got %v, want %v", got.Location(), loc)
 	}
 }
+
+// TestParseCompactDuration_MinutesVsMonths pins the unit map that a real
+// misread turned into a 2029 due date: a +30m due was taken as 30 minutes and
+// parsed as 30 MONTHS (2026-10-16 + 30m = 2029-04-16). m is months; minutes
+// spell out as min (or minute/minutes), and mo is the explicit month alias.
+func TestParseCompactDuration_MinutesVsMonths(t *testing.T) {
+	base := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		in   string
+		want time.Time
+	}{
+		{"+30m", time.Date(2029, 4, 16, 12, 0, 0, 0, time.UTC)},     // MONTHS - the trap
+		{"+30min", time.Date(2026, 10, 16, 12, 30, 0, 0, time.UTC)}, // minutes
+	}
+	for _, c := range cases {
+		got, err := ParseCompactDuration(c.in, base)
+		if err != nil {
+			t.Fatalf("ParseCompactDuration(%q): %v", c.in, err)
+		}
+		if !got.Equal(c.want) {
+			t.Errorf("ParseCompactDuration(%q, %s) = %s, want %s", c.in, base.Format(time.RFC3339), got.Format(time.RFC3339), c.want.Format(time.RFC3339))
+		}
+	}
+	// One spelling per unit, exactly as the hint promises: anything else is
+	// rejected rather than guessed.
+	for _, bad := range []string{"+30mins", "+30minutes", "+30mo", "+30 m", "+30MIN"} {
+		if _, err := ParseCompactDuration(bad, base); err == nil {
+			t.Errorf("ParseCompactDuration(%q) accepted; want an error", bad)
+		}
+	}
+}

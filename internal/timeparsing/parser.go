@@ -17,8 +17,12 @@ import (
 	"github.com/olebedev/when/rules/en"
 )
 
-// compactDurationRe matches compact duration patterns: [+-]?(\d+)(min|[hdwmy])
-// Examples: +6h, -1d, +2w, 3m, 1y, +30min
+// compactDurationRe matches compact duration patterns: [+-]?(\d+)(unit)
+// Examples: +6h, -1d, +2w, 3m (months), +30min, 1y
+//
+// THE UNIT MAP IS FIXED AND UNAMBIGUOUS: min/minute(s) = minutes,
+// m/mo = MONTHS. A bare +30m is 30 months, not 30 minutes - the mistake this
+// exists to prevent was a +30m due date landing in 2029.
 var compactDurationRe = regexp.MustCompile(`^([+-]?)(\d+)(min|[hdwmy])$`)
 
 // ParseCompactDuration parses compact duration syntax and returns the resulting time.
@@ -71,14 +75,14 @@ func ParseCompactDuration(s string, now time.Time) (time.Time, error) {
 // Feb 28, not Mar 3) instead of overflowing the way time.AddDate does.
 func applyDuration(base time.Time, amount int, unit string) time.Time {
 	switch unit {
-	case "min":
-		return base.Add(time.Duration(amount) * time.Minute)
 	case "h":
 		return base.Add(time.Duration(amount) * time.Hour)
 	case "d":
 		return base.AddDate(0, 0, amount)
 	case "w":
 		return base.AddDate(0, 0, amount*7)
+	case "min":
+		return base.Add(time.Duration(amount) * time.Minute)
 	case "m":
 		return addMonthsClamped(base, amount)
 	case "y":

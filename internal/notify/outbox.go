@@ -88,7 +88,41 @@ func (o *Outbox) Dir() string { return o.dir }
 func (o *Outbox) Enqueue(seat, issueID string, kind Kind, title string) (Record, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	return o.enqueueLocked(seat, issueID, kind, title)
+}
 
+// EnqueueUnique appends a row unless an unacked row already exists for the
+// same seat, issue, and kind. Returns false when the existing row is kept.
+func (o *Outbox) EnqueueUnique(seat, issueID string, kind Kind, title string) (Record, bool, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	acks, err := o.loadAcksLocked()
+	if err != nil {
+		return Record{}, false, err
+	}
+	all, err := o.readAllLocked()
+	if err != nil {
+		return Record{}, false, err
+	}
+	key := strings.TrimSpace(seat)
+	if key == "" {
+		key = UnassignedSeat
+	}
+	if kind == "" {
+		kind = KindDue
+	}
+	for _, rec := range all {
+		if strings.EqualFold(rec.Seat, key) && rec.IssueID == strings.TrimSpace(issueID) &&
+			rec.Kind == kind && rec.Seq > acks[strings.ToLower(rec.Seat)] {
+			return rec, false, nil
+		}
+	}
+	rec, err := o.enqueueLocked(seat, issueID, kind, title)
+	return rec, err == nil, err
+}
+
+func (o *Outbox) enqueueLocked(seat, issueID string, kind Kind, title string) (Record, error) {
 	seat = strings.TrimSpace(seat)
 	if seat == "" {
 		seat = UnassignedSeat
