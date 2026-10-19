@@ -66,6 +66,10 @@ func TestSharedServerIfRevisionSingleWinner(t *testing.T) {
 	}
 
 	baseEnv := []string{
+		// Hermetic to the house create.dedup-check (beads #37): the shared test
+		// database legitimately holds same-titled rows across tests, and a near-
+		// duplicate refusal is not the behavior under test here.
+		"BD_CREATE_DEDUP_CHECK=0",
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + t.TempDir(),
 		"GOPATH=" + os.Getenv("GOPATH"),
