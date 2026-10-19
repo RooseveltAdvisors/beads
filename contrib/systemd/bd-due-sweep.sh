@@ -2,8 +2,9 @@
 # One timer body: fire dues, then deliver seat notifies. That is the whole clock.
 #
 #   bd due sweep     → advances due_at, enqueues due + stale-claim .beads/notify/
-#   bd notify drain  → exact pins.json target → prompt
-#                      (no pin / dead pin: hold + escalate; never fuzzy match)
+#   bd notify drain  → exact seats.json endpoint → prompt
+#                      (legacy pins.json still read until bd seat import-pins;
+#                       no pin / dead pin: hold + escalate; never fuzzy match)
 #
 # No second timer. No firstmate publish hook required for seat delivery.
 set -euo pipefail

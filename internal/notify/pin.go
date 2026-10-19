@@ -212,8 +212,17 @@ func FindPinnedInstance(pin Pin, live []Instance) (Instance, bool) {
 }
 
 // LoadPins projects the registry's exact endpoints into the delivery pin
-// shape. A missing registry is an empty map, not an error.
+// shape. When seats.json is ABSENT (workspace not yet migrated) it falls back
+// to the legacy pins.json so an un-migrated workspace keeps delivering instead
+// of degrading to an exit-5 hold. A missing pins.json is an empty map, not an
+// error.
 func LoadPins(dir string) (map[string]Pin, error) {
+	if _, err := os.Stat(filepath.Join(dir, seats.File)); err != nil {
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
+		return loadLegacyPins(dir)
+	}
 	r, err := seats.Load(dir)
 	if err != nil {
 		return nil, err
@@ -221,6 +230,34 @@ func LoadPins(dir string) (map[string]Pin, error) {
 	out := make(map[string]Pin, len(r))
 	for id, seat := range r {
 		out[id] = Pin{Session: seat.Endpoint.Session, PaneID: seat.Endpoint.PaneID, AgentSessionID: seat.Endpoint.AgentSessionID, Liveness: seat.Liveness}
+	}
+	return out, nil
+}
+
+// legacyPin is one entry of the pre-migration pins.json map.
+type legacyPin struct {
+	Session        string `json:"session"`
+	PaneID         string `json:"pane_id"`
+	AgentSessionID string `json:"agent_session_id"`
+}
+
+// loadLegacyPins reads the old pins.json read path, kept so an un-migrated
+// workspace degrades to working rather than to a no-pin hold.
+func loadLegacyPins(dir string) (map[string]Pin, error) {
+	data, err := os.ReadFile(filepath.Join(dir, PinsFile)) //nolint:gosec // fixed legacy file in the notify dir
+	if os.IsNotExist(err) {
+		return map[string]Pin{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read pins: %w", err)
+	}
+	raw := map[string]legacyPin{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("parse pins: %w", err)
+	}
+	out := make(map[string]Pin, len(raw))
+	for key, entry := range raw {
+		out[key] = Pin{Session: entry.Session, PaneID: entry.PaneID, AgentSessionID: entry.AgentSessionID, Source: "legacy-pins"}
 	}
 	return out, nil
 }

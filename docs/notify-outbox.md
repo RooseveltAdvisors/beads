@@ -3,8 +3,11 @@
 ## Thesis
 
 Beads owns **time** (due/repeat/sweep) and **delivery ledger** (seat-addressed outbox).
-Assignee is a stable **seat identity**. Drain delivers only to an exact pin
-(`.beads/notify/pins.json`: herdr session + pane id, or agent session id).
+Assignee is a stable **seat identity**. Drain delivers only to an exact endpoint
+(`.beads/notify/seats.json`: herdr session + pane id, or agent session id).
+A workspace that has not migrated yet still reads its legacy
+`.beads/notify/pins.json` (see `bd seat import-pins`), so upgrading never
+turns working pins into no-pin holds.
 There is no fuzzy search. A missing pin, dead target, or blocked approval dialog leaves
 the row queued and marks the seat for parent escalation.
 Working targets without verified queue semantics hold until idle and deliver at the next turn boundary.
@@ -54,8 +57,10 @@ that is not per-bead seat delivery.
 
 `bd notify drain` native transport:
 
-1. Load `.beads/notify/pins.json` (seat → `{session, pane_id}` or `agent_session_id`).
-   A fleet seed is in `examples/notify/pins.json`, and pins can be auto-discovered via `scripts/notify/bd-notify-pin`.
+1. Load `.beads/notify/seats.json` (seat → `{session, pane_id}` or `agent_session_id`),
+   falling back to the legacy `pins.json` when `seats.json` is absent.
+   The legacy fleet seed in `examples/notify/pins.json` is imported with `bd seat import-pins`;
+   explicit endpoint writes go through `scripts/notify/bd-notify-pin`.
 2. `herdr session list --json` → running sessions
 3. `herdr --session S agent list` → live agents (any harness)
 4. Check pinned target status and harness delivery profile:
@@ -106,13 +111,14 @@ When a comment is added via `bd comment`:
 ## Fleet tooling (`scripts/notify/`)
 
 The repository includes helper scripts under `scripts/notify/`:
-- `bd-notify-pin`: Pin inspection and explicit pin writes (`set`/`forget`).
+- `bd-notify-pin`: Endpoint inspection and explicit endpoint writes (`set`/`forget`),
+  routed through `bd seat register` / `bd seat unbind` as the single registry writer.
   There is no discovery: a target is read off `herdr agent list` or a lock
   owner and written down, never guessed from titles, cwd or focus.
 - **One seat, one target**: seats are machine-global but each repo keeps its own
-  `.beads/notify/` queue, so a repo may symlink its `pins.json` at the
-  machine-canonical map. `bd-notify-pin set|forget` resolve that link and write
-  through it (mktemp+mv would replace the link and fork the map again - the
+  `.beads/notify/` queue, so a repo may symlink its `seats.json` at the
+  machine-canonical map. `bd seat register` (and therefore `bd-notify-pin set`)
+  resolves that link and writes through it (mktemp+mv would replace the link and fork the map again - the
   2026-10-02 incident where seat `wiseman` resolved to two different panes).
   Regressed by Test 6 in `test_beads_notify_e2e.sh`.
 - `fleet-monitor-beads-notify.sh`: Fleet auditor checking session integrity, outbox health, and non-interrupting delivery compliance.

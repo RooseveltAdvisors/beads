@@ -183,6 +183,29 @@ func init() {
 	reconcile.Flags().Duration("dead-after", 5*time.Minute, "Escalate after an endpoint has been continuously missing this long")
 	seatBackfillCmd.Flags().Bool("apply", false, "Apply the exact-name backfill")
 	seatBackfillCmd.Flags().Bool("flush-unresolved", false, "Explicitly flush unresolved notify rows, retaining a backup and per-row report")
+	importPins := registryCommand("import-pins", "One-time pins.json to seats.json migration (idempotent, reports every pin)", func(cmd *cobra.Command, args []string, o *notify.Outbox, r seats.Registry) error {
+		CheckReadonly("seat import-pins")
+		rows, err := notify.ImportPins(o.Dir(), time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			return printJSON(rows)
+		}
+		if rows == nil {
+			fmt.Printf("no legacy %s to import\n", notify.PinsFile)
+			return nil
+		}
+		for _, row := range rows {
+			fmt.Printf("pins %q -> %q %s", row.PinKey, row.SeatID, row.Action)
+			if row.Detail != "" {
+				fmt.Printf(" (%s)", row.Detail)
+			}
+			fmt.Println()
+		}
+		return nil
+	})
+	importPins.Args = cobra.NoArgs
 	unbind := registryCommand("unbind <seat-id>", "Mark a seat endpoint dead while retaining its immutable identity", func(cmd *cobra.Command, args []string, o *notify.Outbox, r seats.Registry) error {
 		CheckReadonly("seat unbind")
 		return seats.Update(o.Dir(), func(current seats.Registry) error {
@@ -199,6 +222,6 @@ func init() {
 		})
 	})
 	unbind.Args = cobra.ExactArgs(1)
-	seatCmd.AddCommand(register, rename, list, reconcile, unbind, seatBackfillCmd)
+	seatCmd.AddCommand(register, rename, list, reconcile, unbind, importPins, seatBackfillCmd)
 	rootCmd.AddCommand(seatCmd)
 }
