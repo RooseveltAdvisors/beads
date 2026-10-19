@@ -82,7 +82,8 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	var awaitType, awaitID, waiters sql.NullString
 	var ephemeral, noHistory, pinned, isTemplate sql.NullInt64
 	var metadata sql.NullString
-	var rowLock sql.NullInt64       // row_lock column (NOT NULL DEFAULT 0); scanned defensively so NULL maps to 0
+	var rowLock sql.NullInt64 // row_lock column (NOT NULL DEFAULT 0); scanned defensively so NULL maps to 0
+	var assigneeID sql.NullString
 	var storageClass sql.NullString // storage_class column (migration 0060); NULL = unset, resolves per EffectiveStorageClass
 	// Recurrence columns (migration 0067); scanned defensively so a row written
 	// before the migration's DEFAULT '' took effect maps to the empty rule.
@@ -101,7 +102,7 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 		&molType,
 		&eventKind, &actor, &target, &payload,
 		&dueAt, &deferUntil, &repeatPattern, &repeatStart, &repeatEnd, &dueSource, &dueMissed,
-		&workType, &sourceSystem, &metadata, &rowLock, &storageClass,
+		&workType, &sourceSystem, &metadata, &rowLock, &storageClass, &assigneeID,
 		&leaseExpiresAt, &heartbeatAt, &leaseGrantedNode,
 	}
 	dests = append(dests, extra...)
@@ -117,6 +118,7 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 		issue.UpdatedAt = ParseTimeString(updatedAtStr.String)
 	}
 
+	issue.AssigneeID = assigneeID.String
 	// Map nullable fields
 	if contentHash.Valid {
 		issue.ContentHash = contentHash.String
@@ -133,6 +135,10 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	}
 	if assignee.Valid {
 		issue.Assignee = assignee.String
+	}
+	if assigneeID.Valid && assigneeID.String != "" {
+		issue.AssigneeID = assigneeID.String
+		issue.Assignee = assigneeID.String
 	}
 	if createdBy.Valid {
 		issue.CreatedBy = createdBy.String
@@ -283,7 +289,8 @@ func ScanIssueLiteFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	var awaitType, awaitID sql.NullString
 	var ephemeral, noHistory, pinned, isTemplate sql.NullInt64
 	var metadata sql.NullString
-	var rowLock sql.NullInt64       // row_lock column (NOT NULL DEFAULT 0); scanned defensively so NULL maps to 0
+	var rowLock sql.NullInt64 // row_lock column (NOT NULL DEFAULT 0); scanned defensively so NULL maps to 0
+	var assigneeID sql.NullString
 	var storageClass sql.NullString // storage_class column (migration 0060); NULL = unset, resolves per EffectiveStorageClass
 	// Recurrence columns (migration 0067); scanned defensively so a row written
 	// before the migration's DEFAULT '' took effect maps to the empty rule.
@@ -302,7 +309,7 @@ func ScanIssueLiteFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 		&molType,
 		&eventKind, &actor, &target,
 		&dueAt, &deferUntil, &repeatPattern, &repeatStart, &repeatEnd, &dueSource, &dueMissed,
-		&workType, &sourceSystem, &metadata, &rowLock, &storageClass,
+		&workType, &sourceSystem, &metadata, &rowLock, &storageClass, &assigneeID,
 		&leaseExpiresAt, &heartbeatAt, &leaseGrantedNode,
 	}
 	dests = append(dests, extra...)
@@ -332,6 +339,10 @@ func ScanIssueLiteFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	}
 	if assignee.Valid {
 		issue.Assignee = assignee.String
+	}
+	if assigneeID.Valid && assigneeID.String != "" {
+		issue.AssigneeID = assigneeID.String
+		issue.Assignee = assigneeID.String
 	}
 	if createdBy.Valid {
 		issue.CreatedBy = createdBy.String

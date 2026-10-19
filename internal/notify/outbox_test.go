@@ -11,7 +11,7 @@ func TestOutboxEnqueuePendingAck(t *testing.T) {
 	if err := os.MkdirAll(beads, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	o, err := Open(beads)
+	o, err := openRegisteredTestOutbox(t, beads)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestEmptySeatBecomesUnassigned(t *testing.T) {
 	if err := os.MkdirAll(beads, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	o, err := Open(beads)
+	o, err := openRegisteredTestOutbox(t, beads)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestOutboxEnqueueUniqueSkipsUnackedDuplicate(t *testing.T) {
 	if err := os.MkdirAll(beads, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	o, err := Open(beads)
+	o, err := openRegisteredTestOutbox(t, beads)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestOutboxPendingIsExactSeat(t *testing.T) {
 	if err := os.MkdirAll(beads, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	o, err := Open(beads)
+	o, err := openRegisteredTestOutbox(t, beads)
 	if err != nil {
 		t.Fatal(err)
 	}

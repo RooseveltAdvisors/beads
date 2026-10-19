@@ -236,7 +236,7 @@ func outputQueryResults(issues []*types.Issue, queryStr string, longFormat bool)
 			fmt.Printf("%s [P%d] [%s] %s\n", issue.ID, issue.Priority, issue.IssueType, issue.Status)
 			fmt.Printf("  %s\n", issue.Title)
 			if issue.Assignee != "" {
-				fmt.Printf("  Assignee: %s\n", issue.Assignee)
+				fmt.Printf("  Assignee: %s\n", seatDisplay(issue.Assignee))
 			}
 			if len(issue.Labels) > 0 {
 				fmt.Printf("  Labels: %v\n", issue.Labels)
@@ -262,7 +262,7 @@ func formatQueryIssue(buf *strings.Builder, issue *types.Issue) {
 	}
 	assigneeStr := ""
 	if issue.Assignee != "" {
-		assigneeStr = fmt.Sprintf(" @%s", issue.Assignee)
+		assigneeStr = fmt.Sprintf(" @%s", seatDisplay(issue.Assignee))
 	}
 
 	// Get styled status icon

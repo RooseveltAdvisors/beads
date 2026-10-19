@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/steveyegge/beads/internal/seats"
 	"sort"
 	"sync"
 	"time"
@@ -421,6 +422,12 @@ func getJournalIssueInTx(ctx context.Context, tx DBTX, issueID string) (*types.I
 // transaction. actor is stored as-is — "" for the genuinely unattributable
 // paths — in the NOT NULL DEFAULT ” actor column.
 func insertEventRow(ctx context.Context, tx DBTX, op EventOp, issueID string, issue *types.Issue, dep *EventDep, comment *EventComment, actor string) error {
+	ctx = SeatContext(ctx, tx)
+	var resolveErr error
+	actor, resolveErr = seats.ResolveContext(ctx, actor)
+	if resolveErr != nil {
+		return resolveErr
+	}
 	var issueJSON any
 	if issue != nil {
 		b, err := json.Marshal(issue)

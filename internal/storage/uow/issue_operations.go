@@ -211,6 +211,9 @@ func (o *issueOperations) Update(ctx context.Context, request publicops.UpdateRe
 	}
 	return RunTxResult(ctx, o.provider, func(ctx context.Context, uw UnitOfWork) (publicops.UpdateResult, string, error) {
 		attempt := storageissueops.CloneUpdateRequest(snapshot)
+		if err := storageissueops.ResolveUpdateSeatRequest(ctx, &attempt); err != nil {
+			return publicops.UpdateResult{}, "", err
+		}
 		spec, err := updateSpec(attempt)
 		if err != nil {
 			return publicops.UpdateResult{}, "", validationError(err)

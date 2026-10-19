@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/steveyegge/beads/internal/seats"
 	"strings"
 	"time"
 
@@ -107,6 +108,15 @@ func mergeChangedTables(dst map[string]bool, src map[string]bool) map[string]boo
 
 func CreateIssueInTxWithResult(ctx context.Context, tx DBTX, bc *BatchContext, issue *types.Issue, actor string) (CreateIssueResult, error) {
 	var result CreateIssueResult
+	ctx = SeatContext(ctx, tx)
+	var resolveErr error
+	actor, resolveErr = seats.ResolveContext(ctx, actor)
+	if resolveErr != nil {
+		return result, resolveErr
+	}
+	if err := ResolveIssueSeats(ctx, issue); err != nil {
+		return result, err
+	}
 	// The mandatory-due invariant runs here, on the classic/store leg, because
 	// this is the one body every non-public create reaches (CLI create, quick
 	// capture, batch create) with the wisp/plane routing already settled. The

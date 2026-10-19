@@ -34,6 +34,11 @@ func outputJSON(v interface{}) error {
 // parsing stderr. When the envelope is not active, p is ignored and the
 // existing stderr text hint handles the human/text path.
 func outputJSONWithPagination(v interface{}, p *PaginationMeta) error {
+	var projectionErr error
+	v, projectionErr = projectSeatJSON(v)
+	if projectionErr != nil {
+		return projectionErr
+	}
 	var out interface{}
 	if jsonEnvelopeEnabled() && p != nil {
 		out = map[string]interface{}{
@@ -57,6 +62,11 @@ func outputJSONWithPagination(v interface{}, p *PaginationMeta) error {
 }
 
 func outputJSONRaw(v interface{}) error {
+	var err error
+	v, err = projectSeatJSON(v)
+	if err != nil {
+		return err
+	}
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(v); err != nil {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/steveyegge/beads/internal/seats"
 	"slices"
 	"strconv"
 	"strings"
@@ -38,7 +39,7 @@ var _ domain.IssueSQLRepository = (*issueSQLRepositoryImpl)(nil)
 const issueSelectColumns = sqlbuild.IssueSelectColumns
 
 var allowedUpdateFields = map[string]struct{}{
-	"status": {}, "priority": {}, "title": {}, "assignee": {}, "owner": {},
+	"status": {}, "priority": {}, "title": {}, "assignee": {}, "assignee_id": {}, "owner": {},
 	"description": {}, "design": {}, "acceptance_criteria": {}, "notes": {},
 	"issue_type": {}, "estimated_minutes": {}, "external_ref": {}, "spec_id": {},
 	"started_at": {}, "closed_at": {}, "close_reason": {}, "closed_by_session": {},
@@ -141,6 +142,10 @@ func (r *issueSQLRepositoryImpl) Update(ctx context.Context, id string, updates 
 		return nil
 	}
 	updates = cloneUpdateFields(updates)
+	ctx = issueops.SeatContext(ctx, r.runner)
+	if err := issueops.ResolveSeatUpdates(ctx, updates); err != nil {
+		return err
+	}
 	// Pop the close-policy override before anything reads the map as a set of
 	// columns, mirroring issueops.updateIssueInTx. The no-op filter below keeps
 	// unrecognized keys, so a surviving override would reach the field
@@ -417,6 +422,12 @@ func coerceStatus(v any) types.Status {
 }
 
 func (r *issueSQLRepositoryImpl) Claim(ctx context.Context, id, actor string, opts domain.IssueTableOpts) (domain.ClaimRowResult, error) {
+	ctx = issueops.SeatContext(ctx, r.runner)
+	var resolveErr error
+	actor, resolveErr = seats.ResolveContext(ctx, actor)
+	if resolveErr != nil {
+		return domain.ClaimRowResult{}, resolveErr
+	}
 	if id == "" {
 		return domain.ClaimRowResult{}, errors.New("db: Claim: id must not be empty")
 	}
@@ -459,7 +470,11 @@ func (r *issueSQLRepositoryImpl) Claim(ctx context.Context, id, actor string, op
 	// — including a spelling difference across layers (ga-wzl83) — or a
 	// claim-pool alias. issueops.ActorMatches is the exported form of the
 	// primary path's package-local actorMatches, kept for exactly this dual.
-	assigneeOK := oldIssue.Assignee == "" || issueops.ActorMatches(oldIssue.Assignee, actor) || slices.Contains(pools, oldIssue.Assignee)
+	sameActor := issueops.ActorMatches
+	if oldIssue.AssigneeID != "" {
+		sameActor = func(a, b string) bool { return a == b }
+	}
+	assigneeOK := oldIssue.Assignee == "" || sameActor(oldIssue.Assignee, actor) || slices.Contains(pools, oldIssue.Assignee)
 
 	// Same lockstep for the source statuses (bd-pq7m2): claimable from "open"
 	// plus custom active-category statuses, like the primary path — not a
@@ -488,23 +503,23 @@ func (r *issueSQLRepositoryImpl) Claim(ctx context.Context, id, actor string, op
 	if assigneeOK {
 		var res sql.Result
 		if startedWasZero {
-			args := append([]any{actor, now, now}, rowLockArgs...)
+			args := append([]any{actor, issueops.SeatAssigneeID(ctx, actor), now, now}, rowLockArgs...)
 			args = append(args, id, oldIssue.RowVersion)
 			args = append(args, statusArgs...)
 			//nolint:gosec // G201: table is one of two hardcoded constants
 			res, err = r.runner.ExecContext(ctx, fmt.Sprintf(`
 				UPDATE %s
-				SET assignee = ?, status = 'in_progress', updated_at = ?, started_at = ?, %s
+				SET assignee = ?, assignee_id = ?, status = 'in_progress', updated_at = ?, started_at = ?, %s
 				WHERE id = ? AND row_lock = ? AND (%s)
 			`, table, rowLockClause, statusPredicate), args...)
 		} else {
-			args := append([]any{actor, now}, rowLockArgs...)
+			args := append([]any{actor, issueops.SeatAssigneeID(ctx, actor), now}, rowLockArgs...)
 			args = append(args, id, oldIssue.RowVersion)
 			args = append(args, statusArgs...)
 			//nolint:gosec // G201: table is one of two hardcoded constants
 			res, err = r.runner.ExecContext(ctx, fmt.Sprintf(`
 				UPDATE %s
-				SET assignee = ?, status = 'in_progress', updated_at = ?, %s
+				SET assignee = ?, assignee_id = ?, status = 'in_progress', updated_at = ?, %s
 				WHERE id = ? AND row_lock = ? AND (%s)
 			`, table, rowLockClause, statusPredicate), args...)
 		}
@@ -768,6 +783,10 @@ func pickIssueTable(useWisps bool) string {
 
 //nolint:gosec // G201: table is a hardcoded constant ("issues" or "wisps")
 func insertIssueRow(ctx context.Context, runner Runner, table string, issue *types.Issue) error {
+	ctx = issueops.SeatContext(ctx, runner)
+	if err := issueops.ResolveIssueSeats(ctx, issue); err != nil {
+		return err
+	}
 	// Bound the VARCHAR(255) assignment columns at the raw-SQL chokepoint, so
 	// every proxied-server (uow) create — single, batch, and import — rejects an
 	// over-length assignee/owner with a typed ErrFieldTooLong instead of a raw
@@ -797,7 +816,7 @@ func insertIssueRow(ctx context.Context, runner Runner, table string, issue *typ
 			await_type, await_id, timeout_ns, waiters,
 			due_at, defer_until, repeat_pattern, repeat_start, repeat_end, due_source, due_missed,
 			metadata,
-			row_lock, storage_class
+			row_lock, storage_class, assignee_id
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?, ?,
@@ -809,7 +828,7 @@ func insertIssueRow(ctx context.Context, runner Runner, table string, issue *typ
 			?, ?, ?, ?,
 			?, ?, ?, ?, ?, ?, ?,
 			?,
-			?, ?
+			?, ?, ?
 		)
 		ON DUPLICATE KEY UPDATE
 			content_hash = VALUES(content_hash),
@@ -822,6 +841,7 @@ func insertIssueRow(ctx context.Context, runner Runner, table string, issue *typ
 			priority = VALUES(priority),
 			issue_type = VALUES(issue_type),
 			assignee = VALUES(assignee),
+			assignee_id = VALUES(assignee_id),
 			estimated_minutes = VALUES(estimated_minutes),
 			updated_at = VALUES(updated_at),
 			started_at = VALUES(started_at),
@@ -851,7 +871,7 @@ func insertIssueRow(ctx context.Context, runner Runner, table string, issue *typ
 		issue.AwaitType, issue.AwaitID, issue.Timeout.Nanoseconds(), formatJSONStringArray(issue.Waiters),
 		issue.DueAt, issue.DeferUntil, issue.RepeatPattern, issue.RepeatStart, issue.RepeatEnd, string(issue.DueSource), issue.DueMissed,
 		jsonMetadata(issue.Metadata),
-		issueops.FreshRowLock(), nullString(string(issue.StorageClass.Normalize())),
+		issueops.FreshRowLock(), nullString(string(issue.StorageClass.Normalize())), issue.AssigneeID,
 	)
 	if err != nil {
 		return fmt.Errorf("db: insert into %s: %w", table, err)

@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"github.com/steveyegge/beads/internal/seats"
 	"os"
 	"path/filepath"
 	"testing"
@@ -100,10 +101,10 @@ func TestLoadPinsAndHolds(t *testing.T) {
 		t.Fatalf("missing pins.json: %v %+v", err, pins)
 	}
 	body := []byte(`{
-  "FirstMate": {"session":"firstmate","pane_id":"w6:p2","source":"lock"},
-  "wiseman": {"session":"wiseman","pane_id":"w1:pJ"}
+  "firstmate": {"aliases":["FirstMate"],"endpoint":{"session":"firstmate","pane_id":"w6:p2"},"liveness":"live"},
+  "wiseman": {"aliases":["wiseman"],"endpoint":{"session":"wiseman","pane_id":"w1:pJ"},"liveness":"live"}
 }`)
-	if err := os.WriteFile(filepath.Join(o.Dir(), PinsFile), body, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(o.Dir(), seats.File), body, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	pins, err = o.LoadPins()
@@ -135,7 +136,7 @@ func TestLoadPinsAndHolds(t *testing.T) {
 
 func TestLoadPinsRejectsCorruptJSON(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, PinsFile), []byte("{"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, seats.File), []byte("{"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadPins(dir); err == nil {

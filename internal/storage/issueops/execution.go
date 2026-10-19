@@ -131,7 +131,11 @@ func skippedDependencyError(skipped []skippedDependency) error {
 
 // ExecuteUpdate applies a guarded update in tx and reports durable tables changed.
 func ExecuteUpdate(ctx context.Context, tx *sql.Tx, request publicops.UpdateRequest) (publicops.UpdateResult, ChangedTables, error) {
+	ctx = SeatContext(ctx, tx)
 	attempt := CloneUpdateRequest(request)
+	if err := ResolveUpdateSeatRequest(ctx, &attempt); err != nil {
+		return publicops.UpdateResult{}, nil, err
+	}
 	if attempt.Actor == "" || attempt.IssueID == "" {
 		return publicops.UpdateResult{}, nil, fmt.Errorf("%w: update requires actor and issue ID", storage.ErrValidation)
 	}

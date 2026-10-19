@@ -4,14 +4,15 @@
 // delivery: each fired bead or comment ping becomes a durable seat-addressed
 // row under .beads/notify/, independent of firstmate, herdr, or any LLM
 // harness. Seat drains (bd notify drain) pull pending rows and deliver only
-// to an exact pin in pins.json; transports are not the bus. No pin or a dead
-// pin holds the row and marks escalation.
+// to an exact registry endpoint in seats.json; transports are not the bus. No
+// pin or a dead pin holds the row and marks escalation.
 package notify
 
 import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/steveyegge/beads/internal/seats"
 	"os"
 	"path/filepath"
 	"sort"
@@ -88,6 +89,11 @@ func (o *Outbox) Dir() string { return o.dir }
 func (o *Outbox) Enqueue(seat, issueID string, kind Kind, title string) (Record, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	release, lockErr := seats.LockFile(filepath.Join(o.dir, "outbox.lock"))
+	if lockErr != nil {
+		return Record{}, lockErr
+	}
+	defer release()
 	return o.enqueueLocked(seat, issueID, kind, title)
 }
 
@@ -96,6 +102,11 @@ func (o *Outbox) Enqueue(seat, issueID string, kind Kind, title string) (Record,
 func (o *Outbox) EnqueueUnique(seat, issueID string, kind Kind, title string) (Record, bool, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	release, lockErr := seats.LockFile(filepath.Join(o.dir, "outbox.lock"))
+	if lockErr != nil {
+		return Record{}, false, lockErr
+	}
+	defer release()
 
 	acks, err := o.loadAcksLocked()
 	if err != nil {
@@ -105,10 +116,14 @@ func (o *Outbox) EnqueueUnique(seat, issueID string, kind Kind, title string) (R
 	if err != nil {
 		return Record{}, false, err
 	}
-	key := strings.TrimSpace(seat)
-	if key == "" {
-		key = UnassignedSeat
+	key, err := o.ResolveSeat(seat)
+	if err != nil {
+		return Record{}, false, err
 	}
+	if key == "" {
+		return Record{}, false, fmt.Errorf("notify requires a registered seat")
+	}
+	seat = key
 	if kind == "" {
 		kind = KindDue
 	}
@@ -123,9 +138,18 @@ func (o *Outbox) EnqueueUnique(seat, issueID string, kind Kind, title string) (R
 }
 
 func (o *Outbox) enqueueLocked(seat, issueID string, kind Kind, title string) (Record, error) {
-	seat = strings.TrimSpace(seat)
-	if seat == "" {
+	var resolveErr error
+	if strings.TrimSpace(seat) == "" {
 		seat = UnassignedSeat
+	}
+	if seat != UnassignedSeat {
+		seat, resolveErr = o.ResolveSeat(seat)
+	}
+	if resolveErr != nil {
+		return Record{}, resolveErr
+	}
+	if seat == "" {
+		return Record{}, fmt.Errorf("notify requires a registered seat")
 	}
 	issueID = strings.TrimSpace(issueID)
 	if issueID == "" {
@@ -185,6 +209,11 @@ func (o *Outbox) EnqueueSeatBatch(seat string, ids []string, kind Kind, titles m
 func (o *Outbox) Pending(seat string) ([]Record, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	release, lockErr := seats.LockFile(filepath.Join(o.dir, "outbox.lock"))
+	if lockErr != nil {
+		return nil, lockErr
+	}
+	defer release()
 
 	acks, err := o.loadAcksLocked()
 	if err != nil {
@@ -213,6 +242,11 @@ func (o *Outbox) Pending(seat string) ([]Record, error) {
 func (o *Outbox) AckSeat(seat string, upTo int64) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	release, lockErr := seats.LockFile(filepath.Join(o.dir, "outbox.lock"))
+	if lockErr != nil {
+		return lockErr
+	}
+	defer release()
 
 	seat = strings.TrimSpace(seat)
 	if seat == "" {
@@ -236,6 +270,11 @@ func (o *Outbox) AckSeat(seat string, upTo int64) error {
 func (o *Outbox) Seats() ([]string, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	release, lockErr := seats.LockFile(filepath.Join(o.dir, "outbox.lock"))
+	if lockErr != nil {
+		return nil, lockErr
+	}
+	defer release()
 	all, err := o.readAllLocked()
 	if err != nil {
 		return nil, err
@@ -261,7 +300,9 @@ func (o *Outbox) nextSeqLocked() (int64, error) {
 	if err == nil {
 		// A corrupt counter leaves cur at 0 and restarts the sequence; the
 		// ledger is append-only, so a replayed seq is visible, not silent.
-		_, _ = fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &cur)
+		if _, err := fmt.Sscanf(strings.TrimSpace(string(data)), "%d", &cur); err != nil {
+			return 0, fmt.Errorf("notify: corrupt seq: %w", err)
+		}
 	} else if !os.IsNotExist(err) {
 		return 0, err
 	}
@@ -293,7 +334,7 @@ func (o *Outbox) readAllLocked() ([]Record, error) {
 		}
 		var rec Record
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			continue // skip corrupt; ledger is append-only
+			return nil, fmt.Errorf("notify: corrupt ledger row: %w", err)
 		}
 		out = append(out, rec)
 	}
@@ -339,6 +380,11 @@ func (o *Outbox) saveAcksLocked(acks map[string]int64) error {
 func (o *Outbox) HasRecent(issueID string, kind Kind, since time.Time) (bool, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	release, lockErr := seats.LockFile(filepath.Join(o.dir, "outbox.lock"))
+	if lockErr != nil {
+		return false, lockErr
+	}
+	defer release()
 	all, err := o.readAllLocked()
 	if err != nil {
 		return false, err

@@ -113,7 +113,7 @@ func (h HerdrDiscoverer) ListAllInstances() ([]Instance, error) {
 	for _, session := range sessions {
 		inst, err := h.listSession(session)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		all = append(all, inst...)
 	}

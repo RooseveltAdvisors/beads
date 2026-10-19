@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -155,6 +156,12 @@ Examples:
 		// (educational bd close playbook). skip ids already due/escalated this pass.
 		skip := append(append([]string{}, report.DueIDs...), report.EscalatedIDs...)
 		enqueueStaleClaimNotifies(skip)
+		// The existing bd-due-sweep timer drives seat liveness as well.
+		if o, err := openNotifyOutbox(); err != nil {
+			fmt.Fprintf(os.Stderr, "due sweep: seat reconcile: %v\n", err)
+		} else if _, err := reconcileSeatRegistry(o, 5*time.Minute); err != nil {
+			fmt.Fprintf(os.Stderr, "due sweep: seat reconcile: %v\n", err)
+		}
 		if jsonOutput {
 			return printJSON(report)
 		}

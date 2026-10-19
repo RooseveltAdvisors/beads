@@ -100,7 +100,7 @@ func formatIssueLong(buf *strings.Builder, issue *types.Issue, labels []string, 
 		buf.WriteString(fmt.Sprintf("  %s\n", issue.Title))
 	}
 	if issue.Assignee != "" {
-		buf.WriteString(fmt.Sprintf("  Assignee: %s\n", issue.Assignee))
+		buf.WriteString(fmt.Sprintf("  Assignee: %s\n", seatDisplay(issue.Assignee)))
 	}
 	// This is the one text rendering in the tree that prints a field --brief
 	// drops, so it is the one that has to say so. Keyed off the ROW, not off
@@ -242,7 +242,7 @@ func formatIssueCompact(buf *strings.Builder, issue *types.Issue, labels []strin
 	}
 	assigneeStr := ""
 	if issue.Assignee != "" {
-		assigneeStr = fmt.Sprintf(" @%s", issue.Assignee)
+		assigneeStr = fmt.Sprintf(" @%s", seatDisplay(issue.Assignee))
 	}
 
 	// Format dependency info

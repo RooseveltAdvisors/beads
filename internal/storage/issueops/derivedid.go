@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/steveyegge/beads/internal/seats"
 	"time"
 
 	"github.com/steveyegge/beads/internal/storage/rowid"
@@ -108,6 +109,12 @@ func InsertDerivedEvent(ctx context.Context, tx DBTX, table string, e AuxEvent) 
 //
 //nolint:gosec // G201: table is a hardcoded routing constant at every call site.
 func InsertDerivedEventReturningID(ctx context.Context, tx DBTX, table string, e AuxEvent) (string, error) {
+	ctx = SeatContext(ctx, tx)
+	var resolveErr error
+	e.Actor, resolveErr = seats.ResolveContext(ctx, e.Actor)
+	if resolveErr != nil {
+		return "", resolveErr
+	}
 	if e.CreatedAt == "" {
 		e.CreatedAt = NowAuxTime()
 	}
@@ -213,6 +220,11 @@ func NextLiveCommentTime(ctx context.Context, tx DBTX, table, issueID string, no
 //
 //nolint:gosec // G201: table is a hardcoded routing constant at every call site.
 func InsertDerivedComment(ctx context.Context, tx DBTX, table, issueID, author, text, createdAt string) (id string, existed bool, err error) {
+	ctx = SeatContext(ctx, tx)
+	author, err = seats.ResolveContext(ctx, author)
+	if err != nil {
+		return "", false, err
+	}
 	err = tx.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT id FROM %s
 		WHERE issue_id = ? AND author = ? AND text = ? AND created_at = ?

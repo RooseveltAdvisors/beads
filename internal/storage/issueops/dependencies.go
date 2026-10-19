@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/steveyegge/beads/internal/seats"
 	"strings"
 
 	"github.com/steveyegge/beads/internal/storage/depid"
@@ -175,6 +176,12 @@ func AddDependencyInTx(ctx context.Context, tx *sql.Tx, dep *types.Dependency, a
 }
 
 func addDependencyInTx(ctx context.Context, tx *sql.Tx, dep *types.Dependency, actor string, opts AddDependencyOpts, recomputeResult *RecomputeIsBlockedResult) (bool, error) {
+	ctx = SeatContext(ctx, tx)
+	var resolveErr error
+	actor, resolveErr = seats.ResolveContext(ctx, actor)
+	if resolveErr != nil {
+		return false, resolveErr
+	}
 	if strings.HasPrefix(dep.DependsOnID, "external:") && dep.Type == types.DepParentChild {
 		return false, fmt.Errorf("external capability dependencies cannot use parent-child edges")
 	}

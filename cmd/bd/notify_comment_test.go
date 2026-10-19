@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/steveyegge/beads/internal/seats"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,6 +13,9 @@ func setupNotifyBeadsDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := seats.Save(filepath.Join(dir, "notify"), seats.Registry{"wiseman": {Aliases: []string{"wiseman"}, Liveness: seats.Live, Endpoint: seats.Endpoint{Session: "s", PaneID: "p"}}}); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("BEADS_DIR", dir)
@@ -73,6 +77,12 @@ func TestPingCommentAssignee_SkipsSelfAndUnassigned(t *testing.T) {
 func TestTryDrainCommentPing_NoPinHoldsWithoutHerdr(t *testing.T) {
 	t.Setenv("BEADS_TEST_MODE", "")
 	dir := setupNotifyBeadsDir(t)
+	// This scenario is the no-pin case: the registered seat has no endpoint
+	// and the workspace has no legacy pin, so the drain must hold without
+	// any herdr discovery.
+	if err := seats.Save(filepath.Join(dir, "notify"), seats.Registry{"wiseman": {Aliases: []string{"wiseman"}, Liveness: seats.Live}}); err != nil {
+		t.Fatal(err)
+	}
 
 	o, err := notify.Open(dir)
 	if err != nil {
