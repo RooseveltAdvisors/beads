@@ -128,7 +128,14 @@ The repository includes helper scripts under `scripts/notify/`:
 
 ## Deployment (ponytail)
 
-One systemd timer runs sweep then drain. No separate notify timer.
+One service runs sweep then drain: `scripts/notify/bd-due-wake.sh` behind a
+`systemd --user` unit. It sleeps until the earliest `due_at` across the
+managed workspaces, then runs `bd due sweep` and `bd notify drain --all`, so a
+due wake lands within seconds of its due instant instead of on a polling
+boundary. A 300-second cap bounds recovery from suspend and late-arriving
+dues. The unit runs as machine actor `bd-due-trigger`, the identity the sweep
+records its due events under.
+
 Pending outbox rows retry on the next sweep when the pinned target is live.
 Unpinned or dead-pinned seats stay queued until a human (or lock owner) pins
 the exact herdr id.
