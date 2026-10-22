@@ -137,8 +137,9 @@ var notifyResolveCmd = &cobra.Command{
 and whether that exact target is live in herdr.
 
 Delivery is exact: pinned target live -> deliver there; no pin or dead pin
--> hold and escalate. Nothing here is scored or guessed; re-pin a moved
-target by hand with bd-notify-pin set <seat> <session> <pane>.`,
+-> hold and escalate. Nothing here is scored or guessed. A moved pane is
+rewritten at drain time from the live agent session, and a restarted seat
+rebinds itself the next time it runs bd. No external timer is required.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		seat, _ := cmd.Flags().GetString("seat")
@@ -281,14 +282,16 @@ actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.`,
 		)
 		needHerdr := execCmd == "" && !printOnly
 		if needHerdr {
+			instances, discErr = discover.ListAllInstances()
+			if discErr != nil {
+				healSeatRuntime(o, nil, false)
+				return HandleError("herdr discover: %v", discErr)
+			}
+			healSeatRuntime(o, instances, true)
 			var perr error
 			pins, perr = o.LoadPins()
 			if perr != nil {
 				return HandleError("pins: %v", perr)
-			}
-			instances, discErr = discover.ListAllInstances()
-			if discErr != nil {
-				return HandleError("herdr discover: %v", discErr)
 			}
 		}
 
@@ -544,6 +547,13 @@ func tryDrainCommentPing(o *notify.Outbox, seat string) {
 	if err != nil || len(live) == 0 {
 		return
 	}
+	discover := notify.HerdrDiscoverer{}
+	instances, discErr := discover.ListAllInstances()
+	if discErr == nil {
+		healSeatRuntime(o, instances, true)
+	} else {
+		healSeatRuntime(o, nil, false)
+	}
 	pins, err := o.LoadPins()
 	if err != nil {
 		return
@@ -553,9 +563,7 @@ func tryDrainCommentPing(o *notify.Outbox, seat string) {
 		_ = o.SetHold(seat, notify.Hold{Reason: notify.HoldNoPin, Pending: len(live)})
 		return
 	}
-	discover := notify.HerdrDiscoverer{}
-	instances, err := discover.ListAllInstances()
-	if err != nil {
+	if discErr != nil {
 		_ = o.SetHold(seat, notify.Hold{
 			Reason: notify.HoldDeadPin, Session: pin.Session, PaneID: pin.PaneID,
 			AgentSessionID: pin.AgentSessionID, Pending: len(live),

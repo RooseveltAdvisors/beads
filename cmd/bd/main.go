@@ -1204,6 +1204,8 @@ var rootCmd = &cobra.Command{
 
 		// Initialize CommandContext to hold runtime state (replaces scattered globals)
 		initCommandContext()
+		// A restarted herdr pane rebinds its own seat here. This is not a timer.
+		healCallerSeat()
 
 		// Reset per-command write tracking (used by Dolt auto-commit).
 		commandDidWrite.Store(false)
