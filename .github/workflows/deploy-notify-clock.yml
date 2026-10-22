@@ -75,6 +75,10 @@ jobs:
           install -m 0755 "$RUNNER_TEMP/bd" "$INSTALL_BIN"
 
       - name: Verify installed binary against the live workspace
+        env:
+          # The lane's own identity: a machine actor the strict seat
+          # registry admits. An empty actor refuses every write.
+          BEADS_ACTOR: bd-deploy
         run: |
           set -euo pipefail
           "$INSTALL_BIN" --version

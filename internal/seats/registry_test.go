@@ -84,7 +84,7 @@ func TestResolveAdmitsMachineActors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, name := range []string{"bd-due-trigger", "bd-recurrence", "bd-defer-wake"} {
+	for _, name := range []string{"bd-due-trigger", "bd-recurrence", "bd-defer-wake", "bd-deploy"} {
 		got, err := r.Resolve(name)
 		if err != nil {
 			t.Errorf("Resolve(%q) error = %v, want machine actor admitted", name, err)
@@ -110,7 +110,7 @@ func TestResolveAdmitsMachineActors(t *testing.T) {
 	}
 
 	var empty Registry
-	for _, name := range []string{"bd-due-trigger", "bd-recurrence", "bd-defer-wake"} {
+	for _, name := range []string{"bd-due-trigger", "bd-recurrence", "bd-defer-wake", "bd-deploy"} {
 		if got, err := empty.Resolve(name); err != nil || got != name {
 			t.Errorf("empty-registry Resolve(%q) = %q, %v; want machine actor admitted", name, got, err)
 		}

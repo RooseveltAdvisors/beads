@@ -12,6 +12,7 @@ const (
 	MachineActorDueTrigger      = "bd-due-trigger"
 	MachineActorRecurrenceSpawn = "bd-recurrence"
 	MachineActorDeferWake       = "bd-defer-wake"
+	MachineActorDeploy          = "bd-deploy"
 )
 
 // machineActors lists the canonical spellings in one place.
@@ -19,6 +20,7 @@ var machineActors = []string{
 	MachineActorDueTrigger,
 	MachineActorRecurrenceSpawn,
 	MachineActorDeferWake,
+	MachineActorDeploy,
 }
 
 // MachineActor returns the canonical spelling of a machine actor, or "" when
