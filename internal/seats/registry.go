@@ -93,10 +93,15 @@ func (r Registry) Validate() error {
 func Strict(r Registry) bool { return len(r) > 0 }
 
 // Resolve performs exact lookup only. It never creates a seat implicitly.
+// Machine actors resolve to their canonical spelling, so the product's own
+// automation keeps writing in a workspace that has gone strict.
 func (r Registry) Resolve(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "", nil
+	}
+	if canon := MachineActor(name); canon != "" {
+		return canon, nil
 	}
 	for id, seat := range r {
 		if strings.EqualFold(name, id) {

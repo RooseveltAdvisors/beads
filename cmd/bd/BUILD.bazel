@@ -324,6 +324,7 @@ go_library(
         "search.go",
         "search_proxied_server.go",
         "seat.go",
+        "seat_heal.go",
         "seat_identity.go",
         "send_metrics.go",
         "serve.go",

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/steveyegge/beads/internal/seats"
 	"github.com/steveyegge/beads/internal/storage/dberrors"
 	"github.com/steveyegge/beads/internal/types"
 )
@@ -13,7 +14,7 @@ import (
 // wake sweep returns an expired dated defer to open. A constant rather than
 // the invoking session's actor: the wake is the system honoring the defer
 // date, not something the reader who happened to trigger it did.
-const DeferWakeActor = "bd-defer-wake"
+const DeferWakeActor = seats.MachineActorDeferWake
 
 // WakeDefersResult reports what one sweep woke, per table.
 type WakeDefersResult struct {

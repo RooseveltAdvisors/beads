@@ -71,3 +71,48 @@ func TestLockFileWaitsForCurrentWriter(t *testing.T) {
 	}
 	second()
 }
+
+// TestResolveAdmitsMachineActors pins the due-sweep integration seam: a
+// workspace that has registered a seat goes strict, and the product's own
+// automation writes under constant machine actors (bd-due-trigger,
+// bd-recurrence, bd-defer-wake). Those must resolve to their canonical
+// spelling while near names stay refused - admission is an exact set, never a
+// pattern.
+func TestResolveAdmitsMachineActors(t *testing.T) {
+	r := Registry{}
+	if err := r.Register("wiseman", []string{"wiseman"}, Endpoint{Session: "wiseman", PaneID: "w1:pP7"}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"bd-due-trigger", "bd-recurrence", "bd-defer-wake"} {
+		got, err := r.Resolve(name)
+		if err != nil {
+			t.Errorf("Resolve(%q) error = %v, want machine actor admitted", name, err)
+			continue
+		}
+		if got != name {
+			t.Errorf("Resolve(%q) = %q, want canonical %q", name, got, name)
+		}
+	}
+
+	if got, err := r.Resolve("BD-Due-Trigger"); err != nil || got != "bd-due-trigger" {
+		t.Errorf("Resolve(BD-Due-Trigger) = %q, %v; want canonical bd-due-trigger", got, err)
+	}
+
+	for _, name := range []string{"bd-due-trigge", "bd-due-trigger2", "bd-due-trigger-", "due-trigger", "bd-due"} {
+		if got, err := r.Resolve(name); err == nil {
+			t.Errorf("Resolve(%q) = %q, want refusal (no pattern admission)", name, got)
+		}
+	}
+
+	if got, err := r.Resolve("nobody"); err == nil {
+		t.Errorf("Resolve(nobody) = %q, want refusal for unknown seat", got)
+	}
+
+	var empty Registry
+	for _, name := range []string{"bd-due-trigger", "bd-recurrence", "bd-defer-wake"} {
+		if got, err := empty.Resolve(name); err != nil || got != name {
+			t.Errorf("empty-registry Resolve(%q) = %q, %v; want machine actor admitted", name, got, err)
+		}
+	}
+}
