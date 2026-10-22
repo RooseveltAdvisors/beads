@@ -4,6 +4,7 @@ go_library(
     name = "seats",
     srcs = [
         "lock.go",
+        "machine_actors.go",
         "registry.go",
     ],
     importpath = "github.com/steveyegge/beads/internal/seats",
