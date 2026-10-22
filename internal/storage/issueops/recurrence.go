@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/beads/internal/dedup"
+	"github.com/steveyegge/beads/internal/seats"
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/storage/dberrors"
 	"github.com/steveyegge/beads/internal/storage/depid"
@@ -22,11 +23,11 @@ import (
 // than the invoking session's actor, for DeferWakeActor's reason: the trigger
 // is the system honoring a deadline, not something the reader who happened to
 // run the sweep did.
-const DueTriggerActor = "bd-due-trigger"
+const DueTriggerActor = seats.MachineActorDueTrigger
 
 // RecurrenceSpawnActor is the actor recorded on a successor bead a close
 // spawned, when the closer's own actor is unavailable.
-const RecurrenceSpawnActor = "bd-recurrence"
+const RecurrenceSpawnActor = seats.MachineActorRecurrenceSpawn
 
 // DueMissGrace is how far forward the sweep pushes a NON-recurring bead's due
 // date once its deadline has passed with the work still open.
