@@ -150,3 +150,104 @@ func TestSameNameCallerCannotStealALiveSeat(t *testing.T) {
 		t.Fatalf("endpoint = %#v, want the void filled by the caller", r["wiseman"].Endpoint)
 	}
 }
+
+// TestRebindCannotStealAnOccupiedPane pins the 2026-10-23 incident class: a
+// same-name shell must not move a seat whose registered pane hosts a live
+// agent. Pane occupancy is the durable fact - the discovery often leaves
+// AgentSessionID empty, and a full-pin match then read every binding as
+// stale, so any claimant won and notifications followed the thief.
+func TestRebindCannotStealAnOccupiedPane(t *testing.T) {
+	o, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	if err := seats.Update(o.Dir(), func(r seats.Registry) error {
+		return r.Register("wiseman", []string{"wiseman"}, seats.Endpoint{
+			Session: "wiseman", PaneID: "w1:pP7", AgentSessionID: "session-owner",
+		}, now)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The registered pane is occupied. The discovery carries no session id
+	// on the instance - the gap that made every binding read stale.
+	occupant := Instance{Session: "wiseman", PaneID: "w1:pP7", AgentSessionID: ""}
+	other := Instance{Session: "wiseman", PaneID: "w1:p3G", AgentSessionID: "session-intruder"}
+
+	if err := o.Rebind("wiseman", other, now.Add(time.Minute), []Instance{occupant, other}, true); err != nil {
+		t.Fatal(err)
+	}
+	r, err := seats.Load(o.Dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r["wiseman"].Endpoint.PaneID != "w1:pP7" {
+		t.Fatalf("endpoint = %#v, want the occupied pane to hold", r["wiseman"].Endpoint)
+	}
+}
+
+// TestRebindRespectsOneEndpointOneSeat pins the second incident class: a
+// caller whose pane already belongs to a registered seat may not claim a
+// second seat onto the same pane.
+func TestRebindRespectsOneEndpointOneSeat(t *testing.T) {
+	o, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	if err := seats.Update(o.Dir(), func(r seats.Registry) error {
+		if err := r.Register("beads", []string{"beads"}, seats.Endpoint{
+			Session: "wiseman", PaneID: "w1:p3G", AgentSessionID: "session-beads",
+		}, now); err != nil {
+			return err
+		}
+		return r.Register("firstmate", []string{"firstmate"}, seats.Endpoint{
+			Session: "firstmate", PaneID: "w1:pOLD", AgentSessionID: "session-fm",
+		}, now)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The firstmate binding's pane is gone (restart void), but the caller
+	// lives on beads' pane. One endpoint, one seat.
+	caller := Instance{Session: "wiseman", PaneID: "w1:p3G", AgentSessionID: "session-beads"}
+	if err := o.Rebind("firstmate", caller, now.Add(time.Minute), []Instance{caller}, true); err != nil {
+		t.Fatal(err)
+	}
+	r, err := seats.Load(o.Dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r["firstmate"].Endpoint.PaneID != "w1:pOLD" {
+		t.Fatalf("firstmate endpoint = %#v, want it held (pane belongs to seat beads)", r["firstmate"].Endpoint)
+	}
+}
+
+// TestRebindMovesToTheSeatsOwnNewPane keeps the moved-owner case working: the
+// seat's own session appears at a new pane while a stranger occupies the old
+// one, and the seat follows its own session.
+func TestRebindMovesToTheSeatsOwnNewPane(t *testing.T) {
+	o, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	if err := seats.Update(o.Dir(), func(r seats.Registry) error {
+		return r.Register("wiseman", []string{"wiseman"}, seats.Endpoint{
+			Session: "wiseman", PaneID: "w1:pOLD", AgentSessionID: "session-owner",
+		}, now)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stranger := Instance{Session: "wiseman", PaneID: "w1:pOLD", AgentSessionID: "session-stranger"}
+	moved := Instance{Session: "wiseman", PaneID: "w1:pNEW", AgentSessionID: "session-owner"}
+	if err := o.Rebind("wiseman", moved, now.Add(time.Minute), []Instance{stranger, moved}, true); err != nil {
+		t.Fatal(err)
+	}
+	r, err := seats.Load(o.Dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r["wiseman"].Endpoint.PaneID != "w1:pNEW" {
+		t.Fatalf("endpoint = %#v, want the seat to follow its own session", r["wiseman"].Endpoint)
+	}
+}
