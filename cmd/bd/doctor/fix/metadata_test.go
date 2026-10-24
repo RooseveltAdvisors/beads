@@ -12,6 +12,7 @@ import (
 
 	mysql "github.com/go-sql-driver/mysql"
 	"github.com/steveyegge/beads/internal/configfile"
+	"github.com/steveyegge/beads/internal/testutil"
 )
 
 // TestFixMissingMetadata_NotBeadsWorkspace verifies that FixMissingMetadata
@@ -199,6 +200,13 @@ func TestFixMissingMetadataJSON_NotBeadsWorkspace(t *testing.T) {
 }
 
 // setupGitRepoInDir initializes a git repo in the given directory with a remote.
+//
+// Every step is fatal on failure, the dir must exist, and the child env is
+// scrubbed of the git vars that name a repository (GIT_DIR, GIT_WORK_TREE,
+// ...). An empty dir, a swallowed config failure, or a leaked GIT_DIR each make
+// these writes land in whatever repository git resolves from the process
+// environment — the host checkout's own .git/config in the r880 clobber
+// (wy-qlvlmf), where this helper's remote.origin.url overwrote the real origin.
 func setupGitRepoInDir(t *testing.T, dir string) {
 	t.Helper()
 	// An empty dir would run every command in the test process's working
@@ -207,6 +215,12 @@ func setupGitRepoInDir(t *testing.T, dir string) {
 	// with the fixtures below. Refuse before any command runs.
 	if strings.TrimSpace(dir) == "" {
 		t.Fatal("setupGitRepoInDir: empty dir would configure the repository the tests run in")
+	}
+	if dir == "" {
+		t.Fatal("setupGitRepoInDir: empty dir would run git against the host checkout")
+	}
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Fatalf("setupGitRepoInDir: %q is not an existing directory (err=%v)", dir, err)
 	}
 	cmds := [][]string{
 		{"git", "init"},
@@ -218,14 +232,12 @@ func setupGitRepoInDir(t *testing.T, dir string) {
 	for _, args := range cmds {
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir = dir
-		if err := cmd.Run(); err != nil {
+		cmd.Env = testutil.WithoutGitRepoLocationEnv(os.Environ())
+		if out, err := cmd.CombinedOutput(); err != nil {
 			if args[1] == "init" {
-				t.Fatalf("setupGitRepoInDir: git init in %s: %v", dir, err)
+				t.Fatalf("setupGitRepoInDir: git init in %s: %v\n%s", dir, err, out)
 			}
 			// config failures are non-fatal
-			if args[1] == "init" {
-				t.Fatalf("git init failed: %v", err)
-			}
 		}
 	}
 }

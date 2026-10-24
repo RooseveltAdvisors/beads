@@ -107,6 +107,15 @@ var opCapability = map[string]string{
 	// with a typed capability error instead of dialing a path the older server
 	// would answer as a claim of an issue called ":reclaim".
 	OpReclaimIssues: "issues.reclaim",
+	// The lease refresh, dialed by httpHeartbeater. A server that predates it
+	// does not advertise the token, so Preflight refuses locally with a typed
+	// capability error rather than dialing a route the older server lacks.
+	OpHeartbeatIssue: "issues.heartbeat",
+	// The blocked listing, dialed by httpBlockedLister. A server that
+	// predates it does not advertise the token, so Preflight refuses locally
+	// with a typed capability error naming blocked.list rather than dialing a
+	// route the older server lacks.
+	OpListBlockedIssues: "blocked.list",
 	// The advance-a-molecule role (molecule.go) dials it when served and
 	// refuses before dialing when not; it never composes a client-side copy.
 	OpAdvanceMolecule: "issues.advanceMolecule",
@@ -153,6 +162,51 @@ const CapListSort = "issues.list.sort"
 // declared now for the same reason CapListSort was: the capability-union
 // parity gate compares this client's whole vocabulary with the server's.
 const CapCountScope = "issues.count.scope"
+
+// CapListSearch is the behavior capability announcing that listIssues honors
+// `q`, `bd search`'s free text (issueops.ListRequest.Query), spelled exactly
+// as httpapi's CapIssuesListSearch. The Reader's List reads it off the
+// handshake snapshot and refuses a request that carries Query LOCALLY, with a
+// typed capability error naming this token, when the server does not
+// advertise it — so a search never dials a server that would answer
+// `unknown_parameter`, and is never widened into the unsearched listing.
+const CapListSearch = "issues.list.search"
+
+// CapListNoAssignee, CapListTitle and CapListIDs are the behavior
+// capabilities announcing that listIssues honors `no_assignee`, `title` and the
+// repeatable `id` (`bd list --no-assignee`, `--title`, `--id`;
+// issueops.ListRequest's NoAssignee, TitleSearch and IDFilter), spelled exactly
+// as httpapi's CapIssuesListNoAssignee, CapIssuesListTitle and CapListIDs. The
+// Reader's List reads them off the handshake snapshot and refuses a request
+// carrying a member LOCALLY, with a typed capability error naming that
+// member's token, when the server does not advertise it — never a round trip
+// an older server answers `unknown_parameter`, never a wider listing than
+// asked for.
+const (
+	CapListNoAssignee = "issues.list.noAssignee"
+	CapListTitle      = "issues.list.title"
+	CapListIDs        = "issues.list.ids"
+)
+
+// CapListFilters is the behavior capability announcing that listIssues honors
+// the rest of `bd list`'s filter vocabulary — the updated/closed/defer/due
+// bounds, the priority range, the text and external-ref matches, the label
+// pattern/regex, the spec prefix, the type and status exclusions, the mol/wisp
+// types and the empty-description, no-labels, no-parent, pinned, no-pinned,
+// deferred and overdue predicates — spelled exactly as httpapi's
+// CapIssuesListFilters. One token for the set: the members land in one server
+// build. The Reader's List refuses a request carrying any of them LOCALLY,
+// naming this token, when the server does not advertise it.
+const CapListFilters = "issues.list.filters"
+
+// CapBlockingIsBlocked is the behavior capability announcing that
+// listBlockingAnnotations honors `is_blocked` (issueops.BlockingRequest.
+// IncludeIsBlocked), spelled exactly as httpapi's
+// CapDependenciesBlockingIsBlocked. The annotator refuses a request asking
+// for the flag LOCALLY, with a typed capability error naming this token, when
+// the server does not advertise it, so the IsBlockedBatch read never dials a
+// server that would answer `unknown_parameter`.
+const CapBlockingIsBlocked = "dependencies.blocking.isBlocked"
 
 // CapBatchApplyLarge is the behavior capability announcing that issues.batchApply
 // accepts a batch larger than the compiled-in floor (100 items), up to the
@@ -224,6 +278,37 @@ const CapBatchApplyDepAddLineage = "issues.batchApply.depAddLineage"
 // (bd-jkp9v3).
 const CapIssuesUpdateAllowTemplate = "issues.update.allowTemplate"
 
+// CapIssuesUpdatePersistence is the behavior capability announcing that
+// updateIssue accepts `patch.persistence` (issueops.IssuePatch.Persistence,
+// the plane move behind `bd promote`). lifecycle.go sends the member only to
+// a server advertising it, and refuses the move before the dial otherwise:
+// there is no client-side fallback, because the move is one transaction on
+// the server.
+const CapIssuesUpdatePersistence = "issues.update.persistence"
+
+// CapIssuesUpdateClaim is the behavior capability announcing that updateIssue
+// accepts `claim` and resolves the claimed id on both planes (a wisp included),
+// spelled exactly as httpapi's constant of the same name. Lifecycle.Update
+// reads it from the cached handshake before the dial: with it, a claim rides
+// updateIssue; without it, a claim alone goes to claimIssue (a wisp then
+// refuses by name, W-ClaimRequest.Wisp) and a claim beside a patch, a guard, a
+// force override or `allow_template` is refused before the dial with
+// ErrUnsupported naming it.
+const CapIssuesUpdateClaim = "issues.update.claim"
+
+// CapIssuesCreateGates and CapIssuesUpdateGates are the behavior capabilities
+// announcing the gate members, spelled exactly as
+// httpapi's constants of the same names: await_type, await_id, timeout and
+// waiters on createIssue and batchApply create items, and await_id and
+// waiters on updateIssue's and batchApply update items' patch. The encoders
+// send the members only to a server advertising the matching token, and
+// refuse the request before the dial naming it otherwise
+// (W-CreateRequest.Gates; the retired W-IssuePatch.AwaitID).
+const (
+	CapIssuesCreateGates = "issues.create.gates"
+	CapIssuesUpdateGates = "issues.update.gates"
+)
+
 // CapIssuesCreateDefaultPriority is the behavior capability announcing that
 // the server stores the create default priority for an ABSENT `priority`
 // member on issues.create, issues.batchCreate and issues.batchApply create
@@ -242,20 +327,6 @@ const CapIssuesCreateDefaultPriority = "issues.create.defaultPriority"
 // error — never a silent drop, and never a second, client-side copy of the
 // rule.
 const CapCloseAutoCloseMolecule = "issues.close.autoCloseMolecule"
-
-// CapIssuesCreateRepeat is the behavior capability announcing that the
-// server accepts the recurrence members (repeat_pattern, repeat_start,
-// repeat_end) on issues.create, issues.batchCreate and issues.batchApply
-// create items, spelled exactly as httpapi's constant of the same name. A
-// client sends them only when advertised; against an older server they would
-// be refused as unknown members.
-const CapIssuesCreateRepeat = "issues.create.repeat"
-
-// CapIssuesUpdateDueClearReason is the behavior capability announcing that
-// PATCH /v0/beads/issues/{id} accepts `due_clear_reason` (see
-// UpdateIssueRequest), spelled exactly as httpapi's constant of the same
-// name. A server without it predates the member and refuses it as unknown.
-const CapIssuesUpdateDueClearReason = "issues.update.dueClearReason"
 
 // CapExternalDependencies is the CONDITIONAL behavior capability announcing
 // that the ready, claim and close operations of this server apply bd's
@@ -392,12 +463,23 @@ func (e *WireRevisionSkewError) Unwrap() error { return ErrWireRevisionSkew }
 // union(opCapability tokens, this) set-equal with httpapi.Capabilities(), which is
 // what makes the server change and this client change land together: the parity
 // test goes red the moment one ships without the other.
+// CapIssuesCreateRepeat is the behavior capability announcing that the
+// server accepts the recurrence members (repeat_pattern, repeat_start,
+// repeat_end) on issues.create, issues.batchCreate and issues.batchApply
+// create items.
+const CapIssuesCreateRepeat = "issues.create.repeat"
+
+// CapIssuesUpdateDueClearReason is the behavior capability announcing that
+// PATCH /v0/beads/issues/{id} accepts due_clear_reason.
+const CapIssuesUpdateDueClearReason = "issues.update.dueClearReason"
+
 var behaviorCapabilities = []string{
 	CapProjectEnforce, CapBatchApplyLarge, CapListSort, CapCountScope,
 	CapSweepWispsPlane, CapSweepLiveDependents, CapSweepLimit,
 	CapBatchApplyDepAddLineage, CapIssuesUpdateAllowTemplate, CapIssuesCreateDefaultPriority,
-	CapCloseAutoCloseMolecule,
-	CapIssuesCreateRepeat, CapIssuesUpdateDueClearReason,
+	CapCloseAutoCloseMolecule, CapIssuesCreateRepeat, CapIssuesUpdateDueClearReason, CapListSearch,
+	CapListNoAssignee, CapListTitle, CapListIDs, CapIssuesUpdatePersistence, CapBlockingIsBlocked, CapIssuesUpdateClaim,
+	CapIssuesCreateGates, CapIssuesUpdateGates, CapListFilters,
 }
 
 // CapabilityFor reports the capability token gating op, and whether op is on

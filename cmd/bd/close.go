@@ -469,25 +469,28 @@ func closeClaimedID(claimed *types.Issue) string {
 // denominator, because only it knows what it attempted — the direct route
 // counts resolved ids, the proxied one counts arguments.
 //
-// The summary is suppressed for a single-id batch deliberately: one inline
-// refusal is already unambiguous about which id failed, and suppressing it
-// keeps single-id stderr byte-identical to what it was before close learned to
-// fail a partial batch.
+// The text summary is suppressed for a single-id batch deliberately: one
+// inline refusal is already unambiguous about which id failed, and suppressing
+// it keeps single-id stderr byte-identical to what it was before close learned
+// to fail a partial batch.
 //
 // In --json mode the summary is one compact JSON line on stderr — the shape
 // reportUpdateFailures established — so a consumer that sees exit 1 can read
 // WHICH ids failed instead of scraping English prose, while stdout keeps the
-// plain closed-issues array a successful close emits. claimedNextID names the
-// issue --claim-next claimed on this run, if any: that claim is committed
-// inside the batch's own transaction and a sibling's refusal does not roll it
-// back, so the report names it rather than pretending it did not happen.
+// plain closed-issues array a successful close emits. It is emitted for a
+// single id too, as reportUpdateFailures' is: a consumer closing one id at a
+// time needs a parseable reason as much as one closing a batch. claimedNextID
+// names the issue --claim-next claimed on this run, if any: that claim is
+// committed inside the batch's own transaction and a sibling's refusal does
+// not roll it back, so the report names it rather than pretending it did not
+// happen.
 func reportCloseFailures(failures []closeIDFailure, total int, claimedNextID string, jsonOut bool) error {
-	if total <= 1 {
-		return SilentExit()
-	}
 	msg := fmt.Sprintf("%d of %d issues failed to close", len(failures), total)
 
 	if !jsonOut {
+		if total <= 1 {
+			return SilentExit()
+		}
 		fmt.Fprintf(os.Stderr, "Error: %s\n", msg)
 		if claimedNextID != "" {
 			fmt.Fprintf(os.Stderr, "Note: --claim-next already claimed %s; it stays assigned to you.\n", claimedNextID)
@@ -874,10 +877,12 @@ func resolveReasonFile(cmd *cobra.Command, hasExistingReason bool) (string, bool
 
 // resolveCloseTargets resolves a batch of partial issue IDs for `bd close`,
 // preserving input order. For each ID it tries the local store first, then
-// explicit prefix routing via routes.jsonl, then a shared contributor-routed
-// store. This matches resolveAndGetIssueWithRouting's routing precedence.
+// explicit prefix routing via routes.jsonl, then a shared auto-routed store.
+// This matches resolveAndGetIssueForMutation's routing precedence and write
+// intent, and like it returns a routing failure (an unreadable routes.jsonl, a
+// routed store that fails to open) as itself rather than as a not-found.
 //
-// The contributor-routed handle is shared across the batch so bulk close does
+// The auto-routed handle is shared across the batch so bulk close does
 // not repeatedly open the same planning store and every result has a clear store
 // owner for subsequent close-time checks and writes.
 //
@@ -886,60 +891,102 @@ func resolveReasonFile(cmd *cobra.Command, hasExistingReason bool) (string, bool
 // no-op for routed-via-shared-handle entries because they don't own the handle.
 func resolveCloseTargets(ctx context.Context, localStore storage.DoltStorage, ids []string) ([]*RoutedResult, func(), error) {
 	results := make([]*RoutedResult, 0, len(ids))
-	var sharedRouted storage.DoltStorage
-	var sharedRoutedTried bool
+	shared := &closeAutoRoute{localStore: localStore}
 	cleanup := func() {
 		for _, r := range results {
 			r.Close()
 		}
-		if sharedRouted != nil {
-			_ = sharedRouted.Close()
-		}
-	}
-	ensureShared := func() (storage.DoltStorage, error) {
-		if sharedRouted != nil {
-			return sharedRouted, nil
-		}
-		if sharedRoutedTried {
-			return nil, fmt.Errorf("no auto-routed store available")
-		}
-		sharedRoutedTried = true
-		rs, routed, _, err := openRoutedReadStore(ctx, localStore)
-		if err != nil {
-			return nil, err
-		}
-		if !routed {
-			return nil, fmt.Errorf("no auto-routed store available")
-		}
-		sharedRouted = rs
-		return rs, nil
+		shared.Close()
 	}
 	for _, id := range ids {
-		// Local first.
-		if r, err := resolveAndGetFromStore(ctx, localStore, id, false); err == nil {
-			results = append(results, r)
-			continue
-		} else if !isNotFoundErr(err) {
+		r, err := resolveCloseTarget(ctx, localStore, shared, id)
+		if err != nil {
 			cleanup()
-			return nil, func() {}, fmt.Errorf("resolving ID %s: %w", id, err)
+			return nil, func() {}, err
 		}
-		// Write-intent: a prefix-routed target opens writable so the close
-		// commits on the target head (#4141). Contributor auto-routing below
-		// stays read-only: it hydrates foreign projects that must not be mutated.
-		if r, err := resolveViaPrefixRoutingWithAccess(ctx, id, true, false); err == nil {
-			results = append(results, r)
-			continue
-		}
-		// Contributor auto-routing uses one shared store for the whole batch.
-		if rs, rerr := ensureShared(); rerr == nil {
-			if r, err := resolveAndGetFromStore(ctx, rs, id, true); err == nil {
-				// Per-id RoutedResult does not own the shared handle; cleanup() does.
-				results = append(results, r)
-				continue
-			}
-		}
-		cleanup()
-		return nil, func() {}, fmt.Errorf("resolving ID %s: no issue found matching %q", id, id)
+		results = append(results, r)
 	}
 	return results, cleanup, nil
+}
+
+// resolveCloseTarget resolves one ID of a bd close batch: the local store,
+// then a prefix route, then the batch's shared auto-routed store.
+func resolveCloseTarget(ctx context.Context, localStore storage.DoltStorage, shared *closeAutoRoute, id string) (*RoutedResult, error) {
+	// Local first.
+	r, err := resolveAndGetFromStore(ctx, localStore, id, false)
+	if err == nil {
+		return r, nil
+	}
+	if !isNotFoundErr(err) {
+		return nil, fmt.Errorf("resolving ID %s: %w", id, err)
+	}
+	// The first routed tier that refuses the id answers instead of the
+	// not-found below (isRoutedResolutionRefusal). The refusal is checked
+	// before isRoutingFailure, which it would also satisfy, so the shared
+	// auto-routed store still gets its chance.
+	var refusal error
+	// Write-intent: a prefix-routed target opens writable so the close
+	// commits on the target head (#4141).
+	r, err = resolveViaPrefixRoutingWithAccess(ctx, id, true, false)
+	if err == nil {
+		return r, nil
+	}
+	if isRoutedResolutionRefusal(err) {
+		refusal = err
+	} else if isRoutingFailure(err) {
+		return nil, fmt.Errorf("resolving ID %s: %w", id, err)
+	}
+	r, err = shared.resolve(ctx, id)
+	if err == nil {
+		return r, nil
+	}
+	if refusal != nil {
+		return nil, fmt.Errorf("resolving ID %s: %w", id, refusal)
+	}
+	if isRoutingFailure(err) {
+		return nil, fmt.Errorf("resolving ID %s: %w", id, err)
+	}
+	return nil, fmt.Errorf("resolving ID %s: no issue found matching %q", id, id)
+}
+
+// closeAutoRoute is the auto-routed store a bd close batch shares. It opens on
+// first use and is closed once, by the batch's cleanup.
+type closeAutoRoute struct {
+	localStore storage.DoltStorage
+	store      storage.DoltStorage
+	err        error
+	tried      bool
+}
+
+// resolve looks id up in the shared auto-routed store, opening it on the first
+// call with write intent, as resolveAndGetIssueForMutation does: the target
+// opens writable, whichever rule selected it, so the close commits where the
+// issue lives. The outcome of that open, failure included, holds for the rest
+// of the batch.
+func (a *closeAutoRoute) resolve(ctx context.Context, id string) (*RoutedResult, error) {
+	if !a.tried {
+		a.tried = true
+		rs, routed, _, err := openAutoRoutedStore(ctx, a.localStore, true)
+		switch {
+		case err != nil:
+			a.err = err
+		case !routed:
+			a.err = fmt.Errorf("%w: no auto-routed store available", errRoutingUnavailable)
+		default:
+			a.store = rs
+		}
+	}
+	if a.err != nil {
+		return nil, a.err
+	}
+	// Per-id RoutedResult does not own the shared handle; Close does.
+	return resolveAndGetFromStore(ctx, a.store, id, true)
+}
+
+// Close closes the shared auto-routed store, if one was opened.
+func (a *closeAutoRoute) Close() {
+	if a.store != nil {
+		_ = a.store.Close()
+		a.store = nil
+	}
 }
