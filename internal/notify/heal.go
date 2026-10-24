@@ -53,21 +53,53 @@ func (o *Outbox) Rebind(name string, self Instance, now time.Time, live []Instan
 		if holdsLiveBinding(cur, self, live, haveLive) {
 			return nil
 		}
+		if endpointHeldByOtherSeat(r, id, self.PaneID) {
+			// One endpoint, one seat. The caller's pane already belongs
+			// to a registered seat: a name claim is not proof of a
+			// second identity on the same pane.
+			return nil
+		}
 		return r.Register(id, nil, ep, now)
 	})
 }
 
-// holdsLiveBinding reports whether the seat is bound to an endpoint that is
-// not the caller's and that still resolves to a live agent instance. With no
-// liveness evidence the last observation decides; a live binding is held.
+// holdsLiveBinding reports whether the seat must keep its registered
+// endpoint against this caller. Pane occupancy is the durable, observable
+// fact: while a live agent sits at the registered pane, the binding holds
+// against every same-name claimant. The void case - no live agent at the
+// registered pane - is the restart the heal exists for. With no liveness
+// evidence at all the last observation decides: a held row retries, a
+// stolen pin loses the delivery.
 func holdsLiveBinding(cur seats.Seat, self Instance, live []Instance, haveLive bool) bool {
 	if cur.Endpoint.PaneID == "" || cur.Endpoint.PaneID == self.PaneID {
 		return false
 	}
-	if haveLive {
-		pin := Pin{Session: cur.Endpoint.Session, PaneID: cur.Endpoint.PaneID, AgentSessionID: cur.Endpoint.AgentSessionID}
-		_, ok := FindPinnedInstance(pin, live)
-		return ok
+	if !haveLive {
+		return cur.Liveness == seats.Live
 	}
-	return cur.Liveness == seats.Live
+	for _, inst := range live {
+		if inst.PaneID != cur.Endpoint.PaneID {
+			continue
+		}
+		// The registered pane is occupied. Without session evidence on
+		// both sides, stability wins. With it, the binding moves only
+		// to the seat's own registered session, never to a stranger.
+		if cur.Endpoint.AgentSessionID == "" || inst.AgentSessionID == "" {
+			return true
+		}
+		return inst.AgentSessionID == cur.Endpoint.AgentSessionID ||
+			self.AgentSessionID != cur.Endpoint.AgentSessionID
+	}
+	return false
+}
+
+// endpointHeldByOtherSeat reports whether paneID is the registered endpoint
+// of a seat other than id.
+func endpointHeldByOtherSeat(r seats.Registry, id, paneID string) bool {
+	for otherID, seat := range r {
+		if otherID != id && seat.Endpoint.PaneID == paneID {
+			return true
+		}
+	}
+	return false
 }
