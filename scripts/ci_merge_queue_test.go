@@ -189,9 +189,9 @@ func TestMergeQueueConcurrencyNeverCancelsQueueRuns(t *testing.T) {
 func TestMergeQueuePullRequestFieldsHandleMergeGroup(t *testing.T) {
 	// path suffix (workflow:YAML path) -> why null on merge_group is right.
 	nullOK := map[string]string{
-		"pr.yml:.concurrency.group":           "falls back to github.ref (TestMergeQueueConcurrencyNeverCancelsQueueRuns)",
-		"pr-risk.yml:.concurrency.group":      "falls back to github.ref",
-		"bazel.yml:.concurrency.group":        "falls back to github.ref",
+		"pr.yml:.concurrency.group":           "falls back to github.sha on push, github.ref otherwise (TestMergeQueueConcurrencyNeverCancelsQueueRuns, TestCIScopePushConcurrency)",
+		"pr-risk.yml:.concurrency.group":      "falls back to github.sha on push, github.ref otherwise",
+		"bazel.yml:.concurrency.group":        "falls back to github.sha on push, github.ref otherwise",
 		"rbe.steps[0].env.FORK":               "null == true is false: a merge group is never a fork",
 		"rbe.steps[0].env.PR_NUMBER":          "read only for fork/Dependabot pull_request runs (the rbe-fork mint)",
 		".env.RBE_FORK_PR":                    "setup-bazel reads it only in the fork modes, which a merge group never takes",
@@ -211,6 +211,7 @@ func TestMergeQueuePullRequestFieldsHandleMergeGroup(t *testing.T) {
 		"bazel-server-storage.steps[*].env.PR_HINT": "ci-analytics-summary metadata only (--pr-hint); `|| 0` already covers merge_group same as a non-PR push",
 		"bazel-cmd-dolt.steps[*].env.PR_HINT":       "ci-analytics-summary metadata only (--pr-hint); `|| 0` already covers merge_group same as a non-PR push",
 		"bazel-dolt-race.steps[*].env.PR_HINT":      "ci-analytics-summary metadata only (--pr-hint); `|| 0` already covers merge_group same as a non-PR push",
+		"bazel-dolt-int.steps[*].env.PR_HINT":       "ci-analytics-summary metadata only (--pr-hint); `|| 0` already covers merge_group same as a non-PR push",
 	}
 	used := map[string]bool{}
 	var fallbacks []string

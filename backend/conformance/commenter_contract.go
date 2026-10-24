@@ -770,6 +770,14 @@ func commenterSeed(id string, ephemeral bool) *types.Issue {
 		Priority:  2,
 		IssueType: types.TypeTask,
 		Ephemeral: ephemeral,
+		// The anchor contracts read this row before and after a comment.
+		// Its updated_at is seeded a day ahead of the wall clock so the
+		// activity touch's CASE (updated_at < stamp) can never fire and a
+		// second-boundary straddle between the create and the appends
+		// cannot decide the outcome: the column stays put deterministically,
+		// which is exactly the invariant "a comment leaves every field of
+		// the issue untouched" states.
+		UpdatedAt: time.Now().UTC().Truncate(time.Second).Add(24 * time.Hour),
 	}
 }
 

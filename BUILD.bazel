@@ -74,6 +74,13 @@ exports_files(
     visibility = ["//scripts:__pkg__"],
 )
 
+# //scripts:shell_scripts_test: Oracle A's runner, whose EXIT-trap removal of
+# its reference worktree oracle_a_script_test.go checks in a fixture repository.
+exports_files(
+    ["tests/oracle-a/run-oracle-a.sh"],
+    visibility = ["//scripts:__pkg__"],
+)
+
 # The nested Go modules' go.mod files, which mark where the root module ends:
 # //scripts:go_test_sources_test's scan of every _test.go file skips their
 # trees, as `go test ./...` does. (go.mod is in no Go partition below: it is
@@ -246,6 +253,20 @@ exports_files(
     visibility = ["//internal/httpclient/encode:__pkg__"],
 )
 
+# --- begin go_srcs (managed by tools/bazel/go_srcs.py; run `make bazel-sync`) ---
+
+filegroup(
+    name = "go_srcs",
+    srcs = glob(
+        ["**/*.go"],
+        allow_empty = True,
+        exclude = ["bazel-*/**"],
+    ),
+    visibility = ["//:__subpackages__"],
+)
+
+# --- end go_srcs ---
+
 # --- begin repo_files (managed by tools/bazel/go_srcs.py; run `make bazel-sync`) ---
 
 filegroup(
@@ -336,6 +357,7 @@ filegroup(
         "//internal/gitignore:repo_doc_files",
         "//internal/gitlab:repo_doc_files",
         "//internal/gittraceenv:repo_doc_files",
+        "//internal/historicalsqlite:repo_doc_files",
         "//internal/hooks:repo_doc_files",
         "//internal/httpapi:repo_doc_files",
         "//internal/httpapi/apigen:repo_doc_files",
@@ -346,6 +368,7 @@ filegroup(
         "//internal/httpclient/encode:repo_doc_files",
         "//internal/httpclient/wire:repo_doc_files",
         "//internal/idgen:repo_doc_files",
+        "//internal/initprocs:repo_doc_files",
         "//internal/jira:repo_doc_files",
         "//internal/linear:repo_doc_files",
         "//internal/lockfile:repo_doc_files",
@@ -387,6 +410,7 @@ filegroup(
         "//internal/storage/externaldeps:repo_doc_files",
         "//internal/storage/fs:repo_doc_files",
         "//internal/storage/git:repo_doc_files",
+        "//internal/storage/historyoffequiv:repo_doc_files",
         "//internal/storage/issueops:repo_doc_files",
         "//internal/storage/journalscan:repo_doc_files",
         "//internal/storage/kvkeys:repo_doc_files",
@@ -417,6 +441,7 @@ filegroup(
         "//internal/utils:repo_doc_files",
         "//internal/validation:repo_doc_files",
         "//internal/versioncheck:repo_doc_files",
+        "//internal/versionedhistory:repo_doc_files",
         "//internal/workapi:repo_doc_files",
         "//internal/workapi/storecounter:repo_doc_files",
         "//internal/workapi/storequerier:repo_doc_files",
@@ -575,6 +600,7 @@ filegroup(
         "//internal/gitignore:repo_go_srcs",
         "//internal/gitlab:repo_go_srcs",
         "//internal/gittraceenv:repo_go_srcs",
+        "//internal/historicalsqlite:repo_go_srcs",
         "//internal/hooks:repo_go_srcs",
         "//internal/httpapi:repo_go_srcs",
         "//internal/httpapi/apigen:repo_go_srcs",
@@ -585,6 +611,7 @@ filegroup(
         "//internal/httpclient/encode:repo_go_srcs",
         "//internal/httpclient/wire:repo_go_srcs",
         "//internal/idgen:repo_go_srcs",
+        "//internal/initprocs:repo_go_srcs",
         "//internal/jira:repo_go_srcs",
         "//internal/linear:repo_go_srcs",
         "//internal/lockfile:repo_go_srcs",
@@ -626,6 +653,7 @@ filegroup(
         "//internal/storage/externaldeps:repo_go_srcs",
         "//internal/storage/fs:repo_go_srcs",
         "//internal/storage/git:repo_go_srcs",
+        "//internal/storage/historyoffequiv:repo_go_srcs",
         "//internal/storage/issueops:repo_go_srcs",
         "//internal/storage/journalscan:repo_go_srcs",
         "//internal/storage/kvkeys:repo_go_srcs",
@@ -656,6 +684,7 @@ filegroup(
         "//internal/utils:repo_go_srcs",
         "//internal/validation:repo_go_srcs",
         "//internal/versioncheck:repo_go_srcs",
+        "//internal/versionedhistory:repo_go_srcs",
         "//internal/workapi:repo_go_srcs",
         "//internal/workapi/storecounter:repo_go_srcs",
         "//internal/workapi/storequerier:repo_go_srcs",
@@ -799,6 +828,7 @@ filegroup(
         "//internal/gitignore:repo_go_test_srcs",
         "//internal/gitlab:repo_go_test_srcs",
         "//internal/gittraceenv:repo_go_test_srcs",
+        "//internal/historicalsqlite:repo_go_test_srcs",
         "//internal/hooks:repo_go_test_srcs",
         "//internal/httpapi:repo_go_test_srcs",
         "//internal/httpapi/apigen:repo_go_test_srcs",
@@ -809,6 +839,7 @@ filegroup(
         "//internal/httpclient/encode:repo_go_test_srcs",
         "//internal/httpclient/wire:repo_go_test_srcs",
         "//internal/idgen:repo_go_test_srcs",
+        "//internal/initprocs:repo_go_test_srcs",
         "//internal/jira:repo_go_test_srcs",
         "//internal/linear:repo_go_test_srcs",
         "//internal/lockfile:repo_go_test_srcs",
@@ -850,6 +881,7 @@ filegroup(
         "//internal/storage/externaldeps:repo_go_test_srcs",
         "//internal/storage/fs:repo_go_test_srcs",
         "//internal/storage/git:repo_go_test_srcs",
+        "//internal/storage/historyoffequiv:repo_go_test_srcs",
         "//internal/storage/issueops:repo_go_test_srcs",
         "//internal/storage/journalscan:repo_go_test_srcs",
         "//internal/storage/kvkeys:repo_go_test_srcs",
@@ -880,6 +912,7 @@ filegroup(
         "//internal/utils:repo_go_test_srcs",
         "//internal/validation:repo_go_test_srcs",
         "//internal/versioncheck:repo_go_test_srcs",
+        "//internal/versionedhistory:repo_go_test_srcs",
         "//internal/workapi:repo_go_test_srcs",
         "//internal/workapi/storecounter:repo_go_test_srcs",
         "//internal/workapi/storequerier:repo_go_test_srcs",
@@ -1032,6 +1065,7 @@ filegroup(
         "//internal/gitignore:repo_other_files",
         "//internal/gitlab:repo_other_files",
         "//internal/gittraceenv:repo_other_files",
+        "//internal/historicalsqlite:repo_other_files",
         "//internal/hooks:repo_other_files",
         "//internal/httpapi:repo_other_files",
         "//internal/httpapi/apigen:repo_other_files",
@@ -1042,6 +1076,7 @@ filegroup(
         "//internal/httpclient/encode:repo_other_files",
         "//internal/httpclient/wire:repo_other_files",
         "//internal/idgen:repo_other_files",
+        "//internal/initprocs:repo_other_files",
         "//internal/jira:repo_other_files",
         "//internal/linear:repo_other_files",
         "//internal/lockfile:repo_other_files",
@@ -1083,6 +1118,7 @@ filegroup(
         "//internal/storage/externaldeps:repo_other_files",
         "//internal/storage/fs:repo_other_files",
         "//internal/storage/git:repo_other_files",
+        "//internal/storage/historyoffequiv:repo_other_files",
         "//internal/storage/issueops:repo_other_files",
         "//internal/storage/journalscan:repo_other_files",
         "//internal/storage/kvkeys:repo_other_files",
@@ -1113,6 +1149,7 @@ filegroup(
         "//internal/utils:repo_other_files",
         "//internal/validation:repo_other_files",
         "//internal/versioncheck:repo_other_files",
+        "//internal/versionedhistory:repo_other_files",
         "//internal/workapi:repo_other_files",
         "//internal/workapi/storecounter:repo_other_files",
         "//internal/workapi/storequerier:repo_other_files",

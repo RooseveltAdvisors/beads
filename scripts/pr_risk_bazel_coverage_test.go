@@ -142,8 +142,9 @@ func runDecisionStep(t *testing.T, step ciWorkflowStep, f rbeFacts, with map[str
 	return runBazelRBEDecision(t, step.Run, env)
 }
 
-// prGateFor: pr.yml's ci-gate scenario for one run whose Bazel call took
-// this mode with every lane that runs in it passing.
+// prGateFor: pr.yml's ci-gate scenario for one run on event whose Bazel call
+// took this mode with every lane that runs in it passing (lanes: the call's
+// on that event, bazelPRCallLanesFor).
 func prGateFor(t *testing.T, lanes map[string]map[string]bool, event, mode string) bazelGateScenario {
 	t.Helper()
 	outputs := map[string]string{}
@@ -155,11 +156,12 @@ func prGateFor(t *testing.T, lanes map[string]map[string]bool, event, mode strin
 	return bazelGateScenario{
 		name: fmt.Sprintf("%s mode %s", event, mode), event: event,
 		mode: mode, enabled: bazelModeEnabled(mode), call: "success",
-		outputs: outputs,
+		outputs: outputs, callWith: prCallWithFor(t, event),
 	}
 }
 
-// bazelPRCallLanes: the modes each bazel.yml lane runs in under pr.yml's call.
+// bazelPRCallLanes: the modes each bazel.yml lane runs in under a call with
+// these inputs (pr.yml's, the scope resolved: prCallWith).
 func bazelPRCallLanes(t *testing.T, with map[string]string) map[string]map[string]bool {
 	t.Helper()
 	lanes := map[string]map[string]bool{}
@@ -187,7 +189,13 @@ func TestPRGateRequiresRemoteBazelLanes(t *testing.T) {
 	}
 	rbeStep := readCIWorkflow(t, bazelWorkflowName).job(t, bazelRBEJobName).Steps[0]
 	gateStep := pr.job(t, "ci-gate").step(t, "Evaluate CI gate")
-	lanes := bazelPRCallLanes(t, call.With)
+	// The call's lanes on each event: a merge group's scope turns the
+	// Dolt-tier lanes off (TestCIScopePRGate).
+	lanesFor := map[string]map[string]map[string]bool{}
+	for _, event := range rbeGateEvents {
+		lanesFor[event] = bazelPRCallLanesFor(t, event)
+	}
+	lanes := lanesFor["pull_request"]
 
 	required := strings.Fields(gateStep.Env["CI_GATE_REQUIRED"])
 	if !contains(required, bazelRemoteGateID) {
@@ -197,8 +205,8 @@ func TestPRGateRequiresRemoteBazelLanes(t *testing.T) {
 		t.Errorf("pr.yml's ci-gate env sets %s; only its run script may", bazelRemoteGateID)
 	}
 	for lane, id := range bazelLaneGateIDs {
-		if !lanes[lane]["remote"] {
-			t.Errorf("gated lane %s does not run in mode remote", lane)
+		if bazelLaneReporter(lanes, lane, "remote") == "" {
+			t.Errorf("gated lane %s does not run (nor does its union lane) in mode remote", lane)
 		}
 		if !contains(required, id) && !bazelPackageJobs[lane] {
 			t.Errorf("pr.yml's ci-gate does not require %s", id)
@@ -218,7 +226,7 @@ func TestPRGateRequiresRemoteBazelLanes(t *testing.T) {
 		pass, ok := gateMemo[key]
 		if !ok {
 			var log string
-			pass, log = runPRGateStep(t, gateStep, prGateFor(t, lanes, f.event, mode))
+			pass, log = runPRGateStep(t, gateStep, prGateFor(t, lanesFor[f.event], f.event, mode))
 			gateMemo[key] = pass
 			if !pass && !regexp.MustCompile(`::error::`+bazelRemoteGateID+`\b`).MatchString(log) {
 				t.Errorf("%v (mode %s): red gate does not name %s:\n%s", f, mode, bazelRemoteGateID, log)
@@ -261,18 +269,18 @@ func TestPRGateRequiresRemoteBazelLanes(t *testing.T) {
 		if out["mode"] != c.mode {
 			t.Errorf("%s: mode = %q, want %s", c.name, out["mode"], c.mode)
 		}
-		if pass, log := runPRGateStep(t, gateStep, prGateFor(t, lanes, c.f.event, out["mode"])); pass != c.pass {
+		if pass, log := runPRGateStep(t, gateStep, prGateFor(t, lanesFor[c.f.event], c.f.event, out["mode"])); pass != c.pass {
 			t.Errorf("%s: pr.yml gate pass = %v, want %v\n%s", c.name, pass, c.pass, log)
 		}
 	}
 
-	// Remote, but one gated lane failed, was cancelled or reported nothing:
-	// red, naming that lane.
+	// Remote, but one gated lane (or the union lane reporting for it)
+	// failed, was cancelled or reported nothing: red, naming that lane.
 	for lane, id := range bazelLaneGateIDs {
 		for _, mode := range []string{"remote", "fork-ro"} {
 			for _, res := range []string{"failure", "cancelled", ""} {
 				sc := prGateFor(t, lanes, "pull_request", mode)
-				sc.outputs[lane] = res
+				sc.outputs[bazelLaneReporter(lanes, lane, mode)] = res
 				if pass, log := runPRGateStep(t, gateStep, sc); pass || !regexp.MustCompile(`::error::`+id+`\b`).MatchString(log) {
 					t.Errorf("mode %s, lane %s %q: gate pass = %v, want red naming %s\n%s", mode, lane, res, pass, id, log)
 				}
@@ -801,7 +809,8 @@ func TestBazelRetiredLanesCannotBeNarrowed(t *testing.T) {
 
 	// The scripts every lane's test runs under or through, and the whole
 	// setup-bazel action (its generated rc applies to every command).
-	scriptNarrow := regexp.MustCompile(`-test\.(short|run|skip|list|bench)|BEADS_TEST_SKIP|BEADS_TEST_EMBEDDED_DOLT|BEADS_TEST_PROXIED_SERVER|BEADS_TEST_ENV_RUN_DOLT|BEADS_TEST_REQUIRE_DOLT_CONTAINER|BEADS_TEST_DOLT_SERVER\b|TESTBRIDGE_TEST_ONLY|test_filter|test_arg|_filters\b|cache_test_results|eviction_retries|flaky|runs_per_test|test_sharding_strategy`)
+	const narrowOther = `BEADS_TEST_SKIP|BEADS_TEST_EMBEDDED_DOLT|BEADS_TEST_PROXIED_SERVER|BEADS_TEST_ENV_RUN_DOLT|BEADS_TEST_REQUIRE_DOLT_CONTAINER|BEADS_TEST_DOLT_SERVER\b|TESTBRIDGE_TEST_ONLY|test_filter|test_arg|_filters\b|cache_test_results|eviction_retries|flaky|runs_per_test|test_sharding_strategy`
+	scriptNarrow := regexp.MustCompile(`-test\.(short|run|skip|list|bench)|` + narrowOther)
 	files, _ := filepath.Glob(filepath.Join(root, "tools", "bazel", "*.sh"))
 	action, _ := filepath.Glob(filepath.Join(root, setupBazelActionDir, "*"))
 	files = append(files, action...)
@@ -817,12 +826,24 @@ func TestBazelRetiredLanesCannotBeNarrowed(t *testing.T) {
 		// go_test_pinned_shard.sh selects and skips by design (each test in
 		// exactly one shard: TestPinnedShardWrapperSplit), and is reviewed
 		// here for pinnedShardTargets only (the dolt-server-cmd targets and
-		// the embedded lane's httpclient_served_test, whose args are pinned
+		// the embedded lane's served targets, whose args are pinned
 		// above); pinnedShardWrapperUsers fails if anything else runs
-		// through it.
-		exempt := filepath.ToSlash(rel) == pinnedShardWrapper
-		if exempt {
+		// through it. go_test_offline.sh's --shard-manifest selects with
+		// -test.run (each listed test in exactly one shard:
+		// TestOfflineWrapperShardManifest) and refuses a forwarded one; it
+		// may use -test.run and nothing else here, and is reviewed for
+		// offlineWrapperTargets only (bd_managed_local_test, args pinned
+		// above).
+		narrow := scriptNarrow
+		switch filepath.ToSlash(rel) {
+		case pinnedShardWrapper:
+			narrow = nil
 			for _, e := range pinnedShardWrapperUsers(t, root) {
+				t.Error(e)
+			}
+		case offlineWrapper:
+			narrow = regexp.MustCompile(`-test\.(short|skip|list|bench)|` + narrowOther)
+			for _, e := range shWrapperUsers(t, root, offlineWrapper, offlineWrapperTargets, "offlineWrapperTargets") {
 				t.Error(e)
 			}
 		}
@@ -831,7 +852,7 @@ func TestBazelRetiredLanesCannotBeNarrowed(t *testing.T) {
 			if strings.HasPrefix(code, "#") {
 				continue
 			}
-			if scriptNarrow.MatchString(code) && !exempt {
+			if narrow != nil && narrow.MatchString(code) {
 				t.Errorf("%s:%d %q can select, skip or re-run the retired tiers' lanes' tests", rel, i+1, code)
 			}
 			for _, m := range regexp.MustCompile(`--config=([A-Za-z0-9_-]+)`).FindAllStringSubmatch(code, -1) {
@@ -904,13 +925,13 @@ func TestBazelRetiredLanesCannotBeNarrowed(t *testing.T) {
 			map[string]string{"BEADS_HTTP_TEST_REQUIRED": "1", "BEADS_TEST_EMBEDDED_DOLT": "1"},
 		},
 		"//backend/http:http_served_test": {
-			[]string{"$(rootpath :http_test)", "-test.v", "-test.count=1", "-test.timeout=19m"},
+			[]string{"$(rootpath :served_pinned_shards.txt)", "$(rootpath :http_test)", "-test.v", "-test.count=1", "-test.timeout=19m"},
 			map[string]string{"BEADS_HTTP_TEST_REQUIRED": "1", "BEADS_TEST_BD_BINARY": "$(rlocationpath //cmd/bd:bd_for_tests)", "BEADS_TEST_EMBEDDED_DOLT": "1"},
 		},
 		// The served command corpus (backend/http/corpus/README.md), with the
 		// same switches as http_served_test.
 		"//backend/http/corpus:corpus_served_test": {
-			[]string{"$(rootpath :corpus_test)", "-test.v", "-test.count=1", "-test.timeout=19m"},
+			[]string{"$(rootpath :served_pinned_shards.txt)", "$(rootpath :corpus_test)", "-test.v", "-test.count=1", "-test.timeout=19m"},
 			map[string]string{"BEADS_HTTP_TEST_REQUIRED": "1", "BEADS_TEST_BD_BINARY": "$(rlocationpath //cmd/bd:bd_for_tests)", "BEADS_TEST_EMBEDDED_DOLT": "1"},
 		},
 		"//cmd/bd:bd_proxied_test": {
@@ -921,8 +942,12 @@ func TestBazelRetiredLanesCannotBeNarrowed(t *testing.T) {
 				"BEADS_TEST_REQUIRE_DOLT_CONTAINER": "1", "BEADS_TEST_REQUIRE_SOCAT": "1", "GOMAXPROCS": "4",
 			},
 		},
+		// go_test_offline.sh runs exactly the manifest's tests, each in its
+		// shard (TestOfflineWrapperShardManifest), and the manifest lists
+		// exactly the TestManagedLocalProxied* tests bd_test compiles
+		// (TestManagedLocalShardManifest).
 		"//cmd/bd:bd_managed_local_test": {
-			[]string{"$(rootpath :bd_test)", "-test.run=^TestManagedLocalProxied", "-test.timeout=15m"},
+			[]string{"--shard-manifest=$(rootpath :managed_local_shards.txt)", "$(rootpath :bd_test)", "-test.timeout=15m"},
 			map[string]string{
 				"BEADS_TEST_BD_BINARY": "$(rlocationpath :bd_for_tests)", "BEADS_TEST_COMPACT_GC_FIXTURE": "$(rlocationpath :compact_gc_fixture)",
 				"BEADS_TEST_DOLT_SERVER": "local",
@@ -1170,9 +1195,13 @@ func TestBazelRetiredLanesArePinned(t *testing.T) {
 		}
 		evictionAllowed[want] = true
 	}
-	// The dolt-race shadow's union config carries its proxied member's
+	// The dolt-race union config carries its proxied member's
 	// line (TestBazelDoltRaceConfigIsMemberUnion pins the union).
 	evictionAllowed["test:"+bazelDoltRaceConfig+" --experimental_remote_cache_eviction_retries=0"] = true
+	// The dolt-int union config carries its server-storage member's line
+	// (item 5 A2: doltserver-cmd has none of its own;
+	// TestBazelDoltIntConfigIsMemberUnion pins the union).
+	evictionAllowed["test:"+bazelDoltIntConfig+" --experimental_remote_cache_eviction_retries=0"] = true
 	for _, line := range strings.Split(rc, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "#") && strings.Contains(line, "remote_cache_eviction_retries") && !evictionAllowed[line] {
