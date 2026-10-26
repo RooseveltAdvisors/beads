@@ -251,3 +251,36 @@ func TestRebindMovesToTheSeatsOwnNewPane(t *testing.T) {
 		t.Fatalf("endpoint = %#v, want the seat to follow its own session", r["wiseman"].Endpoint)
 	}
 }
+
+// TestFinishedCallerCannotRebindASeat pins the 2026-10-26 incident class: a
+// finished agent's shell still runs commands, and its last commands moved the
+// seat to a pane no live agent would ever read. The reminders then delivered
+// and acked into a dead pane while the live owner got nothing.
+func TestFinishedCallerCannotRebindASeat(t *testing.T) {
+	o, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	if err := seats.Update(o.Dir(), func(r seats.Registry) error {
+		return r.Register("wiseman", []string{"wiseman"}, seats.Endpoint{
+			Session: "wiseman", PaneID: "w1:pP7", AgentSessionID: "session-owner",
+		}, now)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The registered pane is NOT occupied here - the owner's agent is
+	// gone from discovery - so the void-fill would otherwise accept the
+	// claim. The caller is a finished agent whose shell still runs.
+	finished := Instance{Session: "wiseman", PaneID: "w1:pWC", AgentSessionID: "session-finished", Status: "done"}
+	if err := o.Rebind("wiseman", finished, now.Add(time.Minute), []Instance{finished}, true); err != nil {
+		t.Fatal(err)
+	}
+	r, err := seats.Load(o.Dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r["wiseman"].Endpoint.PaneID != "w1:pP7" {
+		t.Fatalf("endpoint = %#v, want the seat to keep its live owner, not the finished caller", r["wiseman"].Endpoint)
+	}
+}

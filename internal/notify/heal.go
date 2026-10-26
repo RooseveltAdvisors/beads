@@ -59,6 +59,13 @@ func (o *Outbox) Rebind(name string, self Instance, now time.Time, live []Instan
 			// second identity on the same pane.
 			return nil
 		}
+		if callerIsFinished(self, live, haveLive) {
+			// A finished agent's shell still runs commands. Its last
+			// commands must never leave a seat pointing at a pane no
+			// live agent will read: the rows would deliver and ack into
+			// a dead pane forever.
+			return nil
+		}
 		return r.Register(id, nil, ep, now)
 	})
 }
@@ -89,6 +96,23 @@ func holdsLiveBinding(cur seats.Seat, self Instance, live []Instance, haveLive b
 		}
 		return inst.AgentSessionID == cur.Endpoint.AgentSessionID ||
 			self.AgentSessionID != cur.Endpoint.AgentSessionID
+	}
+	return false
+}
+
+// callerIsFinished reports whether the calling instance is a finished agent
+// (done, dead, exited, or stopped). Discovery liveness is the evidence; with
+// no evidence the void-fill rules still apply.
+func callerIsFinished(self Instance, live []Instance, haveLive bool) bool {
+	if !haveLive {
+		return false
+	}
+	for _, inst := range live {
+		if inst.PaneID != self.PaneID {
+			continue
+		}
+		status := strings.ToLower(strings.TrimSpace(inst.Status))
+		return status == "done" || status == "dead" || status == "exited" || status == "stopped"
 	}
 	return false
 }
