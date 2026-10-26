@@ -1,6 +1,7 @@
 package timeparsing
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -32,9 +33,14 @@ func TestParseCompactDuration(t *testing.T) {
 			want:  time.Date(2025, 6, 29, 12, 0, 0, 0, time.UTC),
 		},
 		{
-			name:  "+3m adds 3 months",
-			input: "+3m",
+			name:  "+3mo adds 3 months",
+			input: "+3mo",
 			want:  time.Date(2025, 9, 15, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			name:    "+3m is refused as ambiguous",
+			input:   "+3m",
+			wantErr: true,
 		},
 		{
 			name:  "+1y adds 1 year",
@@ -59,8 +65,8 @@ func TestParseCompactDuration(t *testing.T) {
 			want:  time.Date(2025, 6, 15, 13, 30, 0, 0, time.UTC),
 		},
 		{
-			name:  "+30m still adds 30 months",
-			input: "+30m",
+			name:  "+30mo adds 30 months",
+			input: "+30mo",
 			want:  time.Date(2027, 12, 15, 12, 0, 0, 0, time.UTC),
 		},
 
@@ -83,8 +89,8 @@ func TestParseCompactDuration(t *testing.T) {
 
 		// No sign means positive
 		{
-			name:  "3m without sign adds 3 months",
-			input: "3m",
+			name:  "3mo without sign adds 3 months",
+			input: "3mo",
 			want:  time.Date(2025, 9, 15, 12, 0, 0, 0, time.UTC),
 		},
 		{
@@ -192,8 +198,9 @@ func TestIsCompactDuration(t *testing.T) {
 		{"+6h", true},
 		{"-1d", true},
 		{"+2w", true},
-		{"3m", true},
-		{"30m", true},
+		{"3m", false}, // the bare-m spelling is refused, not classified
+		{"3mo", true},
+		{"30mo", true},
 		{"1y", true},
 		{"+24h", true},
 		{"+30min", true},
@@ -237,7 +244,7 @@ func TestIsCompactDuration(t *testing.T) {
 func TestParseCompactDuration_MonthBoundary(t *testing.T) {
 	// Jan 31 + 1 month = Feb 28 (or 29 in leap year)
 	jan31 := time.Date(2025, 1, 31, 12, 0, 0, 0, time.UTC)
-	got, err := ParseCompactDuration("+1m", jan31)
+	got, err := ParseCompactDuration("+1mo", jan31)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -247,7 +254,7 @@ func TestParseCompactDuration_MonthBoundary(t *testing.T) {
 	if !got.Equal(want) {
 		t.Errorf("Jan 31 + 1m = %v, want %v", got, want)
 	}
-	leap, err := ParseCompactDuration("+1m", time.Date(2024, 1, 31, 12, 0, 0, 0, time.UTC))
+	leap, err := ParseCompactDuration("+1mo", time.Date(2024, 1, 31, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -298,7 +305,7 @@ func TestParseCompactDuration_MinutesVsMonths(t *testing.T) {
 		in   string
 		want time.Time
 	}{
-		{"+30m", time.Date(2029, 4, 16, 12, 0, 0, 0, time.UTC)},     // MONTHS - the trap
+		{"+30mo", time.Date(2029, 4, 16, 12, 0, 0, 0, time.UTC)},    // months, explicit spelling
 		{"+30min", time.Date(2026, 10, 16, 12, 30, 0, 0, time.UTC)}, // minutes
 	}
 	for _, c := range cases {
@@ -310,9 +317,18 @@ func TestParseCompactDuration_MinutesVsMonths(t *testing.T) {
 			t.Errorf("ParseCompactDuration(%q, %s) = %s, want %s", c.in, base.Format(time.RFC3339), got.Format(time.RFC3339), c.want.Format(time.RFC3339))
 		}
 	}
+	// The bare-m trap: "+5m" read as minutes by one agent and shipped a due
+	// date a year out (2027-03-26). It is refused with a hint, never guessed.
+	for _, trap := range []string{"+5m", "5m", "-5m", "+30m"} {
+		if _, err := ParseCompactDuration(trap, base); err == nil {
+			t.Errorf("ParseCompactDuration(%q) = nil error, want the ambiguous-unit refusal", trap)
+		} else if !strings.Contains(err.Error(), "min") || !strings.Contains(err.Error(), "mo") {
+			t.Errorf("ParseCompactDuration(%q) error = %q, want the hint naming min and mo", trap, err)
+		}
+	}
 	// One spelling per unit, exactly as the hint promises: anything else is
 	// rejected rather than guessed.
-	for _, bad := range []string{"+30mins", "+30minutes", "+30mo", "+30 m", "+30MIN"} {
+	for _, bad := range []string{"+30mins", "+30minutes", "+30 m", "+30MIN"} {
 		if _, err := ParseCompactDuration(bad, base); err == nil {
 			t.Errorf("ParseCompactDuration(%q) accepted; want an error", bad)
 		}
