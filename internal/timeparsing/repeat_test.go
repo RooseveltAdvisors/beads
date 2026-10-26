@@ -37,7 +37,7 @@ func TestParseRepeatInterval(t *testing.T) {
 		{"2d", base.AddDate(0, 0, 2)},
 		{"+1w", base.AddDate(0, 0, 7)},
 		{"+6h", base.Add(6 * time.Hour)},
-		{"+1m", base.AddDate(0, 1, 0)},
+		{"+1mo", base.AddDate(0, 1, 0)},
 		{"+1y", base.AddDate(1, 0, 0)},
 	}
 	for _, tc := range tests {
@@ -58,7 +58,7 @@ func ymd(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 9, 0,
 // month-end series. The anchor is what the series was first scheduled on, not
 // whatever a short month clamped the previous occurrence to.
 func TestNextFromKeepsTheAnchorDay(t *testing.T) {
-	monthly := mustParseRepeat(t, "+1m")
+	monthly := mustParseRepeat(t, "+1mo")
 	yearly := mustParseRepeat(t, "+1y")
 	tests := []struct {
 		name   string

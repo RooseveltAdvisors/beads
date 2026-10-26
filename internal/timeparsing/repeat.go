@@ -119,7 +119,7 @@ func (r Repeat) NextFrom(t, anchor time.Time) (time.Time, error) {
 	switch {
 	case r.cron != nil:
 		return r.cron.next(t)
-	case r.unit == "m" || r.unit == "y":
+	case r.unit == "mo" || r.unit == "y":
 		next := applyDuration(t, r.amount, r.unit)
 		day := anchor.Day()
 		if last := daysInMonth(next); day > last {

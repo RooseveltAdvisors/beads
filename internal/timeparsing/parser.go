@@ -23,7 +23,12 @@ import (
 // THE UNIT MAP IS FIXED AND UNAMBIGUOUS: min/minute(s) = minutes,
 // m/mo = MONTHS. A bare +30m is 30 months, not 30 minutes - the mistake this
 // exists to prevent was a +30m due date landing in 2029.
-var compactDurationRe = regexp.MustCompile(`^([+-]?)(\d+)(min|[hdwmy])$`)
+var compactDurationRe = regexp.MustCompile(`^([+-]?)(\d+)(min|mo|[hdwy])$`)
+
+// ambiguousMonthsRe matches the bare-m spelling (the trap: "+5m" reads as 5
+// minutes to most people and used to parse as 5 months, shipping a due date a
+// year out). It is refused, never guessed.
+var ambiguousMonthsRe = regexp.MustCompile(`^([+-]?)(\d+)m$`)
 
 // ParseCompactDuration parses compact duration syntax and returns the resulting time.
 //
@@ -34,19 +39,26 @@ var compactDurationRe = regexp.MustCompile(`^([+-]?)(\d+)(min|[hdwmy])$`)
 //   - h = hours
 //   - d = days
 //   - w = weeks
-//   - m = months (NOT minutes; use "min" for minutes)
+//   - mo = months
 //   - y = years
+//
+// The bare "m" is refused: it reads as minutes to most people and parsed as
+// months here (+5m shipped a due date a year out). Use "min" or "mo".
 //
 // Examples:
 //   - "+30min" -> now + 30 minutes
 //   - "+6h" -> now + 6 hours
 //   - "-1d" -> now - 1 day
 //   - "+2w" -> now + 2 weeks
-//   - "3m"  -> now + 3 months (no sign = positive)
+//   - "3mo" -> now + 3 months (no sign = positive)
 //   - "1y"  -> now + 1 year
 //
 // Returns error if input doesn't match the compact duration pattern.
 func ParseCompactDuration(s string, now time.Time) (time.Time, error) {
+	if ambiguousMonthsRe.MatchString(s) {
+		return time.Time{}, fmt.Errorf("ambiguous unit in %q: \"m\" parses as MONTHS in bd, so %s is %s months from now. "+
+			"Use \"min\" for minutes or \"mo\" for months", s, s, s)
+	}
 	matches := compactDurationRe.FindStringSubmatch(s)
 	if matches == nil {
 		return time.Time{}, fmt.Errorf("not a compact duration: %q", s)
@@ -71,7 +83,7 @@ func ParseCompactDuration(s string, now time.Time) (time.Time, error) {
 }
 
 // applyDuration applies the given amount and unit to the base time. Month and
-// year steps clamp to the last day of a shorter target month (Jan 31 + 1m is
+// year steps clamp to the last day of a shorter target month (Jan 31 + 1mo is
 // Feb 28, not Mar 3) instead of overflowing the way time.AddDate does.
 func applyDuration(base time.Time, amount int, unit string) time.Time {
 	switch unit {
@@ -83,7 +95,7 @@ func applyDuration(base time.Time, amount int, unit string) time.Time {
 		return base.AddDate(0, 0, amount*7)
 	case "min":
 		return base.Add(time.Duration(amount) * time.Minute)
-	case "m":
+	case "mo":
 		return addMonthsClamped(base, amount)
 	case "y":
 		return addMonthsClamped(base, 12*amount)

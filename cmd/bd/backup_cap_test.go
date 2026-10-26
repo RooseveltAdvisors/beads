@@ -111,7 +111,7 @@ func TestPauseAutoBackupForSizeCap_WarnThrottle(t *testing.T) {
 		{
 			name:         "warned 1h ago, custom 30m interval → warns again",
 			lastWarnAt:   time.Now().UTC().Add(-1 * time.Hour),
-			warnInterval: "30m",
+			warnInterval: "30m", // Go duration syntax: m is minutes here (unlike bd compact durations)
 			wantUpdated:  true,
 		},
 	}

@@ -202,10 +202,10 @@ func TestLexer(t *testing.T) {
 			values:   []string{"label", "=", "30D", ""},
 		},
 		{
-			name:     "lowercase months unit is a duration",
-			input:    "updated>30m",
+			name:     "explicit months unit is a duration",
+			input:    "updated>30mo",
 			expected: []TokenType{TokenIdent, TokenGreater, TokenDuration, TokenEOF},
-			values:   []string{"updated", ">", "30m", ""},
+			values:   []string{"updated", ">", "30mo", ""},
 		},
 		{
 			name:     "signed lowercase days unit is a duration",
@@ -729,7 +729,7 @@ func TestDurationParsing(t *testing.T) {
 		{"7d", now.AddDate(0, 0, -7)},
 		{"24h", now.Add(-24 * time.Hour)},
 		{"2w", now.AddDate(0, 0, -14)},
-		{"1m", now.AddDate(0, -1, 0)},
+		{"1mo", now.AddDate(0, -1, 0)},
 		{"1y", now.AddDate(-1, 0, 0)},
 	}
 
@@ -758,10 +758,11 @@ func TestQueryMinutesUnitResolvesAgo(t *testing.T) {
 	now := time.Date(2025, 2, 4, 12, 0, 0, 0, time.UTC)
 
 	tests := []struct {
-		name  string
-		query string
-		want  time.Time
-		bound func(*types.IssueFilter) *time.Time
+		name    string
+		query   string
+		want    time.Time
+		wantErr bool
+		bound   func(*types.IssueFilter) *time.Time
 	}{
 		{
 			name:  "created>30min is 30 minutes ago",
@@ -776,8 +777,13 @@ func TestQueryMinutesUnitResolvesAgo(t *testing.T) {
 			bound: func(f *types.IssueFilter) *time.Time { return f.UpdatedBefore },
 		},
 		{
-			name:  "bare m still means months, not minutes",
-			query: "created>30m",
+			name:    "bare m is refused as ambiguous, not guessed",
+			query:   "created>30m",
+			wantErr: true,
+		},
+		{
+			name:  "explicit months unit resolves",
+			query: "created>30mo",
 			want:  now.AddDate(0, -30, 0),
 			bound: func(f *types.IssueFilter) *time.Time { return f.CreatedAfter },
 		},
@@ -786,6 +792,12 @@ func TestQueryMinutesUnitResolvesAgo(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := EvaluateAt(tt.query, now)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("EvaluateAt(%q) = nil error, want the ambiguous-unit refusal", tt.query)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("EvaluateAt(%q) error = %v", tt.query, err)
 			}
@@ -1009,7 +1021,7 @@ func TestCompactDurationGrammarReachesQueryPlane(t *testing.T) {
 
 	// Guard the oracle itself: if ParseCompactDuration stopped accepting the
 	// units the grammar documents, every assertion below would pass vacuously.
-	for _, unit := range []string{"min", "h", "d", "w", "m", "y"} {
+	for _, unit := range []string{"min", "h", "d", "w", "mo", "y"} {
 		if !isAccepted[unit] {
 			t.Fatalf("oracle lost unit %q: timeparsing no longer accepts %q", unit, "1"+unit)
 		}
