@@ -42,8 +42,8 @@ import (
 // were: LatestVersion() drifting to 72 for the wrong reason (an unrelated
 // migration landing first) should still be caught by this test failing to
 // explain why 72 is epoch-minted-addresses-shaped.
-func TestLatestVersionIncludesMigration0075(t *testing.T) {
-	const want = 75
+func TestLatestVersionIncludesMigration0076(t *testing.T) {
+	const want = 76
 	if got := LatestVersion(); got != want {
 		t.Fatalf("LatestVersion() = %d, want %d (epoch_minted_addresses migration slot claimed by gastownhall/beads#6664)", got, want)
 	}

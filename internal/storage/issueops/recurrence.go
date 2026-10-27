@@ -162,6 +162,7 @@ type dueCandidate struct {
 	repeatPattern string
 	repeatStart   *time.Time
 	repeatEnd     *time.Time
+	repeatWindow  string
 	dueMissed     int
 	priority      int
 }
@@ -175,7 +176,7 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 	}
 	statusList, statusArgs := statusPlaceholders(live)
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
-		SELECT id, due_at, repeat_pattern, repeat_start, repeat_end, due_missed, priority
+		SELECT id, due_at, repeat_pattern, repeat_start, repeat_end, repeat_window, due_missed, priority
 		FROM %s
 		WHERE due_at IS NOT NULL AND due_at <= UTC_TIMESTAMP()
 		  AND status IN (%s)
@@ -188,7 +189,7 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 		var c dueCandidate
 		var pattern sql.NullString
 		var start, end sql.NullTime
-		if err := rows.Scan(&c.id, &c.dueAt, &pattern, &start, &end, &c.dueMissed, &c.priority); err != nil {
+		if err := rows.Scan(&c.id, &c.dueAt, &pattern, &start, &end, &c.repeatWindow, &c.dueMissed, &c.priority); err != nil {
 			_ = rows.Close()
 			return nil, nil, fmt.Errorf("due sweep: scan %s row: %w", table, err)
 		}
@@ -214,6 +215,12 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 
 	now := time.Now().UTC()
 	for _, c := range candidates {
+		// A recurring bead outside its quiet window does not fire: the
+		// silence is designed. Its due_at stays put and the wake re-checks
+		// at the window edge.
+		if c.repeatPattern != "" && repeatWindowQuiet(c.repeatWindow, now) {
+			continue
+		}
 		next, fromPattern := nextDueAfterMiss(c, now)
 		// The predicate is repeated so a bead closed, deferred, or rescheduled
 		// between the SELECT and here matches nothing and is left alone rather
@@ -826,4 +833,13 @@ func findActiveRecurrenceCover(ctx context.Context, tx DBTX, title, currentID st
 		return "", nil
 	}
 	return coverID, err
+}
+
+// repeatWindowQuiet reports whether the recurrence window is quiet at now.
+func repeatWindowQuiet(window string, now time.Time) bool {
+	w, err := timeparsing.ParseWindow(window)
+	if err != nil || w.IsZero() {
+		return false
+	}
+	return !w.Contains(now)
 }

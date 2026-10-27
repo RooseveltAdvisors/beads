@@ -117,6 +117,12 @@ type Issue struct {
 	// permanently overdue. The pattern is an interval ("+1w") or a five-field
 	// cron expression ("0 9 * * 1") — see timeparsing.ParseRepeat.
 	//
+	// RepeatWindow is the daily window in which the recurrence is live
+	// ("09:00-20:00 America/New_York"). Outside it the bead is deliberately
+	// silent: the sweep does not fire it, due_missed does not accrue, and the
+	// stale-claim and escalate checkers do not treat the silence as a zombie.
+	// Empty means always live.
+	RepeatWindow string
 	// RepeatStart and RepeatEnd bound the series. Occurrences before
 	// RepeatStart are skipped; the series stops once the next occurrence would
 	// fall after RepeatEnd. Both are optional and independent: an unbounded

@@ -175,6 +175,13 @@ func cliCompatibleMigrationSQL(name, sqlText string) string {
 		// substitute ALTERs wisps directly, the same as 0067's, so it
 		// belongs on cliSubstituteAssumesWispTables too.
 		return cliMigration0073AddParticipationGeneration
+	case "0076_add_repeat_window.up.sql":
+		// Direct DDL for the same reason as 0067: the source migration's
+		// PREPARE guard is what makes the raw .up.sql idempotent when
+		// replayed onto an already-migrated store, and the 2.2.x CLI
+		// no-ops a prepared ADD COLUMN. The column is new on every plane
+		// by this point in the series.
+		return cliMigration0076AddRepeatWindow
 	case "0074_add_removed_restriction.up.sql":
 		// Direct DDL for the same reason as 0067/0068: the source migration's
 		// PREPARE guard (an INFORMATION_SCHEMA probe) is what makes the raw
@@ -225,6 +232,9 @@ func cliSubstituteAssumesWispTables(name string) bool {
 		// @wisps_cr_needs_add table-exists guard and ALTERs wisps directly.
 		return true
 	case "0073_add_participation_generation.up.sql":
+		// cliMigration0076AddRepeatWindow is 0076 with its PREPARE guard dropped.
+		const cliMigration0076AddRepeatWindow = "ALTER TABLE issues ADD COLUMN repeat_window TEXT;"
+
 		// cliMigration0073AddParticipationGeneration drops the source's
 		// @wisps_pg_needs_add table-exists guard and ALTERs wisps directly,
 		// the same shape 0067's override already uses for current_revision.
@@ -337,6 +347,9 @@ ALTER TABLE issue_versions MODIFY COLUMN durable_state LONGBLOB;`
 // twin exists for this table.
 const cliMigration0071WidenIssueVersionsDatetimePrecision = `ALTER TABLE issue_versions MODIFY COLUMN change_at DATETIME(6) NOT NULL;
 ALTER TABLE issue_versions MODIFY COLUMN removed_at DATETIME(6);`
+
+// cliMigration0076AddRepeatWindow is 0076 with its PREPARE guard dropped.
+const cliMigration0076AddRepeatWindow = "ALTER TABLE issues ADD COLUMN repeat_window TEXT;"
 
 // cliMigration0073AddParticipationGeneration is 0070 with its two guarded
 // PREPARE blocks replaced by the direct ALTERs they would run on a fresh

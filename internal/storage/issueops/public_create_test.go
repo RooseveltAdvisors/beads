@@ -82,7 +82,7 @@ func TestPublicCreateIssueFieldClassificationIsComplete(t *testing.T) {
 		"DueAt": true, "DeferUntil": true, "RepeatPattern": true, "RepeatStart": true, "RepeatEnd": true, "DueSource": true, "ExternalRef": true, "SourceSystem": true, "SourceRepo": true, "Metadata": true, "Labels": true,
 		"Sender": true, "Ephemeral": true, "NoHistory": true, "WispType": true, "StorageClass": true, "Pinned": true, "IsTemplate": true,
 		"BondedFrom": true, "AwaitType": true, "AwaitID": true, "Timeout": true, "Waiters": true, "SourceFormula": true, "SourceLocation": true,
-		"MolType": true, "WorkType": true, "EventKind": true, "Actor": true, "Target": true, "Payload": true,
+		"MolType": true, "WorkType": true, "RepeatWindow": true, "EventKind": true, "Actor": true, "Target": true, "Payload": true,
 	}
 	ignored := map[string]bool{
 		"AssigneeID": true, "ContentHash": true, "LeaseExpiresAt": true, "HeartbeatAt": true, "LeaseGrantedNode": true, "RowVersion": true,

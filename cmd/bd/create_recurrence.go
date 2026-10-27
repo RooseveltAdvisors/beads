@@ -15,6 +15,7 @@ import (
 // triple. The zero value means "not recurring".
 type recurrenceFlags struct {
 	pattern string
+	window  string
 	start   *time.Time
 	end     *time.Time
 }
@@ -27,6 +28,7 @@ type recurrenceFlags struct {
 func gatherRecurrenceFlags(cmd *cobra.Command) (recurrenceFlags, error) {
 	var out recurrenceFlags
 	out.pattern, _ = cmd.Flags().GetString("repeat")
+	out.window, _ = cmd.Flags().GetString("window")
 
 	now := time.Now()
 	for _, bound := range []struct {
@@ -104,7 +106,8 @@ func warnSubHourlyRepeat(pattern string) {
 
 // registerRecurrenceFlags adds the recurrence flags to a create-shaped command.
 func registerRecurrenceFlags(cmd *cobra.Command) {
-	cmd.Flags().String("repeat", "", "Recurrence rule: an interval (+1d, +2w, +1m) or a 5-field cron expression (\"0 9 * * 1\"). Closing a recurring bead is refused while recurrence.close_guard is on (the default); end the series with --repeat \"\" first. With the guard off, closing spawns the next instance under the same parent (peer dependencies are not copied). A +1m/+1y series clamps to the last day of a shorter month (Jan 31 -> Feb 28 -> Mar 31)")
+	cmd.Flags().String("window", "", "Quiet window for a recurring bead: \"HH:MM-HH:MM IANA/Zone\" (example: \"09:00-20:00 America/New_York\"). Outside it the bead does not fire and the nag checkers stay quiet.")
+	cmd.Flags().String("repeat", "", "Recurrence rule: an interval (+1d, +2w, +1mo) or a 5-field cron expression (\"0 9 * * 1\"). Closing a recurring bead is refused while recurrence.close_guard is on (the default); end the series with --repeat \"\" first. With the guard off, closing spawns the next instance under the same parent (peer dependencies are not copied). A +1m/+1y series clamps to the last day of a shorter month (Jan 31 -> Feb 28 -> Mar 31)")
 	cmd.Flags().String("repeat-start", "", "Earliest occurrence of a recurring bead. Same formats as --due")
 	cmd.Flags().String("repeat-end", "", "Last occurrence of a recurring bead; the series stops after it. Same formats as --due")
 }
