@@ -112,6 +112,26 @@ func TestSeatReconcilerMarksStaleAndRebindsExactSession(t *testing.T) {
 	}
 }
 
+func TestReconcileDoesNotCollapseSeatsThatShareASession(t *testing.T) {
+	r := seats.Registry{}
+	now := time.Now().UTC()
+	shared := seats.Endpoint{Session: "firstmate", PaneID: "w1:pOLD", AgentSessionID: "parent-session"}
+	if err := r.Register("firstmate", []string{"firstmate", "THE-FM"}, shared, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Register("fm-task", []string{"fm-task"}, shared, now); err != nil {
+		t.Fatal(err)
+	}
+	live := []Instance{{Session: "firstmate", PaneID: "w1:p23", AgentSessionID: "parent-session"}}
+	ReconcileSeats(r, live, now.Add(time.Second), time.Minute)
+	if r["fm-task"].Endpoint.PaneID != "w1:pOLD" {
+		t.Fatalf("task seat collapsed onto parent pane: %+v", r["fm-task"].Endpoint)
+	}
+	if r["firstmate"].Endpoint.PaneID != "w1:pOLD" {
+		t.Fatalf("shared session also moved the parent seat: %+v", r["firstmate"].Endpoint)
+	}
+}
+
 func TestSeatBackfillKeepsAckedCooldownHistory(t *testing.T) {
 	o, err := Open(t.TempDir())
 	if err != nil {
