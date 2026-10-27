@@ -721,6 +721,12 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 					// on each priority raise only; a recurring bead pings on
 					// every occurrence, which is the push the cadence exists
 					// for.
+					if issueops.RepeatWindowQuiet(issue, time.Now().UTC()) {
+						// The window is quiet right now: the recurring bead
+						// is silent by design and neither the occurrence ping
+						// nor the escalate fires outside it.
+						continue
+					}
 					if issue.RepeatPattern == "" && !escalated[id] && issue.DueMissed > 1 {
 						continue
 					}

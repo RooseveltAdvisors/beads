@@ -3,6 +3,7 @@ package issueops
 import (
 	"context"
 	"fmt"
+	"github.com/steveyegge/beads/internal/timeparsing"
 	"strings"
 	"time"
 
@@ -71,6 +72,12 @@ func FindStaleClaims(ctx context.Context, s IssueActivity, after time.Duration, 
 		if issue == nil || CommentProgressExempt(issue) {
 			continue
 		}
+		// A recurring bead inside its quiet window is silent by design,
+		// not a zombie claim: the 12h nag must not fire every morning for
+		// a window that was designed to sleep 13 hours.
+		if issue.IsRecurring() && RepeatWindowQuiet(issue, now) {
+			continue
+		}
 		anchor, src, err := progressAnchor(ctx, s, issue)
 		if err != nil {
 			return nil, err
@@ -121,4 +128,17 @@ func progressAnchor(ctx context.Context, s IssueActivity, issue *types.Issue) (t
 		}
 	}
 	return best, src, nil
+}
+
+// RepeatWindowQuiet reports whether the issue's recurrence window is quiet at
+// now. A bead with no window is never quiet.
+func RepeatWindowQuiet(issue *types.Issue, now time.Time) bool {
+	if issue == nil {
+		return false
+	}
+	w, err := timeparsing.ParseWindow(issue.RepeatWindow)
+	if err != nil || w.IsZero() {
+		return false
+	}
+	return !w.Contains(now)
 }

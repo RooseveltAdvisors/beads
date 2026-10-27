@@ -282,7 +282,7 @@ func TestNextOccurrencePastNeverLandsInThePast(t *testing.T) {
 	// A monthly series anchored on Jan 31 keeps its month-end anchor through
 	// the walk because the start bound carries it.
 	jan31 := at(2026, time.January, 31, 9)
-	monthly := &types.Issue{RepeatPattern: "+1m", DueAt: &jan31, RepeatStart: &jan31}
+	monthly := &types.Issue{RepeatPattern: "+1mo", DueAt: &jan31, RepeatStart: &jan31}
 	mnext, ok := nextOccurrencePast(monthly, jan31, at(2026, time.March, 5, 0))
 	if !ok || !mnext.Equal(at(2026, time.March, 31, 9)) {
 		t.Fatalf("monthly late close: (%v, %v), want Mar 31 09:00", mnext, ok)

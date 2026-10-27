@@ -347,7 +347,7 @@ var singleIssueOnlyFlags = []string{
 	"labels", "label", "skills", "context",
 	"event-category", "event-actor", "event-target", "event-payload",
 	"due", "defer",
-	"repeat", "repeat-start", "repeat-end",
+	"repeat", "repeat-start", "repeat-end", "window",
 	"metadata", "estimate", "wisp-type",
 }
 
