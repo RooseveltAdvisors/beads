@@ -11,6 +11,16 @@ import (
 // ReconcileSeats observes herdr; it never creates, stops, or restarts agents.
 // A moved endpoint can only be recovered by the registered agent session ID.
 // A new agent session must explicitly re-register its immutable seat ID.
+func sessionOwnerCount(r seats.Registry, sessionID string) int {
+	n := 0
+	for _, seat := range r {
+		if seat.Session == sessionID {
+			n++
+		}
+	}
+	return n
+}
+
 func ReconcileSeats(r seats.Registry, live []Instance, now time.Time, deadAfter time.Duration) []string {
 	var dead []string
 	for id, seat := range r {
@@ -19,7 +29,10 @@ func ReconcileSeats(r seats.Registry, live []Instance, now time.Time, deadAfter 
 		}
 		pin := Pin{Session: seat.Endpoint.Session, PaneID: seat.Endpoint.PaneID, AgentSessionID: seat.Endpoint.AgentSessionID}
 		inst, found := FindPinnedInstance(pin, live)
-		if !found && seat.Session != "" {
+		// A session file may rebind only the one seat that owns it. Task seats
+		// registered from the same process share that file. Moving all of them
+		// onto the live pane collapses routing. Shared ownership is a hold.
+		if !found && seat.Session != "" && sessionOwnerCount(r, seat.Session) == 1 {
 			for _, candidate := range live {
 				if candidate.AgentSessionID == seat.Session {
 					// An ambiguous exact session is a hold, never first-match routing.
