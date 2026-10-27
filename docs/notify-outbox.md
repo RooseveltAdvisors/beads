@@ -125,6 +125,9 @@ The repository includes helper scripts under `scripts/notify/`:
 - `bd-comment-notify`: Wrapper script for commenting and draining.
 - `test_beads_notify_e2e.sh`: Shell end-to-end integration test, including the
   guard that no fuzzy resolver and no second transport implementation exists.
+  Hermetic by default: a mock `bd` shadows the real binary so the suite never
+  writes to a live beads DB; set `BEADS_NOTIFY_E2E_LIVE=1` to opt into a live
+  run deliberately.
 
 ## Deployment (ponytail)
 

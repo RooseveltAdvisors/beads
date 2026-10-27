@@ -10,7 +10,12 @@ cd "$REPO_DIR"
 PASS_COUNT=0
 FAIL_COUNT=0
 
-# If live beads issue is not present, use a hermetic mock bd for E2E assertions
+# Hermetic by default: this suite must never mutate a live beads DB (real
+# comments, real queue drains) unless the operator explicitly opts in with
+# BEADS_NOTIFY_E2E_LIVE=1. The previous gate was inverted: it ran live
+# whenever a probe issue (wiseman-c88) happened to resolve, which wrote real
+# test comments to that live bead on 2026-09-22 and 2026-10-27, and fell
+# back to the mock only on probe failure - hermetic by accident, not design.
 MOCK_DIR="$(mktemp -d)"
 trap 'rm -rf "$MOCK_DIR"' EXIT
 
@@ -42,7 +47,9 @@ exit 0
 EOF
 chmod +x "$MOCK_DIR/bd"
 
-if ! bd show wiseman-c88 --json >/dev/null 2>&1; then
+if [ "${BEADS_NOTIFY_E2E_LIVE:-0}" = "1" ]; then
+    echo "NOTE: BEADS_NOTIFY_E2E_LIVE=1 - running against the LIVE beads DB (real comments, real drains)"
+else
     export PATH="$MOCK_DIR:$PATH"
 fi
 
@@ -114,6 +121,18 @@ echo "Test 6: one registry writer"
 assert_match "pin writes use bd seat register" 'seat register' "$(cat "$REPO_DIR/scripts/notify/bd-notify-lib.sh")"
 assert_match "forget unbinds an ID instead of deleting identity" 'bd seat unbind' "$(cat "$REPO_DIR/scripts/notify/bd-notify-lib.sh")"
 assert_match "registry file is seats.json" 'seats.json' "$(cat "$REPO_DIR/scripts/notify/bd-notify-lib.sh")"
+
+# 7. Hermetic-by-default regression: the mock must shadow any real bd unless
+#    the operator opted into live mode. Live default previously wrote real
+#    test comments to live bead wiseman-c88 (2026-09-22, 2026-10-27).
+echo "Test 7: hermetic-by-default mode selection"
+if [ "${BEADS_NOTIFY_E2E_LIVE:-0}" = "1" ]; then
+    assert_eq "live mode only ever runs by explicit opt-in" "1" "$BEADS_NOTIFY_E2E_LIVE"
+else
+    assert_eq "mock bd shadows any real bd on PATH" "$MOCK_DIR/bd" "$(command -v bd)"
+    assert_match "mock answers the probe issue without a live DB" 'wiseman-c88' \
+        "$(bd show wiseman-c88 --json 2>&1 || true)"
+fi
 
 echo ""
 echo "=== SUMMARY: $PASS_COUNT passed, $FAIL_COUNT failed ==="
