@@ -175,6 +175,11 @@ func cliCompatibleMigrationSQL(name, sqlText string) string {
 		// substitute ALTERs wisps directly, the same as 0067's, so it
 		// belongs on cliSubstituteAssumesWispTables too.
 		return cliMigration0073AddParticipationGeneration
+	case "0077_repair_repeat_window_on_wisps.up.sql":
+		// The repair ALTER is guarded by an INFORMATION_SCHEMA probe; the
+		// 2.2.x CLI no-ops a prepared statement, and the fresh bundle
+		// already carries the column from 0076, so nothing to do.
+		return cliMigration0077RepairRepeatWindowOnWisps
 	case "0076_add_repeat_window.up.sql":
 		// Direct DDL for the same reason as 0067: the source migration's
 		// PREPARE guard is what makes the raw .up.sql idempotent when
@@ -233,7 +238,7 @@ func cliSubstituteAssumesWispTables(name string) bool {
 		return true
 	case "0073_add_participation_generation.up.sql":
 		// cliMigration0076AddRepeatWindow is 0076 with its PREPARE guard dropped.
-		const cliMigration0076AddRepeatWindow = "ALTER TABLE issues ADD COLUMN repeat_window TEXT;"
+		const cliMigration0076AddRepeatWindow = "ALTER TABLE issues ADD COLUMN repeat_window TEXT;\nALTER TABLE wisps ADD COLUMN repeat_window TEXT;"
 
 		// cliMigration0073AddParticipationGeneration drops the source's
 		// @wisps_pg_needs_add table-exists guard and ALTERs wisps directly,
@@ -348,8 +353,13 @@ ALTER TABLE issue_versions MODIFY COLUMN durable_state LONGBLOB;`
 const cliMigration0071WidenIssueVersionsDatetimePrecision = `ALTER TABLE issue_versions MODIFY COLUMN change_at DATETIME(6) NOT NULL;
 ALTER TABLE issue_versions MODIFY COLUMN removed_at DATETIME(6);`
 
-// cliMigration0076AddRepeatWindow is 0076 with its PREPARE guard dropped.
-const cliMigration0076AddRepeatWindow = "ALTER TABLE issues ADD COLUMN repeat_window TEXT;"
+// cliMigration0076AddRepeatWindow is 0076 with its PREPARE guards dropped.
+const cliMigration0076AddRepeatWindow = "ALTER TABLE issues ADD COLUMN repeat_window TEXT;\nALTER TABLE wisps ADD COLUMN repeat_window TEXT;"
+
+// cliMigration0077RepairRepeatWindowOnWisps is 0077 with its guard dropped:
+// the CLI bundle replays onto a fresh store where the column exists, so this
+// substitute is a no-op there and the live-repair path is the raw SQL.
+const cliMigration0077RepairRepeatWindowOnWisps = "SELECT 1;"
 
 // cliMigration0073AddParticipationGeneration is 0070 with its two guarded
 // PREPARE blocks replaced by the direct ALTERs they would run on a fresh

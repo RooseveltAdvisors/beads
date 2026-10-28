@@ -165,6 +165,15 @@ func applyRecurrenceUpdateFlags(cmd *cobra.Command, fields map[string]any) error
 		}
 		fields["repeat_pattern"] = pattern
 	}
+	if cmd.Flags().Changed("window") {
+		window, _ := cmd.Flags().GetString("window")
+		if window != "" {
+			if _, err := timeparsing.ParseWindow(window); err != nil {
+				return HandleErrorRespectJSON("invalid --window %q: %v", window, err)
+			}
+		}
+		fields["repeat_window"] = window
+	}
 	now := time.Now()
 	for _, bound := range []struct{ flag, key string }{
 		{"repeat-start", "repeat_start"},
@@ -190,6 +199,7 @@ func applyRecurrenceUpdateFlags(cmd *cobra.Command, fields map[string]any) error
 // registerRecurrenceUpdateFlags adds the recurrence flags to `bd update`. The
 // descriptions differ from create's: here empty clears.
 func registerRecurrenceUpdateFlags(cmd *cobra.Command) {
+	cmd.Flags().String("window", "", "Quiet window for a recurring bead: \"HH:MM-HH:MM IANA/Zone\" (example: \"09:00-20:00 America/New_York\"). Empty clears the window.")
 	cmd.Flags().String("repeat", "", "Recurrence rule, empty to stop repeating: an interval (+1d, +2w) or 5-field cron (\"0 9 * * 1\")")
 	cmd.Flags().String("repeat-start", "", "Earliest occurrence (empty to clear). Same formats as --due")
 	cmd.Flags().String("repeat-end", "", "Last occurrence (empty to clear). Same formats as --due")

@@ -322,6 +322,12 @@
     },
     {
       "schema": "ApplyCreateItem",
+      "member": "repeat_window",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "ApplyCreateItem",
       "member": "sender",
       "type": "string",
       "required": false
@@ -632,6 +638,12 @@
       "format": "date-time",
       "required": false,
       "nullable": true
+    },
+    {
+      "schema": "ApplyPatchBody",
+      "member": "repeat_window",
+      "type": "string",
+      "required": false
     },
     {
       "schema": "ApplyPatchBody",
@@ -1532,6 +1544,12 @@
     },
     {
       "schema": "BlockedIssue",
+      "member": "repeat_window",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "BlockedIssue",
       "member": "sender",
       "type": "string",
       "required": false
@@ -2178,6 +2196,12 @@
       "member": "repeat_start",
       "type": "string",
       "format": "date-time",
+      "required": false
+    },
+    {
+      "schema": "CreateIssueRequest",
+      "member": "repeat_window",
+      "type": "string",
       "required": false
     },
     {
@@ -2857,6 +2881,12 @@
     },
     {
       "schema": "Issue",
+      "member": "repeat_window",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "Issue",
       "member": "sender",
       "type": "string",
       "required": false
@@ -3357,6 +3387,12 @@
     },
     {
       "schema": "IssueDetails",
+      "member": "repeat_window",
+      "type": "string",
+      "required": false
+    },
+    {
+      "schema": "IssueDetails",
       "member": "revision",
       "type": "string",
       "required": true
@@ -3631,6 +3667,12 @@
       "format": "date-time",
       "required": false,
       "nullable": true
+    },
+    {
+      "schema": "IssuePatchBody",
+      "member": "repeat_window",
+      "type": "string",
+      "required": false
     },
     {
       "schema": "IssuePatchBody",
@@ -3974,6 +4016,12 @@
       "member": "repeat_start",
       "type": "string",
       "format": "date-time",
+      "required": false
+    },
+    {
+      "schema": "IssueWithCounts",
+      "member": "repeat_window",
+      "type": "string",
       "required": false
     },
     {
@@ -4369,6 +4417,12 @@
       "member": "repeat_start",
       "type": "string",
       "format": "date-time",
+      "required": false
+    },
+    {
+      "schema": "IssueWithDependencyMetadata",
+      "member": "repeat_window",
+      "type": "string",
       "required": false
     },
     {
@@ -5580,6 +5634,12 @@
       "member": "repeat_start",
       "type": "string",
       "format": "date-time",
+      "required": false
+    },
+    {
+      "schema": "TreeNode",
+      "member": "repeat_window",
+      "type": "string",
       "required": false
     },
     {

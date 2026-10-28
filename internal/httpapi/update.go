@@ -47,7 +47,7 @@ var (
 		"notes", "append_notes", "priority", "issue_type", "status",
 		"assignee", "parent_id", "labels", "add_labels", "remove_labels", "metadata",
 		"estimated_minutes", "external_ref", "due_at", "defer_until",
-		"repeat_pattern", "repeat_start", "repeat_end",
+		"repeat_pattern", "repeat_window", "repeat_start", "repeat_end",
 		"estimated_minutes", "external_ref", "due_at", "defer_until", "persistence",
 		"await_id", "waiters",
 	}
@@ -537,6 +537,9 @@ func (s *Server) issuePatch(w http.ResponseWriter, r *http.Request, id string, m
 	}
 	if set("due_at") {
 		patch.DueAt = issueops.Field[*time.Time]{Set: true, Value: wire.DueAt}
+	}
+	if set("repeat_window") {
+		patch.RepeatWindow = issueops.Field[string]{Set: true, Value: derefString(wire.RepeatWindow)}
 	}
 	if set("repeat_pattern") {
 		patch.RepeatPattern = issueops.Field[string]{Set: true, Value: derefString(wire.RepeatPattern)}

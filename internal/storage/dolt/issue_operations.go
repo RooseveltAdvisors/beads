@@ -162,6 +162,7 @@ func nonCoordinationPatchSignals(patch issueops.IssuePatch) []bool {
 		patch.DueAt.Set,
 		patch.DeferUntil.Set,
 		patch.RepeatPattern.Set,
+		patch.RepeatWindow.Set,
 		patch.RepeatStart.Set,
 		patch.RepeatEnd.Set,
 		patch.Persistence.Set,

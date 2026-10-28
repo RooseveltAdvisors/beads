@@ -122,7 +122,7 @@ type Issue struct {
 	// silent: the sweep does not fire it, due_missed does not accrue, and the
 	// stale-claim and escalate checkers do not treat the silence as a zombie.
 	// Empty means always live.
-	RepeatWindow string
+	RepeatWindow string `json:"repeat_window,omitempty"`
 	// RepeatStart and RepeatEnd bound the series. Occurrences before
 	// RepeatStart are skipped; the series stops once the next occurrence would
 	// fall after RepeatEnd. Both are optional and independent: an unbounded

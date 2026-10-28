@@ -153,7 +153,9 @@ type IssuePatch struct {
 	DeferUntil       Field[*time.Time]
 	// RepeatPattern sets the recurrence rule; a set empty value stops the
 	// series without touching the bead's own due date. RepeatStart and
-	// RepeatEnd bound it; a set nil clears the bound.
+	// RepeatEnd bound it; a set nil clears the bound. RepeatWindow is the
+	// quiet window ("HH:MM-HH:MM IANA/Zone"); a set empty value clears it.
+	RepeatWindow  Field[string]
 	RepeatPattern Field[string]
 	RepeatStart   Field[*time.Time]
 	RepeatEnd     Field[*time.Time]

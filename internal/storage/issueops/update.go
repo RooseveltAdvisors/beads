@@ -26,7 +26,7 @@ func IsAllowedUpdateField(key string) bool {
 		"mol_type":       true,
 		"event_category": true, "event_actor": true, "event_target": true, "event_payload": true,
 		"due_at": true, "defer_until": true, "await_id": true, "waiters": true,
-		"repeat_pattern": true, "repeat_start": true, "repeat_end": true,
+		"repeat_pattern": true, "repeat_window": true, "repeat_start": true, "repeat_end": true,
 		// due_source is provenance, written by the paths that SET a due date
 		// (create, the due sweep, `bd due backfill`). It is updatable rather
 		// than sealed so those paths reach it through the one update funnel
@@ -759,6 +759,8 @@ func issueFieldMatches(issue *types.Issue, key string, value interface{}) (bool,
 		return matchesTimePointer(issue.DueAt, value), nil
 	case "defer_until":
 		return matchesTimePointer(issue.DeferUntil, value), nil
+	case "repeat_window":
+		return matchesString(issue.RepeatWindow, value), nil
 	case "repeat_pattern":
 		return matchesString(issue.RepeatPattern, value), nil
 	case "repeat_start":

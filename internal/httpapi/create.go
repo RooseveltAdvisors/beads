@@ -55,7 +55,7 @@ var (
 		"description", "design", "due_at", "ephemeral", "estimated_minutes",
 		"external_ref", "force_id_prefix", "id", "inherit_labels_from_parent",
 		"issue_type", "labels", createMetadataMember, "no_history", "notes", "owner",
-		"parent_id", "priority", "repeat_end", "repeat_pattern", "repeat_start",
+		"parent_id", "priority", "repeat_end", "repeat_pattern", "repeat_start", "repeat_window",
 		"sender", "status", "title", "waits_for",
 		"parent_id", "priority", "sender", "status", "timeout", "title", "waiters", "waits_for",
 	}
@@ -204,6 +204,7 @@ func (s *Server) createIssueRequest(w http.ResponseWriter, r *http.Request) (iss
 		DueAt:              wire.DueAt,
 		DeferUntil:         wire.DeferUntil,
 		RepeatPattern:      derefString(wire.RepeatPattern),
+		RepeatWindow:       derefString(wire.RepeatWindow),
 		RepeatStart:        wire.RepeatStart,
 		RepeatEnd:          wire.RepeatEnd,
 		Sender:             derefString(wire.Sender),

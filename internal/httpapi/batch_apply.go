@@ -87,7 +87,7 @@ var (
 		"acceptance_criteria", "assignee", "await_id", "await_type", "defer_until", "description", "design",
 		"due_at", "ephemeral", "estimated_minutes", "external_ref", "id",
 		"issue_type", "key", "labels", "metadata", "metadata_refs", "no_history",
-		"notes", "owner", "priority", "repeat_end", "repeat_pattern",
+		"notes", "owner", "priority", "repeat_end", "repeat_pattern", "repeat_window",
 		"repeat_start", "sender", "status", "title",
 		"notes", "owner", "priority", "sender", "status", "timeout", "title", "waiters",
 	}
@@ -100,7 +100,7 @@ var (
 		"acceptance_criteria", "append_notes", "assignee", "await_id", "defer_until",
 		"description", "design", "due_at", "estimated_minutes", "external_ref",
 		"issue_type", "labels", "metadata", "notes", "owner", "priority",
-		"repeat_end", "repeat_pattern", "repeat_start", "status", "title",
+		"repeat_end", "repeat_pattern", "repeat_start", "repeat_window", "status", "title",
 		"status", "title", "waiters",
 	}
 	applyLabelPatchMembers    = []string{"add", "remove", "replace"}
@@ -413,6 +413,7 @@ func applyCreateItem(prefix string, encoded json.RawMessage, raw map[string]json
 		ExternalRef:        wire.ExternalRef,
 		DueAt:              wire.DueAt,
 		RepeatPattern:      derefString(wire.RepeatPattern),
+		RepeatWindow:       derefString(wire.RepeatWindow),
 		RepeatStart:        wire.RepeatStart,
 		RepeatEnd:          wire.RepeatEnd,
 		DeferUntil:         wire.DeferUntil,
@@ -647,6 +648,7 @@ func applyPatch(prefix string, encoded json.RawMessage, raw map[string]json.RawM
 	}
 	if set("repeat_pattern") {
 		patch.RepeatPattern = issueops.Field[string]{Set: true, Value: derefString(wire.RepeatPattern)}
+		patch.RepeatWindow = issueops.Field[string]{Set: true, Value: derefString(wire.RepeatWindow)}
 	}
 	if set("repeat_start") {
 		patch.RepeatStart = issueops.Field[*time.Time]{Set: true, Value: wire.RepeatStart}

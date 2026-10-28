@@ -142,6 +142,7 @@ func createBody(req issueops.CreateRequest) (apigen.CreateIssueRequest, error) {
 	setItemString(&body.IssueType, string(issue.IssueType))
 	setItemString(&body.Assignee, issue.Assignee)
 	setItemString(&body.RepeatPattern, issue.RepeatPattern)
+	setItemString(&body.RepeatWindow, issue.RepeatWindow)
 	if issue.RepeatStart != nil {
 		body.RepeatStart = issue.RepeatStart
 	}
@@ -281,6 +282,7 @@ var createCarriedIssueMembers = map[string]string{
 	"DueAt":              "due_at",
 	"DeferUntil":         "defer_until",
 	"RepeatPattern":      "repeat_pattern",
+	"RepeatWindow":       "repeat_window",
 	"RepeatStart":        "repeat_start",
 	"RepeatEnd":          "repeat_end",
 	"Sender":             "sender",
@@ -988,6 +990,7 @@ func encodeIssuePatch(patch issueops.IssuePatch) (map[string]any, error) {
 	setString(out, "assignee", patch.Assignee)
 	setString(out, "parent_id", patch.ParentID)
 	setString(out, "repeat_pattern", patch.RepeatPattern)
+	setString(out, "repeat_window", patch.RepeatWindow)
 	setNullableTime(out, "repeat_start", patch.RepeatStart)
 	setNullableTime(out, "repeat_end", patch.RepeatEnd)
 	// The gate members (issues.update.gates). Update has already refused them,

@@ -76,7 +76,7 @@ var issueUpsertColumns = []string{
 	// the locally stamped due_at, which itself never syncs here, so a legacy
 	// snapshot without the field must not reset the provenance of a date the
 	// snapshot does not even carry.
-	"repeat_pattern", "repeat_start", "repeat_end",
+	"repeat_pattern", "repeat_window", "repeat_start", "repeat_end",
 }
 
 // issueUpsertAssignments renders the ON DUPLICATE KEY UPDATE clause. With
@@ -143,7 +143,7 @@ func issueInsertSQL(table string, rows int, suffix string) string {
 			mol_type, work_type, source_system, source_repo, close_reason, closed_by_session,
 			event_kind, actor, target, payload,
 			await_type, await_id, timeout_ns, waiters,
-			due_at, defer_until, repeat_pattern, repeat_start, repeat_end, due_source, due_missed,
+			due_at, defer_until, repeat_pattern, repeat_window, repeat_start, repeat_end, due_source, due_missed,
 			metadata,
 			row_lock, storage_class, assignee_id
 		) VALUES %s
@@ -161,7 +161,7 @@ const issueInsertRow = `(
 			?, ?, ?, ?, ?,
 			?, ?, ?, ?,
 			?, ?, ?, ?,
-			?, ?, ?, ?, ?, ?, ?,
+			?, ?, ?, ?, ?, ?, ?, ?,
 			?,
 			?, ?, ?
 		)`
@@ -178,7 +178,7 @@ func issueInsertArgs(issue *types.Issue) []any {
 		issue.MolType, issue.WorkType, issue.SourceSystem, issue.SourceRepo, issue.CloseReason, issue.ClosedBySession,
 		issue.EventKind, issue.Actor, issue.Target, issue.Payload,
 		issue.AwaitType, issue.AwaitID, issue.Timeout.Nanoseconds(), FormatJSONStringArray(issue.Waiters),
-		issue.DueAt, issue.DeferUntil, issue.RepeatPattern, issue.RepeatStart, issue.RepeatEnd, string(issue.DueSource), issue.DueMissed,
+		issue.DueAt, issue.DeferUntil, issue.RepeatPattern, issue.RepeatWindow, issue.RepeatStart, issue.RepeatEnd, string(issue.DueSource), issue.DueMissed,
 		JSONMetadata(issue.Metadata),
 		freshRowLock(), NullString(string(issue.StorageClass.Normalize())), issue.AssigneeID,
 	}

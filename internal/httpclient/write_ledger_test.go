@@ -162,7 +162,7 @@ func writeShapes() []writeShape {
 						"notes", "status", "priority", "issue_type", "assignee", "owner",
 						"estimated_minutes", "external_ref", "due_at", "defer_until",
 						"sender", "metadata", "labels", "ephemeral", "no_history",
-						"repeat_pattern", "repeat_start", "repeat_end",
+						"repeat_pattern", "repeat_window", "repeat_start", "repeat_end",
 						// The gate members, behind issues.create.gates:
 						// carried to a server that
 						// advertises it, refused before the dial otherwise.
@@ -319,6 +319,7 @@ func writeShapes() []writeShape {
 				"DueAt":              member("due_at"),
 				"DeferUntil":         member("defer_until"),
 				"RepeatPattern":      member("repeat_pattern"),
+				"RepeatWindow":       member("repeat_window"),
 				"RepeatStart":        member("repeat_start"),
 				"RepeatEnd":          member("repeat_end"),
 				// THE ORDERED EDIT, whole: one field driving three members, which
@@ -568,6 +569,7 @@ func writeShapes() []writeShape {
 			// (W-CreateItem.Issue): published, refused, pending.
 			pending: map[string]string{
 				"repeat_pattern": "Issue",
+				"repeat_window":  "Issue",
 				"repeat_start":   "Issue",
 				"repeat_end":     "Issue",
 			},
@@ -620,6 +622,7 @@ func writeShapes() []writeShape {
 				"DueAt":              member("due_at"),
 				"DeferUntil":         member("defer_until"),
 				"RepeatPattern":      member("repeat_pattern"),
+				"RepeatWindow":       member("repeat_window"),
 				"RepeatStart":        member("repeat_start"),
 				"RepeatEnd":          member("repeat_end"),
 				// The full ordered edit rather than updateIssue's replace-only

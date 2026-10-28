@@ -246,6 +246,7 @@ func buildCreateIssueFromInput(in createInput) *types.Issue {
 		DueSource:          in.dueSource,
 		DeferUntil:         in.deferUntil,
 		RepeatPattern:      in.repeat.pattern,
+		RepeatWindow:       in.repeat.window,
 		RepeatStart:        in.repeat.start,
 		RepeatEnd:          in.repeat.end,
 		Metadata:           in.metadata,
