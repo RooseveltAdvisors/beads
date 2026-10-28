@@ -175,25 +175,30 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 		return nil, nil, nil
 	}
 	statusList, statusArgs := statusPlaceholders(live)
+	windowCol := "repeat_window"
+	if table == "wisps" {
+		windowCol = "NULL AS repeat_window"
+	}
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
-		SELECT id, due_at, repeat_pattern, repeat_start, repeat_end, repeat_window, due_missed, priority
+		SELECT id, due_at, repeat_pattern, repeat_start, repeat_end, %s, due_missed, priority
 		FROM %s
 		WHERE due_at IS NOT NULL AND due_at <= UTC_TIMESTAMP()
 		  AND status IN (%s)
-	`, table, statusList), statusArgs...)
+	`, windowCol, table, statusList), statusArgs...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("due sweep: scan %s: %w", table, err)
 	}
 	var candidates []dueCandidate
 	for rows.Next() {
 		var c dueCandidate
-		var pattern sql.NullString
+		var pattern, window sql.NullString
 		var start, end sql.NullTime
-		if err := rows.Scan(&c.id, &c.dueAt, &pattern, &start, &end, &c.repeatWindow, &c.dueMissed, &c.priority); err != nil {
+		if err := rows.Scan(&c.id, &c.dueAt, &pattern, &start, &end, &window, &c.dueMissed, &c.priority); err != nil {
 			_ = rows.Close()
 			return nil, nil, fmt.Errorf("due sweep: scan %s row: %w", table, err)
 		}
 		c.repeatPattern = pattern.String
+		c.repeatWindow = window.String
 		if start.Valid {
 			c.repeatStart = &start.Time
 		}
