@@ -39,7 +39,6 @@ const migration0071Down = "0072_widen_issue_versions_datetime_precision.down.sql
 const migration0069ChangeAtDatetimeGuard = "@issue_versions_change_at_needs_widen"
 const migration0069RemovedAtDatetimeGuard = "@issue_versions_removed_at_needs_widen"
 
-
 // TestMigration0071WidensChangeAtAndRemovedAtPrecision is the pure-Go,
 // DB-independent half of the pin, mirroring
 // TestMigration0068AddsAttributionStatus's shape: it checks the frozen
