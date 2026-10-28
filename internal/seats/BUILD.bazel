@@ -6,16 +6,21 @@ go_library(
         "lock.go",
         "machine_actors.go",
         "registry.go",
+        "state.go",
     ],
     importpath = "github.com/steveyegge/beads/internal/seats",
     visibility = ["//:__subpackages__"],
-    deps = ["//internal/lockfile"],
+    deps = [
+        "//internal/lockfile",
+        "@com_github_google_uuid//:uuid",
+    ],
 )
 
 go_test(
     name = "seats_test",
     srcs = ["registry_test.go"],
     embed = [":seats"],
+    deps = ["@com_github_google_uuid//:uuid"],
 )
 
 # --- begin repo_files (managed by tools/bazel/go_srcs.py; run `make bazel-sync`) ---

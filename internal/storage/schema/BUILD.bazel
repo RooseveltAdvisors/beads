@@ -129,6 +129,7 @@ go_library(
         "migrations/0075_add_epoch_minted_addresses.up.sql",
         "migrations/0076_add_repeat_window.up.sql",
         "migrations/ignored/0031_add_wisps_participation_generation.up.sql",
+        "migrations/0077_repair_repeat_window_on_wisps.up.sql",
     ],
     importpath = "github.com/steveyegge/beads/internal/storage/schema",
     visibility = ["//:__subpackages__"],

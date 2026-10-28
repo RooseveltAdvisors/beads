@@ -34,9 +34,13 @@ go_test(
         "pins_fallback_test.go",
         "prompt_test.go",
         "seat_identity_test.go",
+        "uuid_e2e_test.go",
     ],
     embed = [":notify"],
-    deps = ["//internal/seats"],
+    deps = [
+        "//internal/seats",
+        "@com_github_google_uuid//:uuid",
+    ],
 )
 
 # --- begin repo_files (managed by tools/bazel/go_srcs.py; run `make bazel-sync`) ---

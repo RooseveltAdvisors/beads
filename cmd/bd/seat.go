@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -12,17 +14,24 @@ import (
 )
 
 var seatCmd = &cobra.Command{
-	Use: "seat", Short: "Register immutable seat identities, aliases, and exact endpoints",
-	Long: `Names are mutable aliases. A seat ID is immutable. Endpoints are exact
-lookup records, never parsed from a name or ID. Register an ID once, then
-re-register the same ID without --alias after restarting an agent.
+	Use: "seat", Short: "Mint durable agent identities, aliases, and exact endpoints",
+	Long: `An agent's identity is one immutable uuid, minted once at first
+registration and stored in the seat registry row and the agent's durable
+state file. It is never derived from a pane, tab, or session. Aliases are
+the mutable human names of a uuid.
+
+Endpoints are disposable: on every start the agent re-registers under its
+uuid (bd seat register --state <path> with session and pane), the endpoint
+re-asserts, and the uuid never changes. Senders address the uuid (or an
+alias, resolved exactly); delivery resolves the uuid to the live endpoint at
+send time and holds when it does not resolve.
 
 The first alias is the display name. A rename changes one seats.json row;
 beads, actors, and notify rows keep their original identity keys.`,
 }
 
 func registryCommand(use, short string, run func(*cobra.Command, []string, *notify.Outbox, seats.Registry) error) *cobra.Command {
-	return &cobra.Command{Use: use, Short: short, Annotations: map[string]string{"bd:skip_store": "true"}, RunE: func(cmd *cobra.Command, args []string) error {
+	return &cobra.Command{Use: use, Short: short, Annotations: map[string]string{skipStoreAnnotation: "1"}, RunE: func(cmd *cobra.Command, args []string) error {
 		o, err := openNotifyOutbox()
 		if err != nil {
 			return err
@@ -136,25 +145,78 @@ Re-running the command is idempotent. Registry and outbox updates are serialized
 }
 
 func init() {
-	register := registryCommand("register <seat-id>", "Register or rebind a seat to an exact endpoint", func(cmd *cobra.Command, args []string, o *notify.Outbox, r seats.Registry) error {
+	register := registryCommand("register [seat-id]", "Mint an agent uuid, or re-register an endpoint under it", func(cmd *cobra.Command, args []string, o *notify.Outbox, r seats.Registry) error {
 		CheckReadonly("seat register")
 		aliases, _ := cmd.Flags().GetStringSlice("alias")
 		session, _ := cmd.Flags().GetString("session")
 		pane, _ := cmd.Flags().GetString("pane")
 		agent, _ := cmd.Flags().GetString("agent-session")
-		if err := seats.Update(o.Dir(), func(current seats.Registry) error {
-			r = current
-			return r.Register(args[0], aliases, seats.Endpoint{Session: session, PaneID: pane, AgentSessionID: agent}, time.Now().UTC())
-		}); err != nil {
-			return err
+		statePath, _ := cmd.Flags().GetString("state")
+		if statePath == "" {
+			statePath = strings.TrimSpace(os.Getenv(seats.StateEnv))
 		}
-		return printJSON(map[string]any{"seat_id": args[0], "seat": r[args[0]]})
+		endpoint := seats.Endpoint{Session: session, PaneID: pane, AgentSessionID: agent}
+		now := time.Now().UTC()
+		if len(args) > 0 {
+			// Operator path: register or rebind an explicitly named seat.
+			// Token-protected (minted) seats refuse it.
+			if err := seats.Update(o.Dir(), func(current seats.Registry) error {
+				r = current
+				return r.Register(args[0], aliases, endpoint, now)
+			}); err != nil {
+				return err
+			}
+			return printJSON(map[string]any{"seat_id": args[0], "seat": r[args[0]]})
+		}
+		// Agent path: identity comes from the durable state file, never from a
+		// pane, tab, or session. A readable state re-registers its uuid with
+		// its rebind token; no state mints a fresh uuid and writes it.
+		if statePath == "" {
+			return fmt.Errorf("seat register without a seat id requires --state (or %s): the durable state file holds the minted uuid", seats.StateEnv)
+		}
+		st, stateErr := seats.ReadState(statePath)
+		switch {
+		case stateErr == nil:
+			if err := seats.Update(o.Dir(), func(current seats.Registry) error {
+				r = current
+				return r.RebindWithToken(st.AgentUUID, endpoint, st.RebindToken, now)
+			}); err != nil {
+				return err
+			}
+			if err := seats.WriteState(statePath, st); err != nil {
+				return fmt.Errorf("update durable state %s: %w", statePath, err)
+			}
+			return printJSON(map[string]any{"seat_id": st.AgentUUID, "seat": r[st.AgentUUID], "state": statePath})
+		case os.IsNotExist(stateErr):
+			var id, token string
+			if err := seats.Update(o.Dir(), func(current seats.Registry) error {
+				r = current
+				var merr error
+				id, token, merr = r.Mint(aliases, endpoint, now)
+				return merr
+			}); err != nil {
+				return err
+			}
+			alias := ""
+			if len(aliases) > 0 {
+				alias = aliases[0]
+			}
+			st = seats.AgentState{AgentUUID: id, Alias: alias, RebindToken: token}
+			if err := seats.WriteState(statePath, st); err != nil {
+				return fmt.Errorf("seat %s minted but the durable state write failed: %w (without %s no process can re-register this uuid)", id, err, statePath)
+			}
+			return printJSON(map[string]any{"seat_id": id, "seat": r[id], "state": statePath, "minted": true})
+		default:
+			// A corrupt state must never silently re-mint a second identity.
+			return fmt.Errorf("durable state %s unreadable: %w (remove it to mint a fresh identity)", statePath, stateErr)
+		}
 	})
-	register.Args = cobra.ExactArgs(1)
-	register.Flags().StringSlice("alias", nil, "Explicit aliases (first is display name); only on first registration")
+	register.Args = cobra.MaximumNArgs(1)
+	register.Flags().StringSlice("alias", nil, "Explicit aliases (first is display name); only on first registration or mint")
 	register.Flags().String("session", "", "Exact herdr endpoint session")
 	register.Flags().String("pane", "", "Exact endpoint pane ID")
 	register.Flags().String("agent-session", "", "Exact agent session ID for endpoint reconciliation")
+	register.Flags().String("state", "", "Agent durable state file (default $"+seats.StateEnv+"); mints or re-registers the uuid it holds")
 	rename := registryCommand("rename <seat-id>", "Change aliases on exactly one seat row", func(cmd *cobra.Command, args []string, o *notify.Outbox, r seats.Registry) error {
 		CheckReadonly("seat rename")
 		aliases, _ := cmd.Flags().GetStringSlice("alias")
