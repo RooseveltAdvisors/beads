@@ -18,11 +18,11 @@ import (
 // months, so a message naming one example leaves the caller trying units one at
 // a time to find the boundary. "min" is the sharpest case: "+3m" is months and
 // "+30min" is minutes, which is why the parser's own doc comment spells out
-// "m = months (NOT minutes; use \"min\" for minutes)".
+// "mo = months (NOT minutes; use \"min\" for minutes)".
 func TestDeferUntilFormatHintCoversCompactUnits(t *testing.T) {
 	now := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
 
-	for _, unit := range []string{"min", "h", "d", "w", "m", "y"} {
+	for _, unit := range []string{"min", "h", "d", "w", "mo", "y"} {
 		value := "+3" + unit
 		if _, err := timeparsing.ParseRelativeTime(value, now); err != nil {
 			t.Errorf("parser rejected %q, which the --until hint names as supported: %v", value, err)
@@ -32,11 +32,11 @@ func TestDeferUntilFormatHintCoversCompactUnits(t *testing.T) {
 		}
 	}
 
-	if _, err := timeparsing.ParseRelativeTime("+3mo", now); err == nil {
-		t.Fatal("expected +3mo to be rejected; the hint exists to send that caller to +3m")
+	if _, err := timeparsing.ParseRelativeTime("+3m", now); err == nil {
+		t.Fatal("expected +3m to be refused as ambiguous; the hint sends that caller to +3mo or +30min")
 	}
-	if !strings.Contains(deferUntilFormatHint, "+3m") {
-		t.Errorf("--until hint should show the month form +3m: %s", deferUntilFormatHint)
+	if !strings.Contains(deferUntilFormatHint, "+3mo") {
+		t.Errorf("--until hint should show the month form +3mo: %s", deferUntilFormatHint)
 	}
 }
 
@@ -44,7 +44,7 @@ func TestDeferUntilFormatHintCoversCompactUnits(t *testing.T) {
 // and asserts the unit set reaches stderr, so dropping the hint from the error
 // fails here rather than only degrading the message.
 func TestDeferUntilRejectionNamesUnitSet(t *testing.T) {
-	if err := deferCmd.Flags().Set("until", "+3mo"); err != nil {
+	if err := deferCmd.Flags().Set("until", "+3mins"); err != nil {
 		t.Fatalf("setting --until: %v", err)
 	}
 	t.Cleanup(func() {
@@ -60,12 +60,12 @@ func TestDeferUntilRejectionNamesUnitSet(t *testing.T) {
 	})
 
 	if err == nil {
-		t.Fatal("expected --until=+3mo to fail")
+		t.Fatal("expected --until=+3mins to fail")
 	}
-	if !strings.Contains(output, `invalid --until format "+3mo"`) {
+	if !strings.Contains(output, `invalid --until format "+3mins"`) {
 		t.Fatalf("expected the rejected value in the error, got: %s", output)
 	}
-	for _, unit := range []string{"min=minutes", "h=hours", "d=days", "w=weeks", "m=months", "y=years"} {
+	for _, unit := range []string{"min=minutes", "h=hours", "d=days", "w=weeks", "mo=months", "y=years"} {
 		if !strings.Contains(output, unit) {
 			t.Errorf("expected the error to name %q, got: %s", unit, output)
 		}
@@ -128,11 +128,11 @@ func TestGatherInputRejectionsNameUnitSet(t *testing.T) {
 	jsonOutput = false
 	t.Cleanup(func() { jsonOutput = prevJSON })
 
-	units := []string{"min=minutes", "h=hours", "d=days", "w=weeks", "m=months", "y=years"}
+	units := []string{"min=minutes", "h=hours", "d=days", "w=weeks", "mo=months", "y=years"}
 
 	assertNamesUnits := func(t *testing.T, flag, output string) {
 		t.Helper()
-		if !strings.Contains(output, `invalid `+flag+` format "+3mo"`) {
+		if !strings.Contains(output, `invalid `+flag+` format "+3mins"`) {
 			t.Fatalf("expected the rejected %s value in the error, got: %s", flag, output)
 		}
 		for _, unit := range units {
@@ -144,13 +144,13 @@ func TestGatherInputRejectionsNameUnitSet(t *testing.T) {
 
 	for _, flag := range []string{"--due", "--defer"} {
 		t.Run("create "+flag, func(t *testing.T) {
-			cmd := newCreateFlagsCommand(t, flag, "+3mo")
+			cmd := newCreateFlagsCommand(t, flag, "+3mins")
 			var err error
 			output := captureStderr(t, func() {
 				_, err = gatherCreateInput(cmd, []string{"title"})
 			})
 			if err == nil {
-				t.Fatalf("expected %s=+3mo to fail", flag)
+				t.Fatalf("expected %s=+3mins to fail", flag)
 			}
 			assertNamesUnits(t, flag, output)
 		})
@@ -160,7 +160,7 @@ func TestGatherInputRejectionsNameUnitSet(t *testing.T) {
 			cmd.Flags().String("due", "", "Due date")
 			cmd.Flags().String("defer", "", "Defer until")
 			cmd.Flags().Bool("json", false, "JSON output")
-			if err := cmd.ParseFlags([]string{flag, "+3mo"}); err != nil {
+			if err := cmd.ParseFlags([]string{flag, "+3mins"}); err != nil {
 				t.Fatalf("parse update flags: %v", err)
 			}
 			var err error
@@ -168,7 +168,7 @@ func TestGatherInputRejectionsNameUnitSet(t *testing.T) {
 				_, err = gatherUpdateInput(t.Context(), cmd)
 			})
 			if err == nil {
-				t.Fatalf("expected %s=+3mo to fail", flag)
+				t.Fatalf("expected %s=+3mins to fail", flag)
 			}
 			assertNamesUnits(t, flag, output)
 		})
@@ -189,7 +189,7 @@ func TestGatherInputRejectionsNameUnitSet(t *testing.T) {
 		cmd.Flags().String("due", "", "Due date")
 		cmd.Flags().String("defer", "", "Defer until")
 		cmd.Flags().Bool("json", false, "JSON output")
-		if err := cmd.ParseFlags([]string{"--defer", "+3mo"}); err != nil {
+		if err := cmd.ParseFlags([]string{"--defer", "+3mins"}); err != nil {
 			t.Fatalf("parse update flags: %v", err)
 		}
 
@@ -199,7 +199,7 @@ func TestGatherInputRejectionsNameUnitSet(t *testing.T) {
 			return nil
 		})
 		if err == nil {
-			t.Fatal("expected --defer=+3mo to fail")
+			t.Fatal("expected --defer=+3mins to fail")
 		}
 
 		var payload struct {
