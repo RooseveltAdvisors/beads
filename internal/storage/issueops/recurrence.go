@@ -175,6 +175,9 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 		return nil, nil, nil
 	}
 	statusList, statusArgs := statusPlaceholders(live)
+	// repeat_window exists on both planes (0076 covers issues and wisps;
+	// 0077 repairs stores that consumed the first cut). Rows written before
+	// the migration carry NULL there, so it must scan into a NullString.
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
 		SELECT id, due_at, repeat_pattern, repeat_start, repeat_end, repeat_window, due_missed, priority
 		FROM %s
@@ -187,12 +190,13 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 	var candidates []dueCandidate
 	for rows.Next() {
 		var c dueCandidate
-		var pattern sql.NullString
+		var pattern, window sql.NullString
 		var start, end sql.NullTime
-		if err := rows.Scan(&c.id, &c.dueAt, &pattern, &start, &end, &c.repeatWindow, &c.dueMissed, &c.priority); err != nil {
+		if err := rows.Scan(&c.id, &c.dueAt, &pattern, &start, &end, &window, &c.dueMissed, &c.priority); err != nil {
 			_ = rows.Close()
 			return nil, nil, fmt.Errorf("due sweep: scan %s row: %w", table, err)
 		}
+		c.repeatWindow = window.String
 		c.repeatPattern = pattern.String
 		if start.Valid {
 			c.repeatStart = &start.Time

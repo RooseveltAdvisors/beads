@@ -379,6 +379,7 @@ var createCmd = &cobra.Command{
 				DueSource:          dueSource,
 				DeferUntil:         deferUntil,
 				RepeatPattern:      repeat.pattern,
+				RepeatWindow:       repeat.window,
 				RepeatStart:        repeat.start,
 				RepeatEnd:          repeat.end,
 				Metadata:           metadata,
@@ -584,6 +585,7 @@ var createCmd = &cobra.Command{
 			DueSource:          dueSource,
 			DeferUntil:         deferUntil,
 			RepeatPattern:      repeat.pattern,
+			RepeatWindow:       repeat.window,
 			RepeatStart:        repeat.start,
 			RepeatEnd:          repeat.end,
 			Metadata:           metadata,
@@ -734,6 +736,7 @@ type createIssueParams struct {
 	DueSource          types.DueSource
 	DeferUntil         *time.Time
 	RepeatPattern      string
+	RepeatWindow       string `json:"repeat_window,omitempty"`
 	RepeatStart        *time.Time
 	RepeatEnd          *time.Time
 	Metadata           json.RawMessage
@@ -877,6 +880,7 @@ func buildCreateIssue(params createIssueParams) *types.Issue {
 		DueSource:          params.DueSource,
 		DeferUntil:         params.DeferUntil,
 		RepeatPattern:      params.RepeatPattern,
+		RepeatWindow:       params.RepeatWindow,
 		RepeatStart:        params.RepeatStart,
 		RepeatEnd:          params.RepeatEnd,
 		Metadata:           params.Metadata,

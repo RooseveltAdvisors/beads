@@ -609,6 +609,7 @@ func encodeApplyPatch(patch issueops.IssuePatch) (map[string]any, error) {
 	setNullableTime(out, "due_at", patch.DueAt)
 	setNullableTime(out, "defer_until", patch.DeferUntil)
 	setString(out, "repeat_pattern", patch.RepeatPattern)
+	setString(out, "repeat_window", patch.RepeatWindow)
 	setNullableTime(out, "repeat_start", patch.RepeatStart)
 	setNullableTime(out, "repeat_end", patch.RepeatEnd)
 

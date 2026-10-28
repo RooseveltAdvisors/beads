@@ -50,6 +50,7 @@ type GraphApplyNode struct {
 	DueAt              *time.Time                 `json:"due_at,omitempty"`            // RFC3339
 	DeferUntil         *time.Time                 `json:"defer_until,omitempty"`       // RFC3339
 	RepeatPattern      string                     `json:"repeat_pattern,omitempty"`    // interval (+1w) or 5-field cron (0 9 * * 1)
+	RepeatWindow       string                     `json:"repeat_window,omitempty"`     // "HH:MM-HH:MM IANA/Zone"
 	RepeatStart        *time.Time                 `json:"repeat_start,omitempty"`      // RFC3339
 	RepeatEnd          *time.Time                 `json:"repeat_end,omitempty"`        // RFC3339
 	DueSource          types.DueSource            `json:"due_source,omitempty"`        // provenance of due_at: explicit | default

@@ -109,7 +109,7 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	var storageClass sql.NullString // storage_class column (migration 0060); NULL = unset, resolves per EffectiveStorageClass
 	// Recurrence columns (migration 0067); scanned defensively so a row written
 	// before the migration's DEFAULT '' took effect maps to the empty rule.
-	var repeatPattern, dueSource sql.NullString
+	var repeatPattern, repeatWindow, dueSource sql.NullString
 	var dueMissed sql.NullInt64
 	var repeatStart, repeatEnd sql.NullTime
 
@@ -123,7 +123,7 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 		&awaitType, &awaitID, &timeoutNs, &waiters,
 		&molType,
 		&eventKind, &actor, &target, &payload,
-		&dueAt, &deferUntil, &repeatPattern, &repeatStart, &repeatEnd, &dueSource, &dueMissed,
+		&dueAt, &deferUntil, &repeatPattern, &repeatWindow, &repeatStart, &repeatEnd, &dueSource, &dueMissed,
 		&workType, &sourceSystem, &metadata, &rowLock, &storageClass, &assigneeID,
 		&leaseExpiresAt, &heartbeatAt, &leaseGrantedNode,
 	}
@@ -246,6 +246,9 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	if repeatPattern.Valid {
 		issue.RepeatPattern = repeatPattern.String
 	}
+	if repeatWindow.Valid {
+		issue.RepeatWindow = repeatWindow.String
+	}
 	if repeatStart.Valid {
 		issue.RepeatStart = &repeatStart.Time
 	}
@@ -316,7 +319,7 @@ func ScanIssueLiteFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	var storageClass sql.NullString // storage_class column (migration 0060); NULL = unset, resolves per EffectiveStorageClass
 	// Recurrence columns (migration 0067); scanned defensively so a row written
 	// before the migration's DEFAULT '' took effect maps to the empty rule.
-	var repeatPattern, dueSource sql.NullString
+	var repeatPattern, repeatWindow, dueSource sql.NullString
 	var dueMissed sql.NullInt64
 	var repeatStart, repeatEnd sql.NullTime
 
@@ -330,7 +333,7 @@ func ScanIssueLiteFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 		&awaitType, &awaitID, &timeoutNs,
 		&molType,
 		&eventKind, &actor, &target,
-		&dueAt, &deferUntil, &repeatPattern, &repeatStart, &repeatEnd, &dueSource, &dueMissed,
+		&dueAt, &deferUntil, &repeatPattern, &repeatWindow, &repeatStart, &repeatEnd, &dueSource, &dueMissed,
 		&workType, &sourceSystem, &metadata, &rowLock, &storageClass, &assigneeID,
 		&leaseExpiresAt, &heartbeatAt, &leaseGrantedNode,
 	}
@@ -443,6 +446,9 @@ func ScanIssueLiteFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	}
 	if repeatPattern.Valid {
 		issue.RepeatPattern = repeatPattern.String
+	}
+	if repeatWindow.Valid {
+		issue.RepeatWindow = repeatWindow.String
 	}
 	if repeatStart.Valid {
 		issue.RepeatStart = &repeatStart.Time

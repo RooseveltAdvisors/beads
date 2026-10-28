@@ -574,6 +574,9 @@ type ApplyCreateItem struct {
 	// RepeatStart RFC 3339. Earliest occurrence of a recurring bead. Absent means unbounded. Requires `repeat_pattern`. Advertised by the `issues.create.repeat` capability token.
 	RepeatStart *time.Time `json:"repeat_start,omitempty"`
 
+	// RepeatWindow Quiet window for the recurrence ("HH:MM-HH:MM IANA/Zone"). Outside it the bead is deliberately silent: the sweep does not fire it and the nag checkers stay quiet. Empty means always live. Advertised by the `issues.create.repeat` capability token.
+	RepeatWindow *string `json:"repeat_window,omitempty"`
+
 	// Sender Who sent this, for the message-shaped rows a plan creates. Stored verbatim and interpreted by nothing on this surface.
 	Sender *string `json:"sender,omitempty"`
 
@@ -800,11 +803,14 @@ type ApplyPatchBody struct {
 	// RepeatEnd RFC 3339. Explicit `null` CLEARS the end bound.
 	RepeatEnd *time.Time `json:"repeat_end,omitempty"`
 
-	// RepeatPattern Recurrence rule: an interval (`+1d`, `+2w`) or a five-field cron expression (`0 9 * * 1`). An EMPTY STRING stops the series; the bead keeps its own due date.
+	// RepeatPattern Recurrence rule: an interval (`+1d`, `+2w`) or a five-field cron
 	RepeatPattern *string `json:"repeat_pattern,omitempty"`
 
 	// RepeatStart RFC 3339. Explicit `null` CLEARS the start bound.
 	RepeatStart *time.Time `json:"repeat_start,omitempty"`
+
+	// RepeatWindow Quiet window for the recurrence ("HH:MM-HH:MM IANA/Zone"). Outside it the bead is deliberately silent: the sweep does not fire it and the nag checkers stay quiet. Empty means always live. Advertised by the `issues.create.repeat` capability token.
+	RepeatWindow *string `json:"repeat_window,omitempty"`
 
 	// Status The issue's status, from this workspace's own configured vocabulary.
 	//
@@ -1394,6 +1400,9 @@ type CreateIssueRequest struct {
 	// RepeatStart RFC 3339. Earliest occurrence of a recurring bead. Absent means unbounded. Requires `repeat_pattern`. Advertised by the `issues.create.repeat` capability token.
 	RepeatStart *time.Time `json:"repeat_start,omitempty"`
 
+	// RepeatWindow Quiet window for the recurrence ("HH:MM-HH:MM IANA/Zone"). Outside it the bead is deliberately silent: the sweep does not fire it and the nag checkers stay quiet. Empty means always live. Advertised by the `issues.create.repeat` capability token.
+	RepeatWindow *string `json:"repeat_window,omitempty"`
+
 	// Sender Who sent this, for the message-shaped rows an orchestrator creates. Stored verbatim and interpreted by nothing on this surface.
 	Sender *string `json:"sender,omitempty"`
 
@@ -1729,6 +1738,9 @@ type IssuePatchBody struct {
 
 	// RepeatStart RFC 3339. Explicit `null` CLEARS the start bound.
 	RepeatStart *time.Time `json:"repeat_start,omitempty"`
+
+	// RepeatWindow Quiet window for the recurrence ("HH:MM-HH:MM IANA/Zone"). Outside it the bead is deliberately silent: the sweep does not fire it and the nag checkers stay quiet. Empty means always live. Advertised by the `issues.create.repeat` capability token.
+	RepeatWindow *string `json:"repeat_window,omitempty"`
 
 	// Status The issue's status, from this workspace's own configured vocabulary.
 	//

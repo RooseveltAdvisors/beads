@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -120,6 +121,32 @@ func TestEmbeddedDueSweepFiresAndEscalates(t *testing.T) {
 		after := bdShow(t, bd, dir, issue.ID)
 		if after.DueSource != "repeat" {
 			t.Errorf("due_source = %q, want repeat (the pattern computed the new date, not the grace push)", after.DueSource)
+		}
+	})
+
+	t.Run("a recurring bead outside its quiet window does not fire", func(t *testing.T) {
+		dir, _, _ := bdInit(t, bd, "--prefix", "dw")
+		// A window 12 hours away from now in UTC: guaranteed quiet at run time.
+		h := time.Now().UTC().Add(12 * time.Hour).Hour()
+		quiet := fmt.Sprintf("%02d:00-%02d:30 UTC", h, h)
+		issue := bdCreate(t, bd, dir, "Night shift", "--type", "chore",
+			"--due", pastDue(), "--repeat", "+1h", "--window", quiet)
+		report := bdDueSweep(t, bd, dir)
+		if containsString(report.DueIDs, issue.ID) {
+			t.Fatalf("due sweep fired %s outside its window %s; report = %+v", issue.ID, quiet, report)
+		}
+	})
+
+	t.Run("a recurring bead inside its window fires", func(t *testing.T) {
+		dir, _, _ := bdInit(t, bd, "--prefix", "dl")
+		// A window covering now in UTC: guaranteed live at run time.
+		h := time.Now().UTC().Hour()
+		live := fmt.Sprintf("%02d:00-%02d:59 UTC", h, h)
+		issue := bdCreate(t, bd, dir, "Day shift", "--type", "chore",
+			"--due", pastDue(), "--repeat", "+1h", "--window", live)
+		report := bdDueSweep(t, bd, dir)
+		if !containsString(report.DueIDs, issue.ID) {
+			t.Fatalf("due sweep did not fire %s inside its window %s; report = %+v", issue.ID, live, report)
 		}
 	})
 

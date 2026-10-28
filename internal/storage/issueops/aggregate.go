@@ -74,6 +74,7 @@ func UpdateFields(patch publicops.IssuePatch) map[string]interface{} {
 		{patch.DueAt.Set, "due_at", patch.DueAt.Value},
 		{patch.DeferUntil.Set, "defer_until", patch.DeferUntil.Value},
 		{patch.RepeatPattern.Set, "repeat_pattern", patch.RepeatPattern.Value},
+		{patch.RepeatWindow.Set, "repeat_window", patch.RepeatWindow.Value},
 		{patch.RepeatStart.Set, "repeat_start", patch.RepeatStart.Value},
 		{patch.RepeatEnd.Set, "repeat_end", patch.RepeatEnd.Value},
 	} {

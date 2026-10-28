@@ -799,6 +799,11 @@ func buildUpdatePatch(updates map[string]interface{}) (issueops.IssuePatch, erro
 			if pattern, ok = stringField(value); ok {
 				patch.RepeatPattern = pattern
 			}
+		case "repeat_window":
+			var window issueops.Field[string]
+			if window, ok = stringField(value); ok {
+				patch.RepeatWindow = window
+			}
 		case "repeat_start":
 			patch.RepeatStart, ok = optionalTimeField(value)
 		case "repeat_end":

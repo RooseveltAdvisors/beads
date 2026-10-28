@@ -7727,6 +7727,13 @@ components:
             unless the series is ended first (empty repeat_pattern) or the
             workspace disables the guard; with the guard off, closing spawns
             the next instance.
+        repeat_window:
+          type: string
+          description: >-
+            Quiet window for the recurrence ("HH:MM-HH:MM IANA/Zone").
+            Outside it the bead is deliberately silent: the sweep does not
+            fire it and the nag checkers stay quiet. Empty means always live.
+            Advertised by the `issues.create.repeat` capability token.
         repeat_start:
           type: string
           format: date-time
@@ -8123,6 +8130,7 @@ components:
         due_at: { type: string, format: date-time }
         defer_until: { type: string, format: date-time }
         repeat_pattern: { type: string }
+        repeat_window: { type: string, description: "Quiet window for the recurrence: HH:MM-HH:MM IANA/Zone. Empty means always live." }
         repeat_start: { type: string, format: date-time }
         repeat_end: { type: string, format: date-time }
         due_source: { type: string }
@@ -8240,6 +8248,7 @@ components:
         due_at: { type: string, format: date-time }
         defer_until: { type: string, format: date-time }
         repeat_pattern: { type: string }
+        repeat_window: { type: string, description: "Quiet window for the recurrence: HH:MM-HH:MM IANA/Zone. Empty means always live." }
         repeat_start: { type: string, format: date-time }
         repeat_end: { type: string, format: date-time }
         due_source: { type: string }
@@ -8484,6 +8493,7 @@ components:
         due_at: { type: string, format: date-time }
         defer_until: { type: string, format: date-time }
         repeat_pattern: { type: string }
+        repeat_window: { type: string, description: "Quiet window for the recurrence: HH:MM-HH:MM IANA/Zone. Empty means always live." }
         repeat_start: { type: string, format: date-time }
         repeat_end: { type: string, format: date-time }
         due_source: { type: string }
@@ -8576,6 +8586,7 @@ components:
         due_at: { type: string, format: date-time }
         defer_until: { type: string, format: date-time }
         repeat_pattern: { type: string }
+        repeat_window: { type: string, description: "Quiet window for the recurrence: HH:MM-HH:MM IANA/Zone. Empty means always live." }
         repeat_start: { type: string, format: date-time }
         repeat_end: { type: string, format: date-time }
         due_source: { type: string }
@@ -10120,6 +10131,7 @@ components:
         assignee: { type: string }
         assignee_id: { type: string, description: Immutable registered seat identity. }
         repeat_pattern: { type: string }
+        repeat_window: { type: string, description: "Quiet window for the recurrence: HH:MM-HH:MM IANA/Zone. Empty means always live." }
         repeat_start: { type: string, format: date-time }
         repeat_end: { type: string, format: date-time }
         due_source: { type: string }
@@ -11347,6 +11359,13 @@ components:
             guard off, closing spawns the next instance. Absent or empty means
             the bead does not repeat.
             Advertised by the `issues.create.repeat` capability token.
+        repeat_window:
+          type: string
+          description: >-
+            Quiet window for the recurrence ("HH:MM-HH:MM IANA/Zone").
+            Outside it the bead is deliberately silent: the sweep does not
+            fire it and the nag checkers stay quiet. Empty means always live.
+            Advertised by the `issues.create.repeat` capability token.
         repeat_start:
           type: string
           format: date-time
@@ -11674,8 +11693,13 @@ components:
           maxLength: 255
           description: >-
             Recurrence rule: an interval (`+1d`, `+2w`) or a five-field cron
-            expression (`0 9 * * 1`). An EMPTY STRING stops the series; the
-            bead keeps its own due date.
+        repeat_window:
+          type: string
+          description: >-
+            Quiet window for the recurrence ("HH:MM-HH:MM IANA/Zone").
+            Outside it the bead is deliberately silent: the sweep does not
+            fire it and the nag checkers stay quiet. Empty means always live.
+            Advertised by the `issues.create.repeat` capability token.
         repeat_start:
           type: string
           format: date-time
@@ -13384,6 +13408,13 @@ components:
           format: date-time
           nullable: true
           description: 'RFC 3339. Explicit `null` CLEARS the deferral.'
+        repeat_window:
+          type: string
+          description: >-
+            Quiet window for the recurrence ("HH:MM-HH:MM IANA/Zone").
+            Outside it the bead is deliberately silent: the sweep does not
+            fire it and the nag checkers stay quiet. Empty means always live.
+            Advertised by the `issues.create.repeat` capability token.
         repeat_pattern:
           type: string
           maxLength: 255
@@ -13634,6 +13665,13 @@ components:
             repeat_pattern) or the workspace disables the guard; with the
             guard off, closing spawns the next instance. Absent or empty means
             the bead does not repeat.
+            Advertised by the `issues.create.repeat` capability token.
+        repeat_window:
+          type: string
+          description: >-
+            Quiet window for the recurrence ("HH:MM-HH:MM IANA/Zone").
+            Outside it the bead is deliberately silent: the sweep does not
+            fire it and the nag checkers stay quiet. Empty means always live.
             Advertised by the `issues.create.repeat` capability token.
         repeat_start:
           type: string

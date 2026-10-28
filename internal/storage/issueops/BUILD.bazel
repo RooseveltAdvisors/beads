@@ -208,6 +208,7 @@ go_test(
         "recurrence_close_guard_test.go",
         "recurrence_test.go",
         "reopen_test.go",
+        "repeat_window_quiet_test.go",
         "role_requests_test.go",
         "row_lock_guard_test.go",
         "scan_test.go",
