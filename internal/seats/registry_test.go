@@ -1,10 +1,13 @@
 package seats
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestSeatRenameChangesOneRow(t *testing.T) {
@@ -55,6 +58,85 @@ func TestSeatRestartKeepsIdentity(t *testing.T) {
 	loaded, err := Load(dir)
 	if err != nil || !reflect.DeepEqual(loaded, r) {
 		t.Fatalf("round trip: %v %v", loaded, err)
+	}
+}
+
+func TestMintMintsImmutableUUIDGuardedByToken(t *testing.T) {
+	r := Registry{}
+	now := time.Now().UTC()
+	id, token, err := r.Mint([]string{"worker"}, Endpoint{Session: "s", PaneID: "p1", AgentSessionID: "session-1"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		t.Fatalf("minted id %q is not a uuid: %v", id, err)
+	}
+	if token == "" || r[id].TokenSHA256 == "" || r[id].TokenSHA256 == token {
+		t.Fatal("mint must return a bearer token and store only its hash")
+	}
+
+	// The unauthenticated register path refuses a token-protected seat.
+	if err := r.Register(id, nil, Endpoint{Session: "s2", PaneID: "evil"}, now); err == nil {
+		t.Fatal("token-protected seat accepted an unauthenticated re-register")
+	}
+	// A wrong token refuses and moves nothing.
+	if err := r.RebindWithToken(id, Endpoint{Session: "s2", PaneID: "evil"}, "wrong", now); err == nil {
+		t.Fatal("wrong token accepted")
+	}
+	if r[id].Endpoint.PaneID != "p1" {
+		t.Fatalf("refused rebind moved the endpoint to %s", r[id].Endpoint.PaneID)
+	}
+	// The right token re-asserts the endpoint; uuid and aliases never change.
+	if err := r.RebindWithToken(id, Endpoint{Session: "s2", PaneID: "p2", AgentSessionID: "session-2"}, token, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if r[id].Endpoint.PaneID != "p2" || len(r[id].Aliases) != 1 || r[id].Aliases[0] != "worker" {
+		t.Fatalf("rebind churned identity: %+v", r[id])
+	}
+	// The uuid survives a save/load round trip with its protection intact.
+	dir := t.TempDir()
+	if err := Save(dir, r); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(dir)
+	if err != nil || !reflect.DeepEqual(loaded, r) {
+		t.Fatalf("round trip: %v %v", loaded, err)
+	}
+	// Re-registration never invents an identity.
+	if err := r.RebindWithToken(uuid.NewString(), Endpoint{Session: "s", PaneID: "p"}, token, now); err == nil {
+		t.Fatal("unknown uuid accepted at rebind")
+	}
+}
+
+func TestAgentStateRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "agent-state.json")
+	st := AgentState{AgentUUID: uuid.NewString(), Alias: "worker", RebindToken: "tok"}
+	if err := WriteState(path, st); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("state file mode = %o, want 0600 (it carries a bearer token)", info.Mode().Perm())
+	}
+	got, err := ReadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AgentUUID != st.AgentUUID || got.RebindToken != st.RebindToken || got.MintedAt == "" || got.UpdatedAt == "" {
+		t.Fatalf("round trip: %+v", got)
+	}
+	if _, err := ReadState(filepath.Join(t.TempDir(), "absent.json")); !os.IsNotExist(err) {
+		t.Fatalf("missing state error = %v, want os.ErrNotExist", err)
+	}
+	corrupt := filepath.Join(t.TempDir(), "corrupt.json")
+	if err := os.WriteFile(corrupt, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadState(corrupt); err == nil || os.IsNotExist(err) {
+		t.Fatalf("corrupt state error = %v, want a refusal that is not not-exist", err)
 	}
 }
 

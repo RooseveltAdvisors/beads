@@ -4,6 +4,9 @@ package seats
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +14,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const File = "seats.json"
@@ -38,6 +43,12 @@ type Seat struct {
 	UpdatedAt    time.Time  `json:"updated_at"`
 	LastSeenAt   time.Time  `json:"last_seen_at,omitempty"`
 	MissingSince *time.Time `json:"missing_since,omitempty"`
+	// TokenSHA256 is the hash of the rebind token minted with the seat. The
+	// bearer token itself is never stored here: it lives only in the agent's
+	// durable state, so a shell that can read the registry still cannot
+	// re-register the seat. Empty means the seat was registered by an
+	// operator by hand and rebinds are unauthenticated.
+	TokenSHA256 string `json:"token_sha256,omitempty"`
 }
 
 type Registry map[string]Seat
@@ -179,6 +190,9 @@ func Save(dir string, r Registry) error {
 }
 
 // Register rebinds an existing ID on restart without changing its aliases.
+// A token-protected seat (one Mint created) refuses this path: rebinding it
+// requires the rebind token from the agent's durable state, so a foreign
+// shell that knows the uuid still cannot take the seat over.
 func (r Registry) Register(id string, aliases []string, endpoint Endpoint, now time.Time) error {
 	if err := ValidateID(id); err != nil {
 		return err
@@ -187,6 +201,9 @@ func (r Registry) Register(id string, aliases []string, endpoint Endpoint, now t
 		return fmt.Errorf("registration requires an exact endpoint session and pane id")
 	}
 	old, exists := r[id]
+	if exists && old.TokenSHA256 != "" {
+		return fmt.Errorf("seat %s is token-protected: re-register with the durable state (bd seat register --state ...)", id)
+	}
 	if exists && len(aliases) > 0 {
 		return fmt.Errorf("seat %s already exists: re-register without --alias; use rename to change aliases", id)
 	}
@@ -208,6 +225,79 @@ func (r Registry) Register(id string, aliases []string, endpoint Endpoint, now t
 		}
 		return err
 	}
+	return nil
+}
+
+func hashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+// mintToken returns a fresh random rebind token. The token is the only proof
+// that a re-registering process is the agent the uuid was minted for.
+func mintToken() (string, error) {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("mint rebind token: %w", err)
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
+// Mint creates a seat under a fresh uuid and returns the uuid and its rebind
+// token. The uuid is the immutable identity: it is generated here, never
+// derived from a pane, tab, or session, and no later call changes it. The
+// registry stores only the token hash; the caller persists the token in the
+// agent's durable state and presents it on every re-registration.
+func (r Registry) Mint(aliases []string, endpoint Endpoint, now time.Time) (id string, token string, err error) {
+	if endpoint.Session == "" || endpoint.PaneID == "" {
+		return "", "", fmt.Errorf("registration requires an exact endpoint session and pane id")
+	}
+	if len(aliases) == 0 {
+		return "", "", fmt.Errorf("mint requires at least one alias (first is the display name)")
+	}
+	id = uuid.NewString()
+	token, err = mintToken()
+	if err != nil {
+		return "", "", err
+	}
+	r[id] = Seat{
+		Aliases:     aliases,
+		Session:     endpoint.AgentSessionID,
+		Endpoint:    endpoint,
+		Liveness:    Live,
+		UpdatedAt:   now.UTC(),
+		LastSeenAt:  now.UTC(),
+		TokenSHA256: hashToken(token),
+	}
+	if err := r.Validate(); err != nil {
+		delete(r, id)
+		return "", "", err
+	}
+	return id, token, nil
+}
+
+// RebindWithToken re-asserts the endpoint of an existing seat. The seat id
+// and its aliases do not change. When the seat is token-protected the
+// presented token must hash to the stored digest; a mismatch refuses the
+// rebind and leaves the registry untouched, which is the foreign-shell case:
+// a process that never held the durable state cannot claim the uuid.
+func (r Registry) RebindWithToken(id string, endpoint Endpoint, token string, now time.Time) error {
+	if err := ValidateID(id); err != nil {
+		return err
+	}
+	if endpoint.Session == "" || endpoint.PaneID == "" {
+		return fmt.Errorf("registration requires an exact endpoint session and pane id")
+	}
+	old, ok := r[id]
+	if !ok {
+		return fmt.Errorf("unknown seat id %q: identity is minted once and never invented at rebind", id)
+	}
+	if old.TokenSHA256 != "" && hashToken(strings.TrimSpace(token)) != old.TokenSHA256 {
+		return fmt.Errorf("seat %s: rebind token mismatch; only the agent holding the durable state can re-register this identity", id)
+	}
+	old.Endpoint, old.Session = endpoint, endpoint.AgentSessionID
+	old.Liveness, old.UpdatedAt, old.LastSeenAt, old.MissingSince = Live, now.UTC(), now.UTC(), nil
+	r[id] = old
 	return nil
 }
 

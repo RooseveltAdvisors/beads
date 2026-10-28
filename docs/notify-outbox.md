@@ -3,8 +3,16 @@
 ## Thesis
 
 Beads owns **time** (due/repeat/sweep) and **delivery ledger** (seat-addressed outbox).
-Assignee is a stable **seat identity**. Drain delivers only to an exact endpoint
-(`.beads/notify/seats.json`: herdr session + pane id, or agent session id).
+Assignee is a durable **agent identity**: one immutable uuid per agent, minted once at
+first registration (`bd seat register --state <path>` with no seat id) and stored in the
+seat registry row and the agent's own durable state file. The uuid is never derived from
+a pane, tab, or session; the human name lives on the uuid as a mutable alias.
+Endpoints are disposable: on every start the agent re-registers under its uuid
+(same command, readable state file present), the endpoint re-asserts, and the uuid
+never changes. Senders address the uuid (or an alias, resolved exactly); drain resolves
+the uuid to the live endpoint at send time and holds the row when it does not resolve.
+Re-registration of a minted uuid requires the rebind token from the agent's durable
+state, so a foreign shell that merely knows the uuid cannot take the seat over.
 A workspace that has not migrated yet still reads its legacy
 `.beads/notify/pins.json` (see `bd seat import-pins`), so upgrading never
 turns working pins into no-pin holds.
@@ -52,6 +60,9 @@ that is not per-bead seat delivery.
 - `bd notify ack --seat S --upto N`
 - `bd notify seats`
 - `bd notify resolve --seat S` - human diagnostic only (fuzzy lookalike is not delivery)
+- `bd seat register --state <path> [--alias name] --session S --pane P` - mint once, re-register on every start (default state path: `$BEADS_AGENT_STATE`)
+- `bd seat register <seat-id> ...` - operator path for hand-named seats (refused for minted, token-protected uuids)
+- `bd seat rename <seat-id> --alias ...` / `bd seat list` / `bd seat unbind <seat-id>`
 
 ## Exact pin delivery
 
