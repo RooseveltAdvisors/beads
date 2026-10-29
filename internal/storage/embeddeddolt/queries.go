@@ -22,6 +22,7 @@ func (s *EmbeddedDoltStore) WakeExpiredDefersAdvisory(ctx context.Context) {
 }
 
 var _ storage.ExpiredDeferWaker = (*EmbeddedDoltStore)(nil)
+var _ storage.DescendantSearcher = (*EmbeddedDoltStore)(nil)
 
 // runScheduledSweeps runs the lazy time-based sweeps — defer wake and due
 // trigger (issueops.RunScheduledSweepsInTx) — in one write transaction before

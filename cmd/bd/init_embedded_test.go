@@ -107,17 +107,24 @@ func buildEmbeddedBD(t *testing.T) string {
 	return embeddedBD
 }
 
+// bdEnv builds a hermetic subprocess environment for the embedded bd binary.
+//
+// BEADS_* and BD_ROUTING_MODE never cross: viper reads BD_<KEY> above
+// config.yaml and an agent host exports BD_ROUTING_MODE, either of which would
+// override the workspace a test then asserts on. A BD_ var this process
+// INHERITED is dropped for the same reason (BD_JSON_ENVELOPE=1 nests the
+// payload under `data`, so a leak from a shell could turn a green suite red —
+// or, worse, green for the wrong reason); that is the guard the strict strip
+// added, kept here. A BD_ var set AFTER the snapshot is the suite's own
+// control and is forwarded: TestMain's package-wide BD_CREATE_DEDUP_CHECK=false
+// (duplicate blocking is this fork's feature and most suites make near-identical
+// fixtures on purpose; the create_dedup tests clear it to exercise the default),
+// its freeze-file pin, and a test's t.Setenv ceiling such as
+// BD_CREATE_MAX_OPEN_PER_ASSIGNEE. Stripping THOSE silently turned dedup on and
+// the ceilings off for every subprocess suite, which is not what any of those
+// tests were written to observe.
 func bdEnv(dir string) []string {
-	var env []string
-	for _, e := range os.Environ() {
-		// Viper reads BD_<KEY> above config.yaml, and agent hosts export
-		// BD_ROUTING_MODE, which overrides the routing.mode a test's
-		// workspace holds.
-		if strings.HasPrefix(e, "BEADS_") || strings.HasPrefix(e, "BD_ROUTING_MODE=") {
-			continue
-		}
-		env = append(env, e)
-	}
+	env := filterAmbientEnv(os.Environ())
 	return append(env,
 		"HOME="+dir,
 		"BEADS_DOLT_AUTO_START=0",

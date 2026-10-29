@@ -49,14 +49,12 @@ func requireSocat(t *testing.T) {
 	}
 }
 
+// bdProxiedEnv is bdEnv's proxied twin and filters the same way
+// (filterAmbientEnv): an inherited BD_* var must not reshape the output these
+// tests assert on, while a BD_* the suite itself set stays. The two fixed
+// BD_/BEADS_ values below are re-added below.
 func bdProxiedEnv(dir string) []string {
-	var env []string
-	for _, e := range os.Environ() {
-		if strings.HasPrefix(e, "BEADS_") {
-			continue
-		}
-		env = append(env, e)
-	}
+	env := filterAmbientEnv(os.Environ())
 	return append(env,
 		"HOME="+dir,
 		"BEADS_DOLT_PROXIED_SERVER=1",

@@ -213,6 +213,7 @@ class UpdateIssueParams(BaseModel):
     force_no_due: bool = False
     clear_due_reason: str | None = None
     repeat: str | None = None
+    defer_until: str | None = None  # "" clears it, as `bd update --defer ""` does
 
 
 class ClaimIssueParams(BaseModel):
