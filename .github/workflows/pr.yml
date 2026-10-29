@@ -70,7 +70,7 @@ jobs:
   # out.
   scope:
     name: Scope
-    runs-on: ubuntu-latest  # blacksmith pool queues PR jobs for hours; moved 2026-10-13 precedent (bazel.yml)
+    runs-on: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) && 'ubuntu-latest' || 'ubuntu-latest' }}  # label swapped off the blacksmith pool (queues PR jobs for hours; 2026-10-13)
     timeout-minutes: 5
     permissions:
       contents: read
