@@ -62,7 +62,7 @@ that is not per-bead seat delivery.
 - `bd notify resolve --seat S` - human diagnostic only (fuzzy lookalike is not delivery)
 - `bd seat register --state <path> [--alias name] --session S --pane P` - mint once, re-register on every start (default state path: `$BEADS_AGENT_STATE`)
 - `bd seat register <seat-id> ...` - operator path for hand-named seats (refused for minted, token-protected uuids)
-- `bd seat rename <seat-id> --alias ...` / `bd seat list` / `bd seat unbind <seat-id>`
+- `bd seat rename <seat-id> --alias ...` / `bd seat list` / `bd seat delete <seat-id>` (dead rows only; frees a legacy name for a minted uuid) / `bd seat unbind <seat-id>`
 
 ## Exact pin delivery
 
