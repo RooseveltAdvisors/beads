@@ -268,6 +268,14 @@ func init() {
 		return nil
 	})
 	importPins.Args = cobra.NoArgs
+	deleteCmd := registryCommand("delete <seat-id>", "Remove a dead seat row; frees a legacy name-keyed row's name for a minted uuid", func(cmd *cobra.Command, args []string, o *notify.Outbox, r seats.Registry) error {
+		CheckReadonly("seat delete")
+		return seats.Update(o.Dir(), func(current seats.Registry) error {
+			return current.Delete(args[0])
+		})
+	})
+	deleteCmd.Args = cobra.ExactArgs(1)
+
 	unbind := registryCommand("unbind <seat-id>", "Mark a seat endpoint dead while retaining its immutable identity", func(cmd *cobra.Command, args []string, o *notify.Outbox, r seats.Registry) error {
 		CheckReadonly("seat unbind")
 		return seats.Update(o.Dir(), func(current seats.Registry) error {
@@ -284,6 +292,6 @@ func init() {
 		})
 	})
 	unbind.Args = cobra.ExactArgs(1)
-	seatCmd.AddCommand(register, rename, list, reconcile, unbind, importPins, seatBackfillCmd)
+	seatCmd.AddCommand(register, rename, list, reconcile, unbind, deleteCmd, importPins, seatBackfillCmd)
 	rootCmd.AddCommand(seatCmd)
 }

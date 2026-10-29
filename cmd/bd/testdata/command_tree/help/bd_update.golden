@@ -50,7 +50,7 @@ Flags:
       --parent string                New parent issue ID (reparents the issue, use empty string to remove parent)
       --persistent                   Mark issue as persistent (promote wisp to regular issue)
   -p, --priority string              Priority (0-4 or P0-P4, 0=highest)
-      --reason string                Why the due date is being cleared (required with --force-no-due)
+      --reason string                Why the change is being made. Required when clearing a due date (--force-no-due) and when changing --assignee (the reassignment trail).
       --remove-label strings         Remove labels (repeatable)
       --repeat string                Recurrence rule, empty to stop repeating: an interval (+1d, +2w) or 5-field cron ("0 9 * * 1")
       --repeat-end string            Last occurrence (empty to clear). Same formats as --due

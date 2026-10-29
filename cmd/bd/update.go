@@ -204,6 +204,14 @@ pointless).`,
 		}
 		if cmd.Flags().Changed("assignee") {
 			assignee, _ := cmd.Flags().GetString("assignee")
+			// The last inch of the assignee class: every owner change is
+			// explicit and reviewable. A reassignment without a stated
+			// reason is refused, so no bead can silently change hands and
+			// no wrong-owner routing can land without a trail.
+			reason, _ := cmd.Flags().GetString("reason")
+			if strings.TrimSpace(reason) == "" {
+				return HandleErrorRespectJSON("reassigning an assignee requires --reason: say why the owner changed")
+			}
 			updates["assignee"] = assignee
 		}
 		description, descChanged, err := getDescriptionFlag(cmd)
@@ -1164,7 +1172,7 @@ func init() {
 	updateCmd.Flags().String("due", "", "Due date/time (empty to clear). Formats: +6h, +1d, +2w, tomorrow, next monday, 2025-01-15")
 	registerRecurrenceUpdateFlags(updateCmd)
 	updateCmd.Flags().Bool("force-no-due", false, "Permit --due=\"\" to clear the due date when due.required is on. Requires --reason")
-	updateCmd.Flags().String("reason", "", "Why the due date is being cleared (required with --force-no-due)")
+	updateCmd.Flags().String("reason", "", "Why the change is being made. Required when clearing a due date (--force-no-due) and when changing --assignee (the reassignment trail).")
 	updateCmd.Flags().String("defer", "", "Defer until date (empty to clear). Issue hidden from bd ready until then, then auto-wakes to open")
 	// Gate fields (bd-z6kw)
 	updateCmd.Flags().String("await-id", "", "Set gate await_id (e.g., GitHub run ID for gh:run gates)")

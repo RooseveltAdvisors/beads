@@ -198,3 +198,38 @@ func TestResolveAdmitsMachineActors(t *testing.T) {
 		}
 	}
 }
+
+// TestDeleteRefusesLiveAndFreesName pins the delete contract: only dead rows
+// go, and a deleted legacy row's name is free for a mint with that alias.
+func TestDeleteRefusesLiveAndFreesName(t *testing.T) {
+	now := time.Now().UTC()
+	r := Registry{}
+	endpoint := Endpoint{Session: "s", PaneID: "w1:p1", AgentSessionID: "/tmp/a.jsonl"}
+	if err := r.Register("legacy-seat", []string{"beads"}, endpoint, now); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if err := r.Delete("legacy-seat"); err == nil {
+		t.Error("delete of a live seat parsed, want the liveness refusal")
+	}
+	if err := r.Delete("missing"); err == nil {
+		t.Error("delete of an unknown id parsed, want unknown seat id")
+	}
+	// Unbind marks dead without dropping identity; delete then removes it.
+	seat := r["legacy-seat"]
+	seat.Liveness = Dead
+	r["legacy-seat"] = seat
+	if err := r.Delete("legacy-seat"); err != nil {
+		t.Fatalf("delete of a dead seat: %v", err)
+	}
+	if _, ok := r["legacy-seat"]; ok {
+		t.Error("row still present after delete")
+	}
+	// The freed alias now mints.
+	id, _, err := r.Mint([]string{"beads"}, endpoint, now)
+	if err != nil {
+		t.Fatalf("mint after delete: %v", err)
+	}
+	if id == "legacy-seat" {
+		t.Error("mint returned the legacy name as the id, want a uuid")
+	}
+}

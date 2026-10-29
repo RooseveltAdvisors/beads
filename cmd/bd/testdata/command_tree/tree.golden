@@ -6750,6 +6750,13 @@ bd seat backfill
   flag --apply type=bool default="false" usage="Apply the exact-name backfill"
   flag --flush-unresolved type=bool default="false" usage="Explicitly flush unresolved notify rows, retaining a backup and per-row report"
 
+bd seat delete
+  use: "delete <seat-id>"
+  short: "Remove a dead seat row; frees a legacy name-keyed row's name for a minted uuid"
+  hidden: false
+  runnable: true
+  annotations: {bd:skip_store="1"}
+
 bd seat import-pins
   use: "import-pins"
   short: "One-time pins.json to seats.json migration (idempotent, reports every pin)"
@@ -7555,7 +7562,7 @@ bd update
   flag --parent type=string default="" usage="New parent issue ID (reparents the issue, use empty string to remove parent)"
   flag --persistent type=bool default="false" usage="Mark issue as persistent (promote wisp to regular issue)"
   flag --priority -p type=string default="" usage="Priority (0-4 or P0-P4, 0=highest)"
-  flag --reason type=string default="" usage="Why the due date is being cleared (required with --force-no-due)"
+  flag --reason type=string default="" usage="Why the change is being made. Required when clearing a due date (--force-no-due) and when changing --assignee (the reassignment trail)."
   flag --remove-label type=stringSlice default="[]" usage="Remove labels (repeatable)"
   flag --repeat type=string default="" usage="Recurrence rule, empty to stop repeating: an interval (+1d, +2w) or 5-field cron (\"0 9 * * 1\")"
   flag --repeat-end type=string default="" usage="Last occurrence (empty to clear). Same formats as --due"

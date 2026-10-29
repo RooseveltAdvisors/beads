@@ -1343,7 +1343,8 @@ func TestParseTimeFlag(t *testing.T) {
 	}
 }
 
-// TestParseTimeFlag_MinutesVsMonths guards GH#6609: "min" is minutes, bare "m" stays months.
+// TestParseTimeFlag_MinutesVsMonths guards GH#6609 and the bare-m refusal:
+// "min" is minutes, "mo" is months, and the bare "m" is refused as ambiguous.
 func TestParseTimeFlag_MinutesVsMonths(t *testing.T) {
 	t.Parallel()
 	minutes, err := parseTimeFlag("+30min")
@@ -1353,16 +1354,20 @@ func TestParseTimeFlag_MinutesVsMonths(t *testing.T) {
 	if d := time.Until(minutes); d < 29*time.Minute || d > 31*time.Minute {
 		t.Errorf("+30min resolved %v from now, want ~30m", d)
 	}
-	months, err := parseTimeFlag("+30m")
+	months, err := parseTimeFlag("+30mo")
 	if err != nil {
-		t.Fatalf("parseTimeFlag(+30m) error: %v", err)
+		t.Fatalf("parseTimeFlag(+30mo) error: %v", err)
 	}
 	// Bound the months arm on both sides against a computed expectation: a
 	// one-sided "more than a year out" check stays green if "m" regressed to
 	// years or decades, which is the exact discrimination this test exists for.
 	wantMonths := time.Now().AddDate(0, 30, 0)
 	if d := months.Sub(wantMonths); d < -time.Minute || d > time.Minute {
-		t.Errorf("+30m resolved %v, want ~%v (30 months out)", months, wantMonths)
+		t.Errorf("+30mo resolved %v, want ~%v (30 months out)", months, wantMonths)
+	}
+	// The bare m is refused as ambiguous, never guessed as months or minutes.
+	if _, err := parseTimeFlag("+30m"); err == nil {
+		t.Error("+30m parsed, want the ambiguous-unit refusal")
 	}
 }
 

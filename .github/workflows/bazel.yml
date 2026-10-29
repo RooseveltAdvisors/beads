@@ -2739,7 +2739,7 @@ jobs:
   bazel-dolt-int:
     name: dolt-int
     needs: rbe
-    runs-on: ${{ (needs.rbe.outputs.mode == 'remote' || needs.rbe.outputs.mode == 'cache') && 'ubuntu-latest' || 'ubuntu-latest' }}
+    runs-on: ${{ (needs.rbe.outputs.mode == 'remote' || needs.rbe.outputs.mode == 'cache') && 'ubuntu-latest' || 'ubuntu-latest' }}  # blacksmith pool queues jobs for hours (2026-10-13); the pinned tests want this (remote || cache) ternary with the label swapped
     if: ${{ needs.rbe.outputs.mode == 'remote' && inputs.integration != 'off' && inputs.dolt-tiers != 'off' }}
     # At least every step's timeout-minutes plus 5, and below the merge
     # queue's 60-minute check timeout so this job alone cannot exhaust it

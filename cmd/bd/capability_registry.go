@@ -274,6 +274,7 @@ var proxyCapabilityRegistry = []capabilityRow{
 	refusedPath("seat backfill", "proxy.seat.local-only", ProxyReasonDesign, ""),
 	refusedPath("seat import-pins", "proxy.seat.local-only", ProxyReasonDesign, ""),
 	refusedPath("seat list", "proxy.seat.local-only", ProxyReasonDesign, ""),
+	refusedPath("seat delete", "proxy.seat.local-only", ProxyReasonDesign, ""),
 	refusedPath("seat reconcile", "proxy.seat.local-only", ProxyReasonDesign, ""),
 	refusedPath("seat register", "proxy.seat.local-only", ProxyReasonDesign, ""),
 	refusedPath("seat rename", "proxy.seat.local-only", ProxyReasonDesign, ""),

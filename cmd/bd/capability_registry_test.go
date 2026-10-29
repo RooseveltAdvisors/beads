@@ -284,6 +284,7 @@ func TestProxyCapabilityRegistryReasonsAreAssignedIndividually(t *testing.T) {
 		// commands are design refusals over the proxy.
 		"seat backfill":    true,
 		"seat import-pins": true,
+		"seat delete":      true,
 		"seat list":        true,
 		"seat reconcile":   true,
 		"seat register":    true,
