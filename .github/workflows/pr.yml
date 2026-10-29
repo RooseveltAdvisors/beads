@@ -70,7 +70,7 @@ jobs:
   # out.
   scope:
     name: Scope
-    runs-on: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) && 'blacksmith-2vcpu-ubuntu-2404' || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')) && 'ubuntu-latest' || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       contents: read
@@ -625,6 +625,19 @@ jobs:
         env:
           GOCACHE: ${{ runner.temp }}/go-cache/non-race
         run: go test '-tags=integration,gms_pure_go' -count=1 -run '^TestPRPreflight' ./scripts
+
+      # The CI scripts' tests run them under the host's bash, and macOS's
+      # /bin/bash is 3.2 (no mapfile; an empty "${arr[@]}" trips set -u).
+      # main.yml's Test (macOS) runs this package only after a merge, so a
+      # PR that broke it on macOS merged green (#7818). Running it here puts
+      # that break behind the required CI gate.
+      # TestPRWorkflowRunsScriptsPackageOnMacOS pins this step.
+      - name: Run the scripts package on macOS's Bash
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        env:
+          GOCACHE: ${{ runner.temp }}/go-cache/non-race
+        run: go test '-tags=gms_pure_go' -count=1 ./scripts
 
       - name: Check native user config diagnostics
         shell: bash
@@ -1408,7 +1421,7 @@ jobs:
   # reports it back for ci-gate to check; main's push run of bazel.yml runs
   # them after the merge). Same-repo PRs and merge groups run in mode
   # remote, fork and Dependabot PRs through rbe-west's mint (rbe-fork,
-  # modes fork-ro/fork-rw). Mode skip (the farm switch off) or cache (no
+  # modes fork-ro/fork-rw). Mode skip (the farm switch off) or local (no
   # secret, or rbe-fork closed or refusing) is red, never a silent pass
   # with fewer tests. bazel.yml has no pull_request/merge_group trigger of
   # its own: this call is its only PR run. A push to main skips the call
@@ -1615,8 +1628,8 @@ jobs:
           skipped_ok="$skipped_ok $(bash .github/scripts/ci-scope.sh skips)"
           # Bazel lanes skipped by design in the call's execution mode (all
           # of them in mode skip, the remote-only embedded, proxied and
-          # server-storage tiers in modes local and cache, and integration
-          # in mode local), the Dolt-tier lanes when the scope turned them
+          # server-storage tiers in modes local and cache (cache: rbe=cache
+          # dispatches only, never a PR), and integration in mode local), the Dolt-tier lanes when the scope turned them
           # off and the call reports it ran without them (a merge group),
           # and the aggregate unless the mode is missing or invalid.
           skipped_ok="$skipped_ok $(bash .github/scripts/bazel-gate.sh skips)"
@@ -1626,14 +1639,14 @@ jobs:
           # (there is no legacy job to fall back to), so on every pull_request
           # and merge group they must have run remotely on rbe-west: mode
           # remote, or fork-ro/fork-rw through rbe-fork for a PR without the
-          # CI secrets; mode skip (the farm switch off) or cache (no
+          # CI secrets; mode skip (the farm switch off) or local (no
           # secret, or rbe-fork closed or refusing) is red whatever
           # bazel-gate.sh's skip list allows; each lane's own result is
           # required above. A push to main's run never starts the call
           # (skipped, which only its scope excuses).
           BAZEL_REMOTE="$(bash .github/scripts/bazel-gate.sh remote)"
           if [[ "$BAZEL_REMOTE" == not-run-remotely ]]; then
-            echo "::error::The Bazel lanes did not run remotely on rbe-west (mode '${BAZEL_RBE_MODE:-none}'); they are this PR's only run of the Linux Go test tiers. In mode cache on a PR without the CI secrets, rbe-fork was closed or refused this run: re-run all jobs later."
+            echo "::error::The Bazel lanes did not run remotely on rbe-west (mode '${BAZEL_RBE_MODE:-none}'); they are this PR's only run of the Linux Go test tiers. In mode local on a PR without the CI secrets, rbe-fork was closed or refused this run: re-run all jobs later."
           fi
           export BAZEL_REMOTE
           export CI_GATE_SKIPPED_OK="$skipped_ok"

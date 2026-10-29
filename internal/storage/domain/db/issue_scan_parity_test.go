@@ -42,7 +42,7 @@ func TestScanIssue_StringTimestamps(t *testing.T) {
 	for i := range cols {
 		cols[i] = strings.TrimSpace(cols[i])
 	}
-	require.Len(t, cols, 58)
+	require.Len(t, cols, 60)
 
 	row := []driver.Value{
 		"bd-test.1", nil, "title", "desc", "", "", "", // id..notes
@@ -54,14 +54,15 @@ func TestScanIssue_StringTimestamps(t *testing.T) {
 		nil,                // mol_type
 		nil, nil, nil, nil, // event_kind..payload
 		nil, nil, // due_at, defer_until
-		nil, nil, nil, nil, // repeat_pattern, repeat_start, repeat_end, due_source
+		nil, nil, nil, nil, nil, // repeat_pattern, repeat_window, repeat_start, repeat_end, due_source
 		0,             // due_missed
 		nil, nil, nil, // work_type, source_system, metadata
 		int64(12345), // row_lock
 		nil, nil,     // storage_class, assignee_id
+		int64(77),     // arrival_seq
 		nil, nil, nil, // lease_expires_at, heartbeat_at, granted_node
 	}
-	require.Len(t, row, 58)
+	require.Len(t, row, 60)
 
 	mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows(cols).AddRow(row...))
 
@@ -76,4 +77,6 @@ func TestScanIssue_StringTimestamps(t *testing.T) {
 	assert.Equal(t, time.Date(2026, 6, 12, 10, 0, 1, 0, time.UTC), issue.UpdatedAt)
 	// row_lock hydrates into the opaque RowVersion token at its positional slot.
 	assert.Equal(t, int64(12345), issue.RowVersion)
+	// arrival_seq hydrates into ArrivalSeq at its positional slot.
+	assert.Equal(t, int64(77), issue.ArrivalSeq)
 }

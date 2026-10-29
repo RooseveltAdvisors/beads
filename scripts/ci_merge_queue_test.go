@@ -31,6 +31,7 @@ const (
 	bazelFreshRCLine  = "test:fresh --nocache_test_results"
 	mergeQueueActor   = "github-merge-queue[bot]"
 	mergeQueueOwnRepo = "gastownhall/beads"
+	mergeQueueOwner   = "gastownhall"
 )
 
 // mergeGroupCtx: an evalGHExpr context for a merge_group run of entry n
@@ -39,6 +40,7 @@ func mergeGroupCtx(n int, extra map[string]string) map[string]string {
 	ctx := map[string]string{
 		"github.event_name":                 "merge_group",
 		"github.repository":                 mergeQueueOwnRepo,
+		"github.repository_owner":           mergeQueueOwner,
 		"github.actor":                      mergeQueueActor,
 		"github.ref":                        fmt.Sprintf("refs/heads/gh-readonly-queue/main/pr-%d-%040d", 7000+n, n),
 		"github.run_attempt":                "1",
@@ -58,6 +60,7 @@ func pullRequestCtx(n int, extra map[string]string) map[string]string {
 	ctx := map[string]string{
 		"github.event_name":                             "pull_request",
 		"github.repository":                             mergeQueueOwnRepo,
+		"github.repository_owner":                       mergeQueueOwner,
 		"github.actor":                                  "alice",
 		"github.ref":                                    fmt.Sprintf("refs/pull/%d/merge", 7000+n),
 		"github.run_attempt":                            "1",
@@ -263,7 +266,7 @@ func TestMergeQueuePullRequestFieldsHandleMergeGroup(t *testing.T) {
 // Merge groups: bazel.yml's rbe step, evaluated by evalGHExpr for a merge
 // group, takes mode remote with the CI secrets, so pr.yml's gate (which
 // requires every lane to have run remotely, BAZEL_REMOTE) can pass. Without
-// the secret or with the farm switch off the mode is cache or skip, and the
+// the secret or with the farm switch off the mode is local or skip, and the
 // gate is red (TestPRGateRequiresRemoteBazelLanes).
 func TestMergeQueueBazelRunsRemotely(t *testing.T) {
 	requireHostTool(t, "bash")
@@ -272,7 +275,7 @@ func TestMergeQueueBazelRunsRemotely(t *testing.T) {
 		name, varOn, secret, mode string
 	}{
 		{"farm on, secrets", "true", "grpcs://rbe.example:443", "remote"},
-		{"secret missing", "true", "", "cache"},
+		{"secret missing", "true", "", "local"},
 		{"farm switch off", "", "grpcs://rbe.example:443", "skip"},
 	} {
 		ctx := mergeGroupCtx(1, map[string]string{"vars.RBE_WEST_WORKERS": c.varOn, "secrets.RBE_WEST_EXECUTOR": c.secret, "inputs.rbe": "on", "inputs.fork-farm": "off"})

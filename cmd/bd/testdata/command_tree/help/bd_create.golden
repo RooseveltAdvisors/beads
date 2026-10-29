@@ -8,6 +8,7 @@ Aliases:
 
 Flags:
       --acceptance string         Acceptance criteria
+      --allow-duplicate           Allow creating issue even if a similar active issue exists
       --allow-empty-description   Allow empty description input from stdin or file
       --append-notes string       Append to existing notes (with newline separator)
   -a, --assignee string           Assignee
@@ -20,6 +21,7 @@ Flags:
       --design-file string        Read design from file (use - for stdin)
       --dry-run                   Preview what would be created without actually creating
       --due string                Due date/time. Formats: +6h, +1d, +2w, tomorrow, next monday, 2025-01-15
+      --due-source string         Provenance recorded for --due: explicit (caller supplied) or default (synthesized) (default "explicit")
       --ephemeral                 Create as ephemeral (short-lived, subject to TTL compaction)
   -e, --estimate int              Time estimate in minutes (e.g., 60 for 1 hour)
       --event-actor string        Entity URI who caused this event (requires --type=event)
@@ -40,6 +42,9 @@ Flags:
       --notes string              Notes
       --parent string             Parent issue ID for hierarchical child (e.g., 'bd-a3f8e9')
   -p, --priority string           Priority (0-4 or P0-P4, 0=highest) (default "2")
+      --repeat string             Recurrence rule: an interval (+1d, +2w, +1mo) or a 5-field cron expression ("0 9 * * 1"). Closing a recurring bead is refused while recurrence.close_guard is on (the default); end the series with --repeat "" first. With the guard off, closing spawns the next instance under the same parent (peer dependencies are not copied). A +1m/+1y series clamps to the last day of a shorter month (Jan 31 -> Feb 28 -> Mar 31)
+      --repeat-end string         Last occurrence of a recurring bead; the series stops after it. Same formats as --due
+      --repeat-start string       Earliest occurrence of a recurring bead. Same formats as --due
       --repo string               Target repository for issue (overrides auto-routing)
       --silent                    Output only the issue ID (for scripting)
       --skills string             Required skills for this issue
@@ -52,6 +57,7 @@ Flags:
       --validate                  Validate description contains required sections for issue type
       --waits-for string          Spawner issue ID to wait for (creates waits-for dependency for fanout gate)
       --waits-for-gate string     Gate type: all-children (wait for all) or any-children (wait for first) (default "all-children")
+      --window string             Quiet window for a recurring bead: "HH:MM-HH:MM IANA/Zone" (example: "09:00-20:00 America/New_York"). Outside it the bead does not fire and the nag checkers stay quiet.
       --wisp-type string          Wisp type for TTL-based compaction: heartbeat, ping, patrol, gc_report, recovery, error, escalation
 
 Global Flags:

@@ -22,6 +22,7 @@ Working With Issues:
   merge-slot        Manage merge-slot gates for serialized conflict resolution
   note              Append a note to an issue
   priority          Set the priority of an issue
+  progress          Comment progress helpers (comment.progress_required)
   promote           Promote a wisp to a permanent bead
   provenance        Append-only provenance event log
   q                 Quick capture: create issue and output only ID
@@ -123,6 +124,7 @@ Additional Commands:
   completion        Generate the autocompletion script for the specified shell
   cook              Compile a formula into a proto (ephemeral by default)
   defer             Defer one or more issues for later
+  due               Inspect and repair due dates
   formula           Manage workflow formulas
   github            GitHub integration commands
   gitlab            GitLab integration commands
@@ -131,11 +133,13 @@ Additional Commands:
   mail              Delegate to mail provider (e.g., gt mail)
   metrics           Show or change anonymous usage-metrics settings
   mol               Molecule commands (work templates)
+  notify            Seat-addressed notify outbox (beads-owned delivery)
   notion            Notion integration commands
   orphans           Identify orphaned issues (referenced in commits but still open)
   ready             Show ready work (open, no active blockers)
   rename            Rename an issue ID
   schema            Print the JSON Schema for bd's --json / export output
+  seat              Mint durable agent identities, aliases, and exact endpoints
   serve             Serve the beads HTTP API over loopback
   ship              Publish a capability for cross-project dependencies
   undefer           Undefer one or more issues (restore to open)

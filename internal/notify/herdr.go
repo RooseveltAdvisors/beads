@@ -8,9 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/steveyegge/beads/internal/remedy"
 )
 
 // Instance is one live herdr-hosted agent of any harness (pi, claude, codex, …).
@@ -221,8 +224,13 @@ func DefaultPrompt(rec Record) string {
 // Stale-claim / progress kinds get the strongest "you must close via bd" copy.
 func promptPlaybook(kind Kind, issueID string) string {
 	id := strings.TrimSpace(issueID)
-	if id == "" {
-		id = "<id>"
+	// Every command below pastes the bead id, so it goes in as a shell word:
+	// an id the store holds that is not a plain word becomes a placeholder
+	// named escaped after the playbook, so pasting the wake runs no part of it
+	// (remedy.CommandArg). The no-id case keeps the literal <id> it always had.
+	arg, note := "<id>", ""
+	if id != "" {
+		arg, note = remedy.CommandArg(runtime.GOOS, id, "<id>")
 	}
 	switch kind {
 	case KindStaleClaim:
@@ -237,7 +245,7 @@ Finish-line (pick one):
   3) If you should not own it: bd update %s --assignee <seat> (or unassign) and comment why.
 
 House rule: comment.progress_required - bare bd close fails on assigned work; default reason "Closed" does not count. Escape only if needed: bd close %s --force-no-comment --reason "why".
-`, id, id, id, id, id)
+`, arg, arg, arg, arg, arg) + note
 	case KindProgress:
 		return fmt.Sprintf(`Progress trail missing on an assigned bead (comment.progress_required).
 
@@ -246,13 +254,13 @@ Do this before any close:
 When finished:
   bd close %s --reason "what landed"
 Do not only update chat or state/*.status - the bead thread is the handoff.
-`, id, id)
+`, arg, arg) + note
 	case KindEscalate:
 		return fmt.Sprintf(`Escalation wake. Inspect the bead, act, and end in beads:
   bd show %s
   bd comment %s "what you found / did"
   bd close %s --reason "..."   # only if the work is truly finished
-`, id, id, id)
+`, arg, arg, arg) + note
 	case KindComment:
 		return fmt.Sprintf(`Someone commented on a bead assigned to you. Read it, act, stamp progress.
 
@@ -261,13 +269,13 @@ Do not only update chat or state/*.status - the bead thread is the handoff.
 When the work is finished:
   bd close %s --reason "short real reason"
 Do not only reply in chat. Do not ask the captain.
-`, id, id, id)
+`, arg, arg, arg) + note
 	default:
 		// due / defer / manual - still teach the finish line without drowning the body.
 		return fmt.Sprintf(`When the work is finished, close it in beads (harness-agnostic):
   bd comment %s "what landed"    # optional if --reason is explicit
   bd close %s --reason "short real reason"
 Assigned work cannot bare-close (comment.progress_required). Chat-only done is not done.
-`, id, id)
+`, arg, arg) + note
 	}
 }

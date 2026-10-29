@@ -621,6 +621,7 @@ bd close
   flag --comment type=string default="" hidden usage="Alias for --reason"
   flag --continue type=bool default="false" usage="Auto-advance to next step in molecule"
   flag --force -f type=bool default="false" usage="Force close pinned issues or unsatisfied gates"
+  flag --force-no-comment type=bool default="false" usage="Skip comment.progress_required gate (still requires --reason)"
   flag --if-revision type=string default="" usage="Apply the write only if the issue's current revision equals this value (the decimal int64 from `bd show --json`'s \"revision\" field). One id only: refused before any write when combined with more than one issue id. A mismatch writes nothing and exits 13 (vs 1 for other failures)."
   flag --message -m type=string default="" hidden usage="Alias for --reason (git commit convention)"
   flag --no-auto type=bool default="false" usage="With --continue, show next step but don't claim it"
@@ -646,6 +647,9 @@ bd comment
     | Add a comment to an issue.
     |
     | Shorthand for 'bd comments add <id> "text"'.
+    |
+    | A comment on an assigned bead pings that assignee's pinned pane
+    | (.beads/notify/seats.json). Self-comments and unassigned beads do not ping.
     |
     | Examples:
     |   bd comment bd-123 "Working on this now"
@@ -678,7 +682,11 @@ bd comments
     |   bd comments add bd-123 "This is a comment"
     |
     |   # Add a comment from a file
+    |
     |   bd comments add bd-123 -f notes.txt
+    |
+    |   # Delete a comment ("remove" is an alias)
+    |   bd comments delete bd-123 <comment-id>
   flag --local-time type=bool default="false" usage="Show timestamps in local time instead of UTC"
 
 bd comments add
@@ -689,6 +697,9 @@ bd comments add
   long:
     | Add a comment to an issue.
     |
+    | A comment on an assigned bead pings that assignee's pinned pane
+    | (.beads/notify/seats.json). Self-comments and unassigned beads do not ping.
+    |
     | Examples:
     |   # Add a comment
     |   bd comments add bd-123 "Working on this now"
@@ -696,7 +707,15 @@ bd comments add
     |   # Add a comment from a file
     |   bd comments add bd-123 -f notes.txt
   flag --author -a type=string default="" usage="Add author to comment"
-  flag --file -f type=string default="" usage="Read comment text from file"
+  flag --file -f type=string default="" annotations={cobra_annotation_mutually_exclusive=["stdin file"]} usage="Read comment text from file"
+  flag --stdin type=bool default="false" annotations={cobra_annotation_mutually_exclusive=["stdin file"]} usage="Read comment text from standard input"
+
+bd comments delete
+  use: "delete <issue-id> <comment-id>"
+  aliases: ["remove"]
+  short: "Delete a comment from an issue"
+  hidden: false
+  runnable: true
 
 bd comments list
   use: "list"
@@ -1339,6 +1358,7 @@ bd create
   hidden: false
   runnable: true
   flag --acceptance type=string default="" usage="Acceptance criteria"
+  flag --allow-duplicate type=bool default="false" usage="Allow creating issue even if a similar active issue exists"
   flag --allow-empty-description type=bool default="false" usage="Allow empty description input from stdin or file"
   flag --append-notes type=string default="" usage="Append to existing notes (with newline separator)"
   flag --assignee -a type=string default="" usage="Assignee"
@@ -1353,6 +1373,7 @@ bd create
   flag --design-file type=string default="" annotations={cobra_annotation_mutually_exclusive=["design design-file"]} usage="Read design from file (use - for stdin)"
   flag --dry-run type=bool default="false" usage="Preview what would be created without actually creating"
   flag --due type=string default="" usage="Due date/time. Formats: +6h, +1d, +2w, tomorrow, next monday, 2025-01-15"
+  flag --due-source type=string default="explicit" usage="Provenance recorded for --due: explicit (caller supplied) or default (synthesized)"
   flag --ephemeral type=bool default="false" usage="Create as ephemeral (short-lived, subject to TTL compaction)"
   flag --estimate -e type=int default="0" usage="Time estimate in minutes (e.g., 60 for 1 hour)"
   flag --event-actor type=string default="" usage="Entity URI who caused this event (requires --type=event)"
@@ -1374,6 +1395,9 @@ bd create
   flag --notes type=string default="" usage="Notes"
   flag --parent type=string default="" usage="Parent issue ID for hierarchical child (e.g., 'bd-a3f8e9')"
   flag --priority -p type=string default="2" usage="Priority (0-4 or P0-P4, 0=highest)"
+  flag --repeat type=string default="" usage="Recurrence rule: an interval (+1d, +2w, +1mo) or a 5-field cron expression (\"0 9 * * 1\"). Closing a recurring bead is refused while recurrence.close_guard is on (the default); end the series with --repeat \"\" first. With the guard off, closing spawns the next instance under the same parent (peer dependencies are not copied). A +1m/+1y series clamps to the last day of a shorter month (Jan 31 -> Feb 28 -> Mar 31)"
+  flag --repeat-end type=string default="" usage="Last occurrence of a recurring bead; the series stops after it. Same formats as --due"
+  flag --repeat-start type=string default="" usage="Earliest occurrence of a recurring bead. Same formats as --due"
   flag --repo type=string default="" usage="Target repository for issue (overrides auto-routing)"
   flag --silent type=bool default="false" usage="Output only the issue ID (for scripting)"
   flag --skills type=string default="" usage="Required skills for this issue"
@@ -1386,6 +1410,7 @@ bd create
   flag --validate type=bool default="false" usage="Validate description contains required sections for issue type"
   flag --waits-for type=string default="" usage="Spawner issue ID to wait for (creates waits-for dependency for fanout gate)"
   flag --waits-for-gate type=string default="all-children" usage="Gate type: all-children (wait for all) or any-children (wait for first)"
+  flag --window type=string default="" usage="Quiet window for a recurring bead: \"HH:MM-HH:MM IANA/Zone\" (example: \"09:00-20:00 America/New_York\"). Outside it the bead does not fire and the nag checkers stay quiet."
   flag --wisp-type type=string default="" usage="Wisp type for TTL-based compaction: heartbeat, ping, patrol, gc_report, recovery, error, escalation"
 
 bd create-form
@@ -1761,7 +1786,7 @@ bd doctor
     | Server Mode (--server):
     |   Run health checks for Dolt server mode connections (bd-dolt.2.3):
     |   - Server reachable: Can connect to configured host:port?
-    |   - Dolt version: Is it a Dolt server (not vanilla MySQL)?
+    |   - Dolt version: Is it a Dolt server (not vanilla MySQL) at 2.6.0 or newer?
     |   - Database exists: Does the 'beads' database exist?
     |   - Schema compatible: Can query beads tables?
     |   - Connection pool: Pool health metrics
@@ -2073,10 +2098,23 @@ bd dolt remote reset-data
     | only live chunks:
     |
     |   - Git-backed remotes (issue data riding a git remote under refs/dolt/data):
-    |     deletes the Dolt data refs on the git remote, then force-pushes to
-    |     rebuild a fresh store. Code branches are untouched.
+    |     rebuilds a fresh store from local HEAD and replaces the remote's Dolt
+    |     data refs with it (through a Dolt sql-server it pushes the fresh store
+    |     to a temporary ref first, so the remote keeps its data until the new
+    |     store is complete, then restarts bd's own server, the shared server in
+    |     shared-server mode, so that it rereads the remote; like bd dolt stop,
+    |     the restart commits any uncommitted changes in every database that
+    |     server serves, and it briefly interrupts them. Any other server must be
+    |     restarted after the reset, before its next push or pull of the remote,
+    |     and so must bd's own while auto-start is off or, outside shared-server
+    |     mode, BEADS_DOLT_SERVER_MODE=1 or dolt_server_port declares it
+    |     externally managed: bd does not stop such a server, and exits non-zero
+    |     once the reset is done, so that nothing pushes or pulls through it
+    |     first). Code branches are untouched.
     |   - Native file remotes (file:// paths): clears the store directory, then
-    |     force-pushes to rebuild it.
+    |     force-pushes to rebuild it. Refused for a git repository, bare or a
+    |     checkout, where Dolt keeps the store among the repository's own files:
+    |     replace that remote as below.
     |   - Cloud/hosted remotes (aws://, gs://, dolthub://, ...): bd cannot clear
     |     the stored data safely — replace the remote with a fresh URL or prefix:
     |       bd dolt remote remove <name>
@@ -2146,8 +2184,13 @@ bd dolt start
   long:
     | Start a dolt sql-server for the current beads project.
     |
-    | The server runs in the background on a per-project port derived from the
-    | project path. PID and logs are stored in .beads/.
+    | The server runs in the background; PID and logs are stored in .beads/. With
+    | no port configured, it listens on a free port the OS assigns and records it in
+    | .beads/dolt-server.port. 'bd dolt stop' removes that file, so the next start
+    | can get a different port (shared-server mode defaults to port 3308 instead).
+    | To keep one port across restarts, set dolt.port in .beads/config.yaml, or in
+    | .beads/config.local.yaml for a machine-local value; 'bd dolt show' lists the
+    | port sources in priority order.
     |
     | The server auto-starts transparently when needed, so manual start is rarely
     | required. Use this command for explicit control or diagnostics.
@@ -2181,7 +2224,12 @@ bd dolt status
     | server never listens), or a local server managed outside bd
     | (dolt.auto-start: false, e.g. an orchestrator-shared sql-server) — pings
     | the configured endpoint via SQL and reports reachability, server version,
-    | and database.
+    | and database. While no server of bd's own is running, it does the same for
+    | a local server bd does not start: one on a unix socket or behind a
+    | credential command, or one that BEADS_DOLT_SERVER_PORT, BEADS_DOLT_PORT,
+    | dolt_server_port or BEADS_DOLT_SERVER_MODE=1 declares externally managed.
+    | The probe logs in as the configured user; it does not present a credential
+    | command's token.
     |
     | In proxied-server mode, reports the proxy (the endpoint every bd command
     | connects through) and the dolt backend behind it separately, read from the
@@ -2220,6 +2268,81 @@ bd dolt test
     |   2. The connection can be established
     |
     | Use this before switching to server mode to ensure the server is running.
+
+bd due
+  use: "due"
+  short: "Inspect and repair due dates"
+  hidden: false
+  runnable: false
+  long:
+    | Commands for the due-date invariant.
+    |
+    |   sweep     fire the beads whose due date has arrived (the external clock's seam)
+    |   backfill  give legacy beads that predate the invariant a due date
+    |
+    | See 'bd due sweep --help' and 'bd due backfill --help'.
+
+bd due backfill
+  use: "backfill"
+  short: "Report (or apply) due dates for beads that have none"
+  hidden: false
+  runnable: true
+  long:
+    | Give every open bead that predates the due-date invariant a due date.
+    |
+    | REPORTS BY DEFAULT, WRITES ONLY WITH --apply. Dating a repository's whole
+    | history is a judgement call about other people's work, so the default run
+    | changes nothing: it prints what it would do and stops. Read the report, then
+    | re-run with --apply if it looks right.
+    |
+    | Each candidate is dated --interval past its OWN creation (default +7d), not
+    | past today, so the relative order of a backlog survives the backfill. A bead
+    | older than the interval would land in the past and fire on the next ready
+    | read, so its date is instead spread across the window starting --interval past
+    | now — placed by the bead's own id, so the report and --apply agree, and a whole
+    | legacy backlog does not come due in one herd; the report marks those rows. Every bead written is stamped due_source=backfill, so a
+    | synthesized date stays distinguishable from one a human chose.
+    |
+    | Beads that are not work awaiting completion are skipped: events, wisps,
+    | templates, federated rows, and anything already closed. So is anything that
+    | already has a due date - a backfill never overwrites one. The report counts
+    | every skipped class so nothing is excluded silently.
+    |
+    | Examples:
+    |   bd due backfill                      # dry run: report only, writes nothing
+    |   bd due backfill --json               # same report, machine-readable
+    |   bd due backfill --interval=+14d      # propose two weeks instead of one
+    |   bd due backfill --apply              # write the dates the report described
+  flag --apply type=bool default="false" usage="Write the due dates. Without this the command only reports."
+  flag --interval type=string default="+7d" usage="How far past each bead's created_at the proposed due date lands"
+
+bd due sweep
+  use: "sweep"
+  short: "Fire every bead whose due date has arrived"
+  hidden: false
+  runnable: true
+  long:
+    | Run the due-date sweep now and report what fired.
+    |
+    | Beads fire lazily on ready-work reads, which is a latency FLOOR, not a clock:
+    | a workspace nobody reads never fires anything. This command is the seam an
+    | external clock stands on — a timer runs it on a fixed cadence, reads the
+    | summary, and publishes it onto whatever rail consumes due beads.
+    |
+    | Each bead whose due date has arrived records a 'due' audit event (the rail
+    | 'bd events' already carries) and has its due date moved forward, so it nags
+    | again rather than going silent: to its next occurrence if it repeats, and one
+    | grace interval otherwise. Expired dated defers wake in the same pass, because
+    | both are time-based sweeps and sharing the transaction costs one round trip
+    | instead of two.
+    |
+    | Unlike the lazy sweep behind a ready read, this one is NOT advisory: a sweep
+    | that could not run exits non-zero, so a clock can tell a quiet workspace from
+    | a broken one.
+    |
+    | Examples:
+    |   bd due sweep                         # fire what is due, print a summary
+    |   bd due sweep --json                  # same, machine-readable
 
 bd duplicate
   use: "duplicate <id> --of <canonical>"
@@ -5107,6 +5230,10 @@ bd mol ready
     | This enables discovery-based resume without explicit waiter tracking.
     | The patrol system uses this to find and dispatch gate-ready molecules.
     |
+    | For a formula step declared type = "gate" with a [steps.gate] block, the
+    | gate bead is an exit-gate that the step's own task blocks, so the ready
+    | step is the one that follows the gate, not that task.
+    |
     | Examples:
     |   bd mol ready --gated           # Find all gate-ready molecules
     |   bd mol ready --gated --json    # JSON output for automation
@@ -5404,6 +5531,112 @@ bd note
   flag --file type=string default="" annotations={cobra_annotation_mutually_exclusive=["stdin file"]} usage="Read note text from file"
   flag --stdin type=bool default="false" annotations={cobra_annotation_mutually_exclusive=["stdin file"]} usage="Read note text from stdin"
 
+bd notify
+  use: "notify"
+  short: "Seat-addressed notify outbox (beads-owned delivery)"
+  hidden: false
+  runnable: false
+  long:
+    | The notify outbox is how beads delivers due/repeat fires and comment
+    | pings to assignee seats.
+    |
+    | bd due sweep enqueues one row per fired bead under its assignee seat
+    | (.beads/notify/). bd comment and bd comments add enqueue a comment ping
+    | for the assignee (skipping self-comments and unassigned beads).
+    | bd notify drain delivers that seat only to the exact herdr
+    | target recorded in .beads/notify/seats.json (session + pane id, or agent
+    | session id). Delivery uses the pinned pane's harness follow-up submit
+    | when verified (so a due fire does not steer mid-turn), holds until idle
+    | for unverified mid-turn harnesses, and uses Enter/steer otherwise.
+    | There is no fuzzy search: a missing pin, dead pinned target, or blocked
+    | approval dialog leaves the row queued and marks the seat for parent
+    | escalation.
+    |
+    | bd notify resolve is a human diagnostic for the pin itself: it prints the
+    | recorded target and whether that exact target is live. There is no scored
+    | or fuzzy match anywhere in beads, because a lookalike that reads like a
+    | target is how a wake once landed on the wrong pane.
+    |
+    | Examples:
+    |   bd notify pending
+    |   bd notify resolve --seat wiseman
+    |   bd notify drain --seat wiseman
+    |   bd notify drain                 # current actor only (--actor / BEADS_ACTOR)
+    |   bd notify drain --all
+    |   bd notify drain --seat wiseman --print
+    |   bd notify drain --seat wiseman --exec 'echo "$BD_NOTIFY_ID"'
+    |   bd notify seats
+
+bd notify ack
+  use: "ack"
+  short: "Mark notify rows delivered for a seat up to a seq"
+  hidden: false
+  runnable: true
+  flag --seat type=string default="" usage="assignee seat (required)"
+  flag --upto type=int64 default="0" usage="ack through this seq (required)"
+
+bd notify drain
+  use: "drain"
+  short: "Deliver pending rows for a seat via herdr (or --exec)"
+  hidden: false
+  runnable: true
+  long:
+    | Drain pending notify rows for one seat, the current actor, or --all assigned seats.
+    |
+    | Default transport is herdr, exact-pin only:
+    |   1. Load .beads/notify/seats.json (seat → session+pane_id or agent_session_id)
+    |   2. Discover live herdr agents
+    |   3. If the pinned target is live, deliver with that pane's harness mode:
+    |      follow_up (pi Option+Enter, cursor/codex Tab), hold-until-idle for
+    |      unverified mid-turn harnesses, or steer (Enter) when idle
+    |   4. Ack on success
+    |   Missing pin, dead pin, or blocked dialog: leave rows queued, mark escalate, never pick a lookalike.
+    |
+    | Harness-agnostic: herdr already knows pi/claude/codex/… in each pane.
+    | Drain picks follow-up vs steer from that harness; it does not import firstmate.
+    |
+    | Flags:
+    |   --print   print rows only (no herdr, still acks unless --no-ack)
+    |   --exec    override transport with a shell command (BD_NOTIFY_* env)
+    |   --no-ack  leave rows pending after delivery attempt
+    |   --all     drain every assigned seat that has pending rows
+    | Unassigned beads are never notified. Without --seat/--all, only the current
+    | actor (--actor / BEADS_ACTOR) is drained so BEADS NOTIFY is not broadcast.
+  flag --all type=bool default="false" usage="drain every seat with pending rows"
+  flag --exec type=string default="" usage="override transport shell command (BD_NOTIFY_* env)"
+  flag --limit type=int default="0" usage="max rows per seat (0 = all pending)"
+  flag --no-ack type=bool default="false" usage="do not mark rows delivered"
+  flag --print type=bool default="false" usage="print rows only (no herdr prompt)"
+  flag --seat type=string default="" usage="assignee seat to drain"
+
+bd notify pending
+  use: "pending"
+  short: "List undelivered notify rows"
+  hidden: false
+  runnable: true
+  flag --seat type=string default="" usage="filter by assignee seat"
+
+bd notify resolve
+  use: "resolve"
+  short: "Human diagnostic: show a seat's exact pin and whether it is live"
+  hidden: false
+  runnable: true
+  long:
+    | Show the authoritative pin for a seat (from .beads/notify/seats.json)
+    | and whether that exact target is live in herdr.
+    |
+    | Delivery is exact: pinned target live -> deliver there; no pin or dead pin
+    | -> hold and escalate. Nothing here is scored or guessed. A moved pane is
+    | rewritten at drain time from the live agent session, and a restarted seat
+    | rebinds itself the next time it runs bd. No external timer is required.
+  flag --seat type=string default="" usage="assignee seat (required)"
+
+bd notify seats
+  use: "seats"
+  short: "List seats that have appeared in the outbox"
+  hidden: false
+  runnable: true
+
 bd notion
   use: "notion"
   short: "Notion integration commands"
@@ -5661,6 +5894,34 @@ bd priority
     |   bd priority bd-123 0    # Critical
     |   bd priority bd-123 2    # Medium
 
+bd progress
+  use: "progress"
+  short: "Comment progress helpers (comment.progress_required)"
+  group: "issues"
+  hidden: false
+  runnable: false
+  long:
+    | Helpers for the beads-owned comment progress gate.
+    |
+    | When comment.progress_required is true (house default), assigned work must show
+    | a progress trail before close: a comment since started_at, or a non-empty
+    | close --reason, or --force-no-comment --reason.
+    |
+    |   bd progress check [id...]   report assigned issues that would fail the gate
+    |
+
+bd progress check
+  use: "check [id...]"
+  short: "List assigned issues missing a fresh progress comment"
+  hidden: false
+  runnable: true
+
+bd progress stale
+  use: "stale"
+  short: "List assigned in_progress beads quiet longer than comment.stale_claim_after"
+  hidden: false
+  runnable: true
+
 bd promote
   use: "promote <wisp-id>"
   short: "Promote a wisp to a permanent bead"
@@ -5757,6 +6018,12 @@ bd prune
     | To delete closed ephemeral beads (wisps, transient molecules) use
     | `bd purge` instead.
     |
+    | --retain-ids retires every id the sweep deletes: a permanent tombstone (the id
+    | and its closed_at) is written in the same transaction, and from then on a
+    | create naming that id is refused (code idempotency_expired) and an import
+    | skips it. Use it when ids are idempotency keys that must never run twice.
+    | Tombstones are permanent.
+    |
     | For full Dolt storage reclaim after deleting many rows, follow with `bd flatten`
     | so history can be collapsed and old chunks can be garbage-collected.
     |
@@ -5771,6 +6038,7 @@ bd prune
   flag --ignore-references type=bool default="false" usage="Delete closed beads even when referenced by open beads (use with care; see --help for details)"
   flag --older-than type=string default="" usage="Only prune beads closed more than N ago (e.g., 30d, 2w, 60, 36h)"
   flag --pattern type=string default="" usage="Only prune beads matching ID glob pattern (e.g., 'gm-old-*')"
+  flag --retain-ids type=bool default="false" usage="Retire every pruned id with a permanent tombstone so it can never be created again (see --help)"
 
 bd purge
   use: "purge"
@@ -5801,6 +6069,12 @@ bd purge
     | --older-than takes days (7, 7d), weeks (2w) or a duration with hour precision
     | (36h, 168h, 90m).
     |
+    | --retain-ids retires every id the sweep deletes: a permanent tombstone (the id
+    | and its closed_at) is written in the same transaction, and from then on a
+    | create naming that id is refused (code idempotency_expired) and an import
+    | skips it. Use it when ids are idempotency keys that must never run twice.
+    | Tombstones are permanent.
+    |
     | To delete closed non-ephemeral beads (regular tasks, features, bugs, etc.)
     | use `bd prune` instead.
     |
@@ -5821,6 +6095,7 @@ bd purge
   flag --limit type=int default="0" usage="Purge at most N beads this run, oldest-closed first (0 = no limit); --json reports remaining/has_more"
   flag --older-than type=string default="" usage="Only purge beads closed more than N ago (e.g., 7d, 2w, 30, 36h)"
   flag --pattern type=string default="" usage="Only purge beads matching ID glob pattern (e.g., *-wisp-*)"
+  flag --retain-ids type=bool default="false" usage="Retire every purged id with a permanent tombstone so it can never be created again (see --help)"
   flag --wisps-plane type=bool default="false" usage="Select every closed row in the wisps table, including --no-history beads (requires --older-than or --pattern)"
 
 bd q
@@ -5838,6 +6113,7 @@ bd q
     |   ISSUE=$(bd q "New feature")    # Capture ID in variable
     |   bd q "Task" | xargs bd show    # Pipe to other commands
     |   bd q "Subtask" --parent=bd-a1b2  # Hierarchical child (outputs: bd-a1b2.1)
+  flag --due type=string default="" usage="Due date/time. Formats: +6h, +1d, +2w, tomorrow, next monday, 2025-01-15. Defaults to the priority ladder when due.required is on"
   flag --labels -l type=stringSlice default="[]" usage="Labels"
   flag --parent type=string default="" usage="Parent issue ID for hierarchical child (e.g., 'bd-a3f8e9')"
   flag --priority -p type=string default="2" usage="Priority (0-4 or P0-P4)"
@@ -6353,10 +6629,44 @@ bd search
   hidden: false
   runnable: true
   long:
-    | Search issues across title and ID (all statuses, including closed).
+    | Search issues across title, description, and ID (all statuses, including closed).
     |
-    | ID-like queries (e.g., "bd-123", "hq-319") use fast exact/prefix matching.
-    | Text queries search titles. Use --desc-contains for description search.
+    | Free-text queries search titles, descriptions, IDs and external refs.
+    |
+    | A query is treated as an ID only when it NAMES A BEAD: it has the shape of an
+    | issue ID (a prefix, then the last hyphen, then an identifier with no further
+    | hyphen) AND that prefix is one this database actually uses. The database is the
+    | gate, not the spelling: hyphenated, underscored, long and uppercase prefixes
+    | ("claude-config-a3f8e9", "bd_001-a3f8e9") are all ID queries where those
+    | prefixes exist. Matching is case-SENSITIVE throughout: only the exact-cased
+    | spelling is read as an ID, so in a "MyProject" database "MyProject-a3f8e9" is an
+    | ID query while "myproject-a3f8e9" is prose and may come back alongside every
+    | bead that cites that ID.
+    |
+    | Terms that merely look ID-shaped ("use-after-free", "race-condition",
+    | "rate-limit") name no prefix any database uses, so they are free text and do
+    | search descriptions — UNLESS everything before the term's LAST hyphen is a
+    | prefix this database uses. In a "bd"-prefixed database "bd-cli" is an ID query
+    | and therefore does NOT scan descriptions, even though it was meant as prose; in
+    | a "beads-vscode"-prefixed one so is "beads-vscode-plugin". Reach for
+    | bd list --desc-contains when a term collides with the local prefix.
+    |
+    | An ID query matches ID, title and external ref, and deliberately not
+    | descriptions, so naming a bead returns that bead rather than every bead that
+    | cites it in its body.
+    |
+    | An ID whose prefix this database does not use — a foreign ID, or one spelled in
+    | the wrong case — is indistinguishable from prose and is searched as free text;
+    | the id column is part of the free-text predicate, so it is still found by its ID
+    | text when the case matches, alongside anything that cites it.
+    |
+    | A wisp, proto or molecule ID ("bd-wisp-0laki") is NOT prose: everything before
+    | its last hyphen ("bd-wisp") is a prefix the database uses, so it is an ID query
+    | like any other.
+    |
+    | --desc-contains, --notes-contains and --external-contains are AND-ed with the
+    | query here, so they NARROW its matches, and this command always requires a
+    | query. The unconditional description search is: bd list --desc-contains "<term>".
     | Use --status open (etc.) to narrow; closed issues are included by default
     | so "was this already filed/fixed?" cannot silently answer no. Matches
     | beyond --limit are dropped status-blind, so when hunting live work in a
@@ -6401,6 +6711,93 @@ bd search
   flag --type -t type=string default="" usage="Filter by type (bug, feature, task, epic, chore, decision, message, molecule, gate, spike, story, milestone); custom types require types.custom config, and an unknown type is an error. Aliases: feat/enhancement→feature, mol→molecule, dec/adr→decision, mr→merge-request"
   flag --updated-after type=string default="" usage="Filter issues updated after date (YYYY-MM-DD or RFC3339)"
   flag --updated-before type=string default="" usage="Filter issues updated before date (YYYY-MM-DD or RFC3339)"
+
+bd seat
+  use: "seat"
+  short: "Mint durable agent identities, aliases, and exact endpoints"
+  hidden: false
+  runnable: false
+  long:
+    | An agent's identity is one immutable uuid, minted once at first
+    | registration and stored in the seat registry row and the agent's durable
+    | state file. It is never derived from a pane, tab, or session. Aliases are
+    | the mutable human names of a uuid.
+    |
+    | Endpoints are disposable: on every start the agent re-registers under its
+    | uuid (bd seat register --state <path> with session and pane), the endpoint
+    | re-asserts, and the uuid never changes. Senders address the uuid (or an
+    | alias, resolved exactly); delivery resolves the uuid to the live endpoint at
+    | send time and holds when it does not resolve.
+    |
+    | The first alias is the display name. A rename changes one seats.json row;
+    | beads, actors, and notify rows keep their original identity keys.
+
+bd seat backfill
+  use: "backfill"
+  short: "Report every legacy identity and re-key beads and pending notifications"
+  hidden: false
+  runnable: true
+  long:
+    | Report every assignee, creator, owner, and actor with its exact seat ID,
+    | including every unresolved string and affected bead. No name creates a seat.
+    | Without --apply this is a preview. Register real seats and their explicit
+    | aliases first. Unknown names remain reported with an empty assignee_id.
+    |
+    | Pending notify rows are re-keyed by exact registry lookup. Unknown rows stay
+    | queued unless --apply --flush-unresolved explicitly flushes them; each flushed
+    | row is listed, and the original ledger is preserved as outbox.jsonl.pre-seat-identity.
+    | Re-running the command is idempotent. Registry and outbox updates are serialized.
+  flag --apply type=bool default="false" usage="Apply the exact-name backfill"
+  flag --flush-unresolved type=bool default="false" usage="Explicitly flush unresolved notify rows, retaining a backup and per-row report"
+
+bd seat import-pins
+  use: "import-pins"
+  short: "One-time pins.json to seats.json migration (idempotent, reports every pin)"
+  hidden: false
+  runnable: true
+  annotations: {bd:skip_store="1"}
+
+bd seat list
+  use: "list"
+  short: "List the authoritative seat registry"
+  hidden: false
+  runnable: true
+  annotations: {bd:skip_store="1"}
+
+bd seat reconcile
+  use: "reconcile"
+  short: "Observe exact herdr sessions, mark stale/dead seats, and escalate dead endpoints"
+  hidden: false
+  runnable: true
+  annotations: {bd:skip_store="1"}
+  flag --dead-after type=duration default="5m0s" usage="Escalate after an endpoint has been continuously missing this long"
+
+bd seat register
+  use: "register [seat-id]"
+  short: "Mint an agent uuid, or re-register an endpoint under it"
+  hidden: false
+  runnable: true
+  annotations: {bd:skip_store="1"}
+  flag --agent-session type=string default="" usage="Exact agent session ID for endpoint reconciliation"
+  flag --alias type=stringSlice default="[]" usage="Explicit aliases (first is display name); only on first registration or mint"
+  flag --pane type=string default="" usage="Exact endpoint pane ID"
+  flag --session type=string default="" usage="Exact herdr endpoint session"
+  flag --state type=string default="" usage="Agent durable state file (default $BEADS_AGENT_STATE); mints or re-registers the uuid it holds"
+
+bd seat rename
+  use: "rename <seat-id>"
+  short: "Change aliases on exactly one seat row"
+  hidden: false
+  runnable: true
+  annotations: {bd:skip_store="1"}
+  flag --alias type=stringSlice default="[]" usage="Replace aliases; first alias is the display name"
+
+bd seat unbind
+  use: "unbind <seat-id>"
+  short: "Mark a seat endpoint dead while retaining its immutable identity"
+  hidden: false
+  runnable: true
+  annotations: {bd:skip_store="1"}
 
 bd send-metrics
   use: "send-metrics"
@@ -7146,6 +7543,7 @@ bd update
   flag --estimate -e type=int default="0" usage="Time estimate in minutes (e.g., 60 for 1 hour)"
   flag --external-ref type=string default="" usage="External reference (e.g., 'gh-9', 'jira-ABC', Linear URL)"
   flag --force type=bool default="false" usage="Override refusals: let -a/--assignee overwrite another actor's live in_progress claim (use only for abandoned claims — crashed agent, expired lease; prefer bd reclaim), let -s/--status move the issue into closed (or a configured done status) despite open children or a live blocker (same as bd close --force), and let --notes overwrite existing non-empty notes (use --append-notes to preserve history instead)"
+  flag --force-no-due type=bool default="false" usage="Permit --due=\"\" to clear the due date when due.required is on. Requires --reason"
   flag --history type=bool default="false" usage="Clear no-history flag (re-enable Dolt commit history)"
   flag --if-assignee type=string default="" usage="Apply the update only if the current assignee equals this value (--if-assignee '' requires unassigned); a mismatch writes nothing and exits 13 (vs 1 for other failures). Requires a field update; cannot combine with --claim"
   flag --if-revision type=string default="" usage="Apply the write only if the issue's current revision equals this value (the decimal int64 from `bd show --json`'s \"revision\" field). One id only: refused before any write when combined with more than one issue id. A mismatch writes nothing and exits 13 (vs 1 for other failures). Composes with --if-assignee/--if-status: all guards present must hold."
@@ -7157,7 +7555,11 @@ bd update
   flag --parent type=string default="" usage="New parent issue ID (reparents the issue, use empty string to remove parent)"
   flag --persistent type=bool default="false" usage="Mark issue as persistent (promote wisp to regular issue)"
   flag --priority -p type=string default="" usage="Priority (0-4 or P0-P4, 0=highest)"
+  flag --reason type=string default="" usage="Why the due date is being cleared (required with --force-no-due)"
   flag --remove-label type=stringSlice default="[]" usage="Remove labels (repeatable)"
+  flag --repeat type=string default="" usage="Recurrence rule, empty to stop repeating: an interval (+1d, +2w) or 5-field cron (\"0 9 * * 1\")"
+  flag --repeat-end type=string default="" usage="Last occurrence (empty to clear). Same formats as --due"
+  flag --repeat-start type=string default="" usage="Earliest occurrence (empty to clear). Same formats as --due"
   flag --session type=string default="" usage="Claude Code session ID for status=closed (or set CLAUDE_SESSION_ID env var)"
   flag --set-labels type=stringSlice default="[]" usage="Set labels, replacing all existing (repeatable)"
   flag --set-metadata type=stringArray default="[]" usage="Set metadata key=value (repeatable, e.g., --set-metadata team=platform)"
@@ -7167,6 +7569,7 @@ bd update
   flag --title type=string default="" usage="New title"
   flag --type -t type=string default="" usage="New type (bug|feature|task|epic|chore|decision|spike|story|milestone); custom types require types.custom config; aliases: enhancement/feat→feature, dec/adr→decision"
   flag --unset-metadata type=stringArray default="[]" usage="Remove metadata key (repeatable, e.g., --unset-metadata team)"
+  flag --window type=string default="" usage="Quiet window for a recurring bead: \"HH:MM-HH:MM IANA/Zone\" (example: \"09:00-20:00 America/New_York\"). Empty clears the window."
 
 bd upgrade
   use: "upgrade"

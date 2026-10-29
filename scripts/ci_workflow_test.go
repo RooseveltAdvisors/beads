@@ -1539,14 +1539,13 @@ func TestPinnedDoltCLIMatchesContainerImage(t *testing.T) {
 	}
 }
 
-// TestPinnedDoltCLIAtLeastRecommendedMin guards doltversion.RecommendedMin
-// against the pinned Dolt CLI version (scripts/ci/install-dolt.sh) drifting
-// below it (#7500). TestPinnedDoltCLIMatchesContainerImage holds the container
-// image and tools/bazel/dolt.bzl to that same pin, so this covers every CI
-// Dolt. A pin lowered below RecommendedMin would mean every CI run exercises a
-// Dolt CLI the package's own policy already warns is below the matrix-tested
-// floor.
-func TestPinnedDoltCLIAtLeastRecommendedMin(t *testing.T) {
+// TestPinnedDoltCLIAtLeastRequiredMin guards doltversion.RequiredMin against
+// the pinned Dolt CLI version (scripts/ci/install-dolt.sh) drifting below it
+// (#7500). TestPinnedDoltCLIMatchesContainerImage holds the container image
+// and tools/bazel/dolt.bzl to that same pin, so this covers every CI Dolt. A
+// pin below RequiredMin would make bd refuse every CI server-mode test's
+// server.
+func TestPinnedDoltCLIAtLeastRequiredMin(t *testing.T) {
 	root := sourceRepoRoot(t)
 
 	installer, err := os.ReadFile(filepath.Join(root, "scripts", "ci", "install-dolt.sh"))
@@ -1556,8 +1555,8 @@ func TestPinnedDoltCLIAtLeastRecommendedMin(t *testing.T) {
 	cliVersion := captureOne(t, `(?m)^readonly version="([0-9]+\.[0-9]+\.[0-9]+)"$`, string(installer), "scripts/ci/install-dolt.sh")
 
 	pinned := doltversion.MustParse(cliVersion)
-	if !pinned.AtLeast(doltversion.RecommendedMin) {
-		t.Errorf("pinned Dolt CLI %s is below doltversion.RecommendedMin %s", cliVersion, doltversion.RecommendedMin)
+	if !pinned.AtLeast(doltversion.RequiredMin) {
+		t.Errorf("pinned Dolt CLI %s is below doltversion.RequiredMin %s", cliVersion, doltversion.RequiredMin)
 	}
 }
 
@@ -1852,10 +1851,10 @@ var bazelAdvisoryLanes = map[string]string{
 }
 
 // bazel-integration's if: remote (modes remote, fork-ro, fork-rw: enabled),
-// or local with the read-only cache (mode cache: fork and Dependabot PRs
-// while rbe-fork is closed, whose only PR-time integration run it is; a
-// warm run builds and tests only what the PR changed), never plain local
-// (rbe=off: a cold tagged race build of //... on one runner); and off when a
+// or local with the read-only cache (mode cache: rbe=cache dispatches, on
+// Blacksmith; a warm run builds and tests only what changed), never plain
+// local (rbe=off, and fork and Dependabot PRs while rbe-fork is closed: a
+// cold tagged race build of //... on one runner); and off when a
 // caller passes integration: "off" (pr.yml and bazel-farm.yml pass "on"). A
 // string input: on push and dispatch it is null, and null != 'off', so the
 // lane keeps running on main.
@@ -2065,10 +2064,11 @@ func TestBazelWorkflowJobsAndExecutionMode(t *testing.T) {
 	}
 	// Every lane needs the rbe job and takes its runner, skip rule and
 	// setup-bazel env from that job's outputs alone. Remote runs use the
-	// Blacksmith pool; fork modes (fork-ro/fork-rw: remote execution with an
-	// rbe-fork-mint certificate, the runner only a client), local and cache
-	// runs (forks while rbe-fork is closed, rbe=off/cache) the GitHub-hosted
-	// runner. Only mode remote gets the secrets; fork modes get
+	// Blacksmith pool, and so do cache runs (rbe=cache dispatches: rbe-cache
+	// refuses GitHub-hosted runners); fork modes (fork-ro/fork-rw: remote
+	// execution with an rbe-fork-mint certificate, the runner only a
+	// client) and local runs (forks while rbe-fork is closed, rbe=off) the
+	// GitHub-hosted runner. Only mode remote gets the secrets; fork modes get
 	// BAZEL_FORK_REMOTE (setup-bazel mints the certificate), cache runs
 	// BAZEL_FORK_CACHE.
 	wantRunsOn := bazelLaneRunsOn
@@ -4112,13 +4112,13 @@ func TestBazelIntegrationJob(t *testing.T) {
 	// GitHub run took 17 minutes end to end) followed by the longest test
 	// action, which .bazelrc caps at its test:integration --test_timeout
 	// (rbe-west's 1200s limit). The job adds setup and log upload. In mode
-	// cache it runs on a 4-CPU GitHub-hosted runner, and with the read-only
+	// cache it runs on a 4-CPU Blacksmith runner, and with the read-only
 	// cache closed (the farm's kill switch) the whole suite builds and runs
 	// there cold, about 30 minutes simulated: the step keeps twice that.
 	const coldCompileMinutes = 20
 	const cacheClosedMinutes = 30
 	if test.TimeoutMinutes < 2*cacheClosedMinutes {
-		t.Errorf("%s test step timeout-minutes = %d, want at least %d (mode cache with the cache closed: ~%d minutes cold on a GitHub-hosted runner)",
+		t.Errorf("%s test step timeout-minutes = %d, want at least %d (mode cache with the cache closed: ~%d minutes cold on a 4-CPU runner)",
 			bazelIntegJobName, test.TimeoutMinutes, 2*cacheClosedMinutes, cacheClosedMinutes)
 	}
 	actionCapMinutes := 0
@@ -5015,6 +5015,7 @@ func TestBazelRBEJobDecidesOnce(t *testing.T) {
 		"RBE_INPUT_CACHE": "${{ inputs.rbe == 'cache' }}",
 		"PULL_REQUEST":    prRiskPullRequestValue,
 		"FORK":            "${{ github.event.pull_request.head.repo.fork == true }}",
+		"FORK_REPO":       bazelForkRepoValue,
 		"DEPENDABOT":      prRiskDependabotValue,
 		"FORK_FARM":       bazelForkFarmValue,
 		"HAS_EXECUTOR":    bazelRBESecretValue,
@@ -5049,7 +5050,7 @@ func TestBazelRBEJobDecidesOnce(t *testing.T) {
 	}
 
 	// Nothing outside the decision step re-derives the condition.
-	rederive := regexp.MustCompile(`(?i)vars\.RBE_WEST_WORKERS|inputs\.rbe\b|inputs\.fork-farm|head\.repo\.fork|github\.actor|dependabot`)
+	rederive := regexp.MustCompile(`(?i)vars\.RBE_WEST_WORKERS|inputs\.rbe\b|inputs\.fork-farm|head\.repo\.fork|github\.repository_owner|github\.actor|dependabot`)
 	walkYAML(readYAMLNode(t, filepath.Join(".github", "workflows", bazelWorkflowName)), "", func(path string, key bool, value string) {
 		// The decision step itself (its env and, since rbe-fork, its run:
 		// the DEPENDABOT fact) is the one place that may.
@@ -5110,26 +5111,27 @@ func TestBazelRBEJobDecidesOnce(t *testing.T) {
 		{"var in other case", facts{"True", "on", "grpcs://x", false, false, false, false, ""}, "remote", "true", ""},
 		// Fork and Dependabot pull_request runs: rbe-fork decides. Open:
 		// remote execution with a mint certificate, tier ro or rw. Closed,
-		// refusing, unreachable or nonsense: local execution with the
-		// read-only cache, as before rbe-fork (rbe=cache simulates them);
-		// rbe=off drops the cache too.
+		// refusing, unreachable or nonsense: local execution, never the
+		// read-only cache (rbe-cache refuses GitHub-hosted runners, where
+		// these lanes run). rbe=cache, the only way into mode cache,
+		// simulates them with the cache, from Blacksmith; rbe=off without.
 		{"fork PR, mint ro", facts{"true", "", "", true, false, true, false, "ro"}, "fork-ro", "true", "ro"},
 		{"fork PR, mint rw", facts{"true", "", "", true, false, true, false, "rw"}, "fork-rw", "true", "rw"},
 		{"fork PR, mint ro, var unset (forks cannot read it)", facts{"", "", "", true, false, true, false, "ro"}, "fork-ro", "true", "ro"},
 		{"fork PR somehow with the secret, mint ro", facts{"true", "", "grpcs://x", true, false, true, false, "ro"}, "fork-ro", "true", "ro"},
 		{"Dependabot PR, mint ro", facts{"true", "", "", false, false, true, true, "ro"}, "fork-ro", "true", "ro"},
 		{"Dependabot PR, var unset, mint ro", facts{"", "", "", false, false, true, true, "ro"}, "fork-ro", "true", "ro"},
-		{"fork PR, mint unreachable", facts{"true", "", "", true, false, true, false, ""}, "cache", "false", ""},
-		{"fork PR, mint closed", facts{"true", "", "", true, false, true, false, "closed"}, "cache", "false", ""},
-		{"fork PR, rw tier closed", facts{"true", "", "", true, false, true, false, "rw-closed"}, "cache", "false", ""},
-		{"fork PR, canary refuses", facts{"true", "", "", true, false, true, false, "canary"}, "cache", "false", ""},
-		{"fork PR, mint busy", facts{"true", "", "", true, false, true, false, "busy"}, "cache", "false", ""},
-		{"fork PR, mint answers garbage", facts{"true", "", "", true, false, true, false, "garbage"}, "cache", "false", ""},
-		{"fork PR, mint answers an unknown tier", facts{"true", "", "", true, false, true, false, "evil"}, "cache", "false", ""},
-		{"fork PR, var unset, mint unreachable", facts{"", "", "", true, false, true, false, ""}, "cache", "false", ""},
-		{"fork PR, var false, mint unreachable", facts{"false", "", "", true, false, true, false, ""}, "cache", "false", ""},
-		{"Dependabot PR, mint unreachable", facts{"true", "", "", false, false, true, true, ""}, "cache", "false", ""},
-		{"Dependabot, var unset, mint unreachable", facts{"", "", "", false, false, true, true, ""}, "cache", "false", ""},
+		{"fork PR, mint unreachable", facts{"true", "", "", true, false, true, false, ""}, "local", "false", ""},
+		{"fork PR, mint closed", facts{"true", "", "", true, false, true, false, "closed"}, "local", "false", ""},
+		{"fork PR, rw tier closed", facts{"true", "", "", true, false, true, false, "rw-closed"}, "local", "false", ""},
+		{"fork PR, canary refuses", facts{"true", "", "", true, false, true, false, "canary"}, "local", "false", ""},
+		{"fork PR, mint busy", facts{"true", "", "", true, false, true, false, "busy"}, "local", "false", ""},
+		{"fork PR, mint answers garbage", facts{"true", "", "", true, false, true, false, "garbage"}, "local", "false", ""},
+		{"fork PR, mint answers an unknown tier", facts{"true", "", "", true, false, true, false, "evil"}, "local", "false", ""},
+		{"fork PR, var unset, mint unreachable", facts{"", "", "", true, false, true, false, ""}, "local", "false", ""},
+		{"fork PR, var false, mint unreachable", facts{"false", "", "", true, false, true, false, ""}, "local", "false", ""},
+		{"Dependabot PR, mint unreachable", facts{"true", "", "", false, false, true, true, ""}, "local", "false", ""},
+		{"Dependabot, var unset, mint unreachable", facts{"", "", "", false, false, true, true, ""}, "local", "false", ""},
 		{"dispatch rbe=cache", facts{"true", "cache", "grpcs://x", false, false, false, false, ""}, "cache", "false", ""},
 		{"dispatch rbe=cache, var unset", facts{"", "cache", "", false, false, false, false, ""}, "cache", "false", ""},
 		{"call rbe=CACHE", facts{"true", "CACHE", "grpcs://x", false, false, true, false, ""}, "cache", "false", ""},
@@ -5138,7 +5140,7 @@ func TestBazelRBEJobDecidesOnce(t *testing.T) {
 		{"call rbe=OFF", facts{"true", "OFF", "grpcs://x", false, false, true, false, ""}, "local", "false", ""},
 		{"fork PR rbe=off, mint ro", facts{"true", "off", "", true, false, true, false, "ro"}, "local", "false", ""},
 		{"same-repo, var unset", facts{"", "", "grpcs://x", false, false, true, false, ""}, "skip", "false", ""},
-		{"same-repo without the secret", facts{"true", "", "", false, false, true, false, ""}, "cache", "false", ""},
+		{"same-repo without the secret", facts{"true", "", "", false, false, true, false, ""}, "local", "false", ""},
 		{"var false", facts{"false", "on", "grpcs://x", false, false, false, false, ""}, "skip", "false", ""},
 		// bazel-farm.yml's authorized fork runs: remote or nothing, never
 		// a second local run (pr.yml already runs one). Not a pull_request
@@ -5149,32 +5151,39 @@ func TestBazelRBEJobDecidesOnce(t *testing.T) {
 		{"authorized fork farm, rbe=off", facts{"true", "off", "grpcs://x", true, true, false, false, ""}, "local", "false", ""},
 		// A fork run that is neither a pull_request nor authorized
 		// (pull_request_target without bazel-farm.yml's inputs) stays local.
-		{"fork, not authorized, secret", facts{"true", "", "grpcs://x", true, false, false, false, "ro"}, "cache", "false", ""},
+		{"fork, not authorized, secret", facts{"true", "", "grpcs://x", true, false, false, false, "ro"}, "local", "false", ""},
+	}
+	caseEnv := func(in facts, forkRepo bool) map[string]string {
+		env := map[string]string{
+			"RBE_VAR_ON":      strconv.FormatBool(strings.EqualFold(in.rbeVar, "true")),
+			"RBE_INPUT_OFF":   strconv.FormatBool(strings.EqualFold(in.rbeInput, "off")),
+			"RBE_INPUT_CACHE": strconv.FormatBool(strings.EqualFold(in.rbeInput, "cache")),
+			"PULL_REQUEST":    strconv.FormatBool(in.pr),
+			"FORK":            strconv.FormatBool(in.fork),
+			"FORK_REPO":       strconv.FormatBool(forkRepo),
+			"DEPENDABOT":      strconv.FormatBool(in.dependabot),
+			"FORK_FARM":       strconv.FormatBool(in.farm),
+			"HAS_EXECUTOR":    strconv.FormatBool(in.secret != ""),
+			"PR_NUMBER":       "",
+			bazelTestMintEnv:  in.mint,
+		}
+		if in.pr || in.farm {
+			env["PR_NUMBER"] = "7123"
+		}
+		return env
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			env := map[string]string{
-				"RBE_VAR_ON":      strconv.FormatBool(strings.EqualFold(c.in.rbeVar, "true")),
-				"RBE_INPUT_OFF":   strconv.FormatBool(strings.EqualFold(c.in.rbeInput, "off")),
-				"RBE_INPUT_CACHE": strconv.FormatBool(strings.EqualFold(c.in.rbeInput, "cache")),
-				"PULL_REQUEST":    strconv.FormatBool(c.in.pr),
-				"FORK":            strconv.FormatBool(c.in.fork),
-				"DEPENDABOT":      strconv.FormatBool(c.in.dependabot),
-				"FORK_FARM":       strconv.FormatBool(c.in.farm),
-				"HAS_EXECUTOR":    strconv.FormatBool(c.in.secret != ""),
-				"PR_NUMBER":       "",
-				bazelTestMintEnv:  c.in.mint,
-			}
-			if c.in.pr || c.in.farm {
-				env["PR_NUMBER"] = "7123"
-			}
-			out, log, err := runBazelRBEDecisionLog(t, step.Run, env)
+			out, log, summary, err := runBazelRBEDecisionSummary(t, step.Run, caseEnv(c.in, false))
 			if err != nil {
 				t.Fatal(err)
 			}
 			want := map[string]string{"mode": c.mode, "enabled": c.enabled, "tier": c.tier}
 			if !reflect.DeepEqual(out, want) {
 				t.Errorf("outputs = %v, want %v", out, want)
+			}
+			if strings.Contains(summary, bazelForkRepoSummary) {
+				t.Errorf("summary says %q outside a fork repository:\n%s", bazelForkRepoSummary, summary)
 			}
 			// The mint is asked exactly for fork and Dependabot
 			// pull_request runs not forced local or cache, about this run.
@@ -5191,14 +5200,44 @@ func TestBazelRBEJobDecidesOnce(t *testing.T) {
 			}
 		})
 	}
+	// The same starts in a fork repository's own CI (github.repository's
+	// owner is not gastownhall: a push to the fork, a PR within it, a
+	// dispatch there): mode local whatever else holds, so no lane reads
+	// rbe-cache (mode cache's --config=fork-cache and its probes), the mint
+	// is never asked, and the summary says why. Fork PRs into beads run
+	// with github.repository gastownhall/beads (the table above).
+	for _, c := range cases {
+		t.Run("fork repository's own CI: "+c.name, func(t *testing.T) {
+			env := caseEnv(c.in, true)
+			env["GITHUB_REPOSITORY"] = bazelForkRepoName
+			out, log, summary, err := runBazelRBEDecisionSummary(t, step.Run, env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := map[string]string{"mode": "local", "enabled": "false", "tier": ""}; !reflect.DeepEqual(out, want) {
+				t.Errorf("outputs = %v, want %v", out, want)
+			}
+			if log != "" {
+				t.Errorf("asked the mint from a fork repository's own CI:\n%s", log)
+			}
+			if !strings.Contains(summary, bazelForkRepoSummary) || !strings.Contains(summary, "fork repository: true") {
+				t.Errorf("summary does not say %q:\n%s", bazelForkRepoSummary, summary)
+			}
+		})
+	}
 	// A value that is not a boolean fails the job rather than picking a mode.
 	if out, err := runBazelRBEDecision(t, step.Run, map[string]string{
-		"RBE_VAR_ON": "true", "RBE_INPUT_OFF": "false", "RBE_INPUT_CACHE": "false", "PULL_REQUEST": "false", "FORK": "", "DEPENDABOT": "false", "FORK_FARM": "false", "HAS_EXECUTOR": "true",
+		"RBE_VAR_ON": "true", "RBE_INPUT_OFF": "false", "RBE_INPUT_CACHE": "false", "PULL_REQUEST": "false", "FORK": "", "FORK_REPO": "false", "DEPENDABOT": "false", "FORK_FARM": "false", "HAS_EXECUTOR": "true",
 	}); err == nil {
 		t.Errorf("decision with FORK='' succeeded with %v; want failure", out)
 	}
 	if out, err := runBazelRBEDecision(t, step.Run, map[string]string{
-		"RBE_VAR_ON": "true", "RBE_INPUT_OFF": "false", "PULL_REQUEST": "false", "FORK": "false", "DEPENDABOT": "false", "FORK_FARM": "false", "HAS_EXECUTOR": "true",
+		"RBE_VAR_ON": "true", "RBE_INPUT_OFF": "false", "RBE_INPUT_CACHE": "false", "PULL_REQUEST": "false", "FORK": "false", "DEPENDABOT": "false", "FORK_FARM": "false", "HAS_EXECUTOR": "true",
+	}); err == nil {
+		t.Errorf("decision without FORK_REPO succeeded with %v; want failure", out)
+	}
+	if out, err := runBazelRBEDecision(t, step.Run, map[string]string{
+		"RBE_VAR_ON": "true", "RBE_INPUT_OFF": "false", "PULL_REQUEST": "false", "FORK": "false", "FORK_REPO": "false", "DEPENDABOT": "false", "FORK_FARM": "false", "HAS_EXECUTOR": "true",
 	}); err == nil {
 		t.Errorf("decision without RBE_INPUT_CACHE succeeded with %v; want failure", out)
 	}
@@ -5206,7 +5245,7 @@ func TestBazelRBEJobDecidesOnce(t *testing.T) {
 	// asking the mint about something else.
 	for _, n := range []string{"", "0", "12a", "1&repo=gascity", "1234567890"} {
 		if out, err := runBazelRBEDecision(t, step.Run, map[string]string{
-			"RBE_VAR_ON": "false", "RBE_INPUT_OFF": "false", "RBE_INPUT_CACHE": "false", "PULL_REQUEST": "true", "FORK": "true", "DEPENDABOT": "false",
+			"RBE_VAR_ON": "false", "RBE_INPUT_OFF": "false", "RBE_INPUT_CACHE": "false", "PULL_REQUEST": "true", "FORK": "true", "FORK_REPO": "false", "DEPENDABOT": "false",
 			"FORK_FARM": "false", "HAS_EXECUTOR": "false", "PR_NUMBER": n, bazelTestMintEnv: "ro",
 		}); err == nil {
 			t.Errorf("decision with PR_NUMBER %q succeeded with %v; want failure", n, out)
@@ -5250,8 +5289,23 @@ func runBazelRBEDecision(t *testing.T, script string, env map[string]string) (ma
 	return out, err
 }
 
+// bazelForkRepoSummary: the decide step's step-summary reason for mode local
+// in a fork repository's own CI.
+// (bazelForkRepoName is the stand-in fork the tests run it in).
+const (
+	bazelForkRepoName    = "someone/beads"
+	bazelForkRepoSummary = "Fork repository's own CI (" + bazelForkRepoName + "): local, no rbe-cache"
+)
+
 // runBazelRBEDecisionLog: runBazelRBEDecision, plus the stub's curl log.
 func runBazelRBEDecisionLog(t *testing.T, script string, env map[string]string) (map[string]string, string, error) {
+	t.Helper()
+	out, log, _, err := runBazelRBEDecisionSummary(t, script, env)
+	return out, log, err
+}
+
+// runBazelRBEDecisionSummary: runBazelRBEDecisionLog, plus the step summary.
+func runBazelRBEDecisionSummary(t *testing.T, script string, env map[string]string) (map[string]string, string, string, error) {
 	t.Helper()
 	dir := t.TempDir()
 	output := filepath.Join(dir, "output")
@@ -5272,18 +5326,19 @@ func runBazelRBEDecisionLog(t *testing.T, script string, env map[string]string) 
 	b, err := cmd.CombinedOutput()
 	logData, _ := os.ReadFile(curlLog)
 	if err != nil {
-		return nil, string(logData), fmt.Errorf("%v: %s", err, b)
+		return nil, string(logData), "", fmt.Errorf("%v: %s", err, b)
 	}
 	data, err := os.ReadFile(output)
 	if err != nil {
-		return nil, string(logData), err
+		return nil, string(logData), "", err
 	}
 	out := map[string]string{}
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		k, v, _ := strings.Cut(line, "=")
 		out[k] = v
 	}
-	return out, string(logData), nil
+	summary, _ := os.ReadFile(filepath.Join(dir, "summary"))
+	return out, string(logData), string(summary), nil
 }
 
 // write-bazelrc.sh: no secrets means a local-only rc, plus --config=fork-cache
@@ -6160,7 +6215,7 @@ func TestBazelCmdDoltJob(t *testing.T) {
 	job := workflow.job(t, bazelCmdDoltJobName)
 	assertBazelTierStep(t, job, bazelCmdDoltJobName, config)
 	test := job.step(t, "bazel test //... --config="+config)
-	// Mode cache runs the shards on a 4-CPU GitHub-hosted runner; with the
+	// Mode cache runs the shards on a 4-CPU Blacksmith runner; with the
 	// read-only cache closed the cold tagged race build comes first (as in
 	// TestBazelIntegrationJob).
 	if test.TimeoutMinutes < 60 || job.TimeoutMinutes <= test.TimeoutMinutes || job.TimeoutMinutes > test.TimeoutMinutes+15 {
@@ -6407,4 +6462,29 @@ func TestDoltImagePullWorkflowsUseRetryHelper(t *testing.T) {
 			t.Errorf("%s still pulls the Dolt image without retries", name)
 		}
 	}
+}
+
+// The full macOS suite (main.yml's Test (macOS)) runs only after a merge, so
+// a PR that breaks ./scripts on macOS's /bin/bash 3.2 merged green and turned
+// main red (#7818: mapfile and empty "${arr[@]}" under set -u). The PR's
+// macOS leg runs the whole ./scripts package so the required CI gate sees
+// that break before the merge.
+func TestPRWorkflowRunsScriptsPackageOnMacOS(t *testing.T) {
+	const (
+		jobName  = "pr-preflight-platforms"
+		stepName = "Run the scripts package on macOS's Bash"
+	)
+	workflow := readCIWorkflow(t, "pr.yml")
+	job := workflow.job(t, jobName)
+	if job.If != ciScopePlatformsIf || job.ContinueOnError {
+		t.Fatalf("%s is bypassable: if=%q continue-on-error=%v", jobName, job.If, job.ContinueOnError)
+	}
+	step := job.step(t, stepName)
+	if step.If != "matrix.os == 'macos-latest'" || step.Shell != "bash" ||
+		step.Env["GOCACHE"] != goBuildCachePath("non-race") ||
+		(step.ContinueOnError != nil && step.ContinueOnError != false) {
+		t.Fatalf("macOS scripts step is conditional on the wrong host, optional, or misses the restored cache: %+v", step)
+	}
+	assertStepRunsExactly(t, job, stepName, "go test '-tags=gms_pure_go' -count=1 ./scripts")
+	assertStepsBefore(t, job, []string{"Set up Go", "Restore non-race Go build cache"}, []string{stepName})
 }

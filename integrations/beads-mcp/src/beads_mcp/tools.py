@@ -574,9 +574,11 @@ async def beads_update_issue(
 ) -> Issue | list[Issue]:
     """Update an existing issue.
 
-    Note: Setting status to 'closed' or 'open' will automatically route to
-    beads_close_issue() or beads_reopen_issue() respectively to ensure
-    proper approval workflows are followed.
+    Note: Setting status to 'closed' routes to beads_close_issue() to ensure
+    proper approval workflows are followed. Setting status to 'open' reopens a
+    closed issue through `bd reopen` (notes become the reason) and still applies
+    the other fields; on an issue that is not closed it is an ordinary update
+    that also clears defer_until. Either way it returns the one updated issue.
     """
     # Smart routing: intercept lifecycle status changes and route to dedicated tools
     if status == "closed":
@@ -584,13 +586,9 @@ async def beads_update_issue(
         reason = notes if notes else "Completed"
         return await beads_close_issue(issue_id=issue_id, reason=reason)
 
-    if status == "open":
-        # Route to reopen tool to respect approval workflows
-        reason = notes if notes else "Reopened"
-        return await beads_reopen_issue(issue_ids=[issue_id], reason=reason)
-
-    # Normal attribute updates proceed as usual
     client = await _get_client()
+    # Built before bd reopen runs, so pydantic rejects an out-of-range priority
+    # before anything changes; bd validates the other fields itself.
     params = UpdateIssueParams(
         issue_id=issue_id,
         status=status,
@@ -607,6 +605,37 @@ async def beads_update_issue(
         clear_due_reason=clear_due_reason,
         repeat=repeat,
     )
+    if status == "open":
+        # Reopen through bd reopen to respect approval workflows; bd decides what is closed.
+        reopened = await client.reopen(ReopenIssueParams(issue_ids=[issue_id], reason=notes or "Reopened"))
+        if reopened:
+            # notes was the reopen reason. Apply the rest; like update, skip None and "".
+            rest = params.model_copy(update={"status": None, "notes": None})
+            fields = rest.model_dump(exclude={"issue_id"})
+            # force_no_due and clear_due_reason modify the one due clear rather
+            # than naming a field of their own; force_no_due's False default
+            # would otherwise read as a field that is present. A clear that IS
+            # requested still gets named, as `due`.
+            dueClearModifiers = {"force_no_due", "clear_due_reason"}
+            pending = [
+                name for name, value in fields.items()
+                if name not in dueClearModifiers and value not in (None, "")
+            ]
+            if (rest.force_no_due or rest.clear_due_reason) and "due" not in pending:
+                pending.append("due")
+            if not pending:
+                return reopened[0]
+            try:
+                return await client.update(rest)
+            except BdError as e:
+                raise BdError(
+                    f"{issue_id} was reopened, but {', '.join(pending)} could not be applied. "
+                    f"Retry without notes, which would now replace the notes field. Cause: {e}"
+                ) from e
+        # bd reopen changed nothing, so the issue is not closed: an ordinary update that
+        # also clears defer_until, as bd reopen does, so a dated defer is ready again.
+        params = params.model_copy(update={"defer_until": ""})
+
     return await client.update(params)
 
 
@@ -647,7 +676,15 @@ async def beads_reopen_issue(
     """
     client = await _get_client()
     params = ReopenIssueParams(issue_ids=issue_ids, reason=reason)
-    return await client.reopen(params)
+    reopened = await client.reopen(params)
+    if not reopened:
+        verb = "is" if len(issue_ids) == 1 else "are"
+        raise BdError(
+            f"Nothing to reopen: {', '.join(issue_ids)} {verb} not closed. "
+            "reopen only applies to closed issues; use update(status=...) to change "
+            "the status of an open, deferred or blocked issue."
+        )
+    return reopened
 
 
 async def beads_add_dependency(

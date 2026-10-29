@@ -622,6 +622,8 @@ class BdCliClient(BdClientBase):
             raise BdCommandError("force_no_due=True only applies when clearing a due date (due='')")
         if params.repeat is not None:
             args.extend(["--repeat", params.repeat])
+        if params.defer_until is not None:  # "" is meaningful: it clears the defer
+            args.extend(["--defer", params.defer_until])
 
         data = await self._run_command(*args)
         # bd update returns an array, extract first element
@@ -688,6 +690,10 @@ class BdCliClient(BdClientBase):
             args.extend(["--reason", params.reason])
 
         data = await self._run_command(*args)
+        # bd reopen reports no-ops (already open / not a done status) on
+        # stderr only (RULING R4 in cmd/bd/reopen.go), so empty stdout is [].
+        if data == {}:
+            data = []
         if not isinstance(data, list):
             raise BdCommandError(f"Invalid response for reopen {params.issue_ids}")
 

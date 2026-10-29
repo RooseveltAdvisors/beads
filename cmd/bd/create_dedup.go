@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/steveyegge/beads/internal/config"
 	"github.com/steveyegge/beads/internal/dedup"
+	"github.com/steveyegge/beads/internal/remedy"
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/types"
 	"github.com/steveyegge/beads/issueops"
@@ -78,6 +80,12 @@ func formatDuplicateBlockError(conflict *dedup.ConflictResult) string {
 
 	pct := int(math.Round(conflict.Similarity * 100))
 
+	// The duplicate's id goes into the two commands as a shell word, so a
+	// stored id that is not a plain word cannot run when the hint is pasted
+	// (remedy.CommandArg); the detail lines above them keep it as the store
+	// holds it, which is prose rather than a command.
+	idArg, idNote := remedy.CommandArg(runtime.GOOS, issue.ID, "<issue-id>")
+
 	var b strings.Builder
 	// 1. Conflict first
 	fmt.Fprintf(&b, "blocked: potential duplicate of active issue %s (%d%% similar)\n", issue.ID, pct)
@@ -88,8 +96,12 @@ func formatDuplicateBlockError(conflict *dedup.ConflictResult) string {
 	fmt.Fprintf(&b, "    Priority: P%d\n", issue.Priority)
 	fmt.Fprintf(&b, "    Assignee: %s\n", assignee)
 	fmt.Fprintf(&b, "  Action:\n")
-	fmt.Fprintf(&b, "    View:     bd show %s\n", issue.ID)
-	fmt.Fprintf(&b, "    Claim:    bd update %s --claim\n", issue.ID)
+	fmt.Fprintf(&b, "    View:     bd show %s\n", idArg)
+	fmt.Fprintf(&b, "    Claim:    bd update %s --claim\n", idArg)
+	if idNote != "" {
+		fmt.Fprint(&b, idNote)
+		fmt.Fprintln(&b)
+	}
 	fmt.Fprintf(&b, "\n")
 	// 2. Bypass flags second
 	fmt.Fprintf(&b, "To bypass this check:\n")

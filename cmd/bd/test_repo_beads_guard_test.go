@@ -81,7 +81,54 @@ const suiteRootPrefix = "beads-bd-tests-"
 
 // Guardrail: ensure the cmd/bd test suite does not touch the real repo .beads state.
 // Disable with BEADS_TEST_GUARD_DISABLE=1 (useful when running tests while actively using beads).
+// inheritedBDEnv names the BD_ variables this test process STARTED with: a
+// developer's shell, a parent bd (a git hook or `bd` driving `go test`), or
+// CI. bdEnv drops those, because one of them (BD_JSON_ENVELOPE=1, say, which
+// nests the payload under `data`) reshapes the output a test then asserts on,
+// so a leak could turn a green suite red — or, worse, green for the wrong
+// reason. A BD_ var set AFTER this snapshot is the suite's own control:
+// TestMain's package-wide dedup opt-out and freeze pin below, or a test's
+// t.Setenv ceiling, and bdEnv forwards it.
+//
+// Declared in this file rather than beside bdEnv because bdEnv is cgo-only
+// and TestMain is not: the symbol must exist in both builds.
+var inheritedBDEnv = map[string]bool{}
+
+// snapshotInheritedBDEnv records the inherited BD_ names. It must be the
+// first thing TestMain does, before this suite sets any of its own.
+func snapshotInheritedBDEnv() {
+	for _, e := range os.Environ() {
+		name, _, ok := strings.Cut(e, "=")
+		if ok && strings.HasPrefix(name, "BD_") {
+			inheritedBDEnv[name] = true
+		}
+	}
+}
+
+// filterAmbientEnv returns es with the ambient beads configuration a bd
+// subprocess must not inherit: BEADS_* and BD_ROUTING_MODE always (a shell
+// pointing at a shared Dolt server or a real workspace would override the
+// per-test one), and any BD_* this process INHERITED. A BD_ var set after the
+// snapshot is the suite's own control and stays, so TestMain's package-wide
+// dedup opt-out and freeze pin, and a test's t.Setenv ceiling, still reach the
+// child. Every env builder in this package routes through here so the three
+// cannot drift apart again.
+func filterAmbientEnv(es []string) []string {
+	out := make([]string, 0, len(es))
+	for _, e := range es {
+		if strings.HasPrefix(e, "BEADS_") || strings.HasPrefix(e, "BD_ROUTING_MODE=") {
+			continue
+		}
+		if name, _, ok := strings.Cut(e, "="); ok && strings.HasPrefix(name, "BD_") && inheritedBDEnv[name] {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
 func TestMain(m *testing.M) {
+	snapshotInheritedBDEnv()
 	// main() is not run here, so hand back the Ps initprocs held during init,
 	// and the -test.parallel default testing derived from the capped count.
 	// An explicit -test.parallel is parsed later, by m.Run, and still wins.

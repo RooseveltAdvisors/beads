@@ -112,6 +112,7 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	var repeatPattern, repeatWindow, dueSource sql.NullString
 	var dueMissed sql.NullInt64
 	var repeatStart, repeatEnd sql.NullTime
+	var arrivalSeq sql.NullInt64 // arrival_seq column (migration 0078); NULL = never stamped
 
 	dests := []any{
 		&issue.ID, &contentHash, &issue.Title, &issue.Description, &issue.Design,
@@ -124,7 +125,7 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 		&molType,
 		&eventKind, &actor, &target, &payload,
 		&dueAt, &deferUntil, &repeatPattern, &repeatWindow, &repeatStart, &repeatEnd, &dueSource, &dueMissed,
-		&workType, &sourceSystem, &metadata, &rowLock, &storageClass, &assigneeID,
+		&workType, &sourceSystem, &metadata, &rowLock, &storageClass, &assigneeID, &arrivalSeq,
 		&leaseExpiresAt, &heartbeatAt, &leaseGrantedNode,
 	}
 	dests = append(dests, extra...)
@@ -279,6 +280,9 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	if storageClass.Valid {
 		issue.StorageClass = types.StorageClass(storageClass.String)
 	}
+	// arrival_seq (migration 0078); NULL = never stamped, read as 0. Only the
+	// journal's create seam writes it (stampArrivalSeqInTx).
+	issue.ArrivalSeq = arrivalSeq.Int64
 	// Lease columns (migration 0054); NULL when no active lease.
 	if leaseExpiresAt.Valid {
 		issue.LeaseExpiresAt = &leaseExpiresAt.Time
@@ -322,6 +326,7 @@ func ScanIssueLiteFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	var repeatPattern, repeatWindow, dueSource sql.NullString
 	var dueMissed sql.NullInt64
 	var repeatStart, repeatEnd sql.NullTime
+	var arrivalSeq sql.NullInt64 // arrival_seq column (migration 0078); NULL = never stamped
 
 	dests := []any{
 		&issue.ID, &contentHash, &issue.Title,
@@ -334,7 +339,7 @@ func ScanIssueLiteFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 		&molType,
 		&eventKind, &actor, &target,
 		&dueAt, &deferUntil, &repeatPattern, &repeatWindow, &repeatStart, &repeatEnd, &dueSource, &dueMissed,
-		&workType, &sourceSystem, &metadata, &rowLock, &storageClass, &assigneeID,
+		&workType, &sourceSystem, &metadata, &rowLock, &storageClass, &assigneeID, &arrivalSeq,
 		&leaseExpiresAt, &heartbeatAt, &leaseGrantedNode,
 	}
 	dests = append(dests, extra...)
@@ -479,6 +484,9 @@ func ScanIssueLiteFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	if storageClass.Valid {
 		issue.StorageClass = types.StorageClass(storageClass.String)
 	}
+	// arrival_seq (migration 0078); NULL = never stamped, read as 0. Only the
+	// journal's create seam writes it (stampArrivalSeqInTx).
+	issue.ArrivalSeq = arrivalSeq.Int64
 	// Lease columns (migration 0054); NULL when no active lease.
 	if leaseExpiresAt.Valid {
 		issue.LeaseExpiresAt = &leaseExpiresAt.Time
