@@ -302,6 +302,22 @@ func (r Registry) RebindWithToken(id string, endpoint Endpoint, token string, no
 }
 
 // Rename edits one registry row; it never visits issue or outbox records.
+// Delete removes a dead seat row. A live or stale seat must be unbound
+// first: deleting an identity that can still re-register would orphan its
+// uuid and rebind token. Deleting a legacy name-keyed row is the supported
+// way to free its name for a minted uuid with the same alias.
+func (r Registry) Delete(id string) error {
+	seat, ok := r[id]
+	if !ok {
+		return fmt.Errorf("unknown seat id %q", id)
+	}
+	if seat.Liveness != Dead {
+		return fmt.Errorf("seat %s is %s: unbind it before delete", id, seat.Liveness)
+	}
+	delete(r, id)
+	return nil
+}
+
 func (r Registry) Rename(id string, aliases []string, now time.Time) error {
 	old, ok := r[id]
 	if !ok {
