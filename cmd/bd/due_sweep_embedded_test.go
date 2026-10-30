@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/beads/internal/storage/issueops"
+	"github.com/steveyegge/beads/internal/timeparsing"
 )
 
 // bdDueSweep runs `bd due sweep --json` and returns the parsed report. The
@@ -77,6 +78,45 @@ func TestEmbeddedDueSweepFiresAndEscalates(t *testing.T) {
 		again := bdDueSweep(t, bd, dir)
 		if containsString(again.DueIDs, issue.ID) {
 			t.Errorf("second sweep re-fired %s; report = %+v", issue.ID, again)
+		}
+	})
+
+	t.Run("a quiet-window past-due bead reschedules to the edge without firing", func(t *testing.T) {
+		dir, _, _ := bdInit(t, bd, "--prefix", "qw")
+		issue := bdCreate(t, bd, dir, "Quiet window thread watch", "--type", "task",
+			"--repeat", "*/10 9-19 * * *", "--window", "09:00-20:00 America/New_York",
+			"--due", pastDue())
+		now := time.Now().UTC()
+		w, err := timeparsing.ParseWindow("09:00-20:00 America/New_York")
+		if err != nil {
+			t.Fatalf("parse window: %v", err)
+		}
+		if w.Contains(now) {
+			t.Skip("test ran inside the live window; rerun outside 09:00-20:00 New York")
+		}
+		open, ok := w.NextOpen(now)
+		if !ok {
+			t.Fatal("NextOpen: want ok")
+		}
+
+		report := bdDueSweep(t, bd, dir)
+		if containsString(report.DueIDs, issue.ID) {
+			t.Fatalf("quiet bead fired %s; the silence is designed, not a miss: %+v", issue.ID, report)
+		}
+
+		after := bdShow(t, bd, dir, issue.ID)
+		if after.DueAt == nil {
+			t.Fatalf("due_at cleared; want the window edge")
+		}
+		// The stored edge must be the UTC instant, not the zone's wall
+		// clock: a New York-zoned 09:00 written to the naive DATETIME
+		// column lands at 09:00 and re-wedges the clock (found live
+		// 2026-10-30, fm-mw4xg).
+		if !after.DueAt.UTC().Equal(open) {
+			t.Errorf("due_at = %v, want the window edge %v as a UTC instant", after.DueAt.UTC(), open.UTC())
+		}
+		if after.DueMissed != 0 {
+			t.Errorf("due_missed = %d, want 0: quiet is not a miss", after.DueMissed)
 		}
 	})
 
