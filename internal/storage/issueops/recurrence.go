@@ -867,6 +867,11 @@ func quietWindowReschedule(c dueCandidate, now time.Time) (time.Time, bool) {
 	if !ok {
 		return time.Time{}, false
 	}
+	// The instant is UTC-normalized before it reaches SQL: a zone-local
+	// time.Time serializes as its wall clock against a naive DATETIME
+	// column, which landed a 13:00Z edge back at 09:00 and re-wedged the
+	// very clock this reschedule exists to free (found live 2026-10-30).
+	open = open.UTC()
 	if c.repeatEnd != nil && open.After(*c.repeatEnd) {
 		return now.Add(DueMissGrace), true
 	}
