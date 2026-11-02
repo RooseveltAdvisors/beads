@@ -5544,6 +5544,9 @@ bd notify
     |   bd notify drain --seat wiseman --print
     |   bd notify drain --seat wiseman --exec 'echo "$BD_NOTIFY_ID"'
     |   bd notify seats
+    |   bd notify holds
+    |   bd notify holds reap --dry-run
+    |   bd notify holds reap --yes
 
 bd notify ack
   use: "ack"
@@ -5586,6 +5589,40 @@ bd notify drain
   flag --no-ack type=bool default="false" usage="do not mark rows delivered"
   flag --print type=bool default="false" usage="print rows only (no herdr prompt)"
   flag --seat type=string default="" usage="assignee seat to drain"
+
+bd notify holds
+  use: "holds"
+  short: "List or reap parent-escalation holds"
+  hidden: false
+  runnable: true
+  long:
+    | Holds mark seats whose drain could not deliver (no-pin, pinned-target-dead,
+    | target-blocked). Detection already works; retention reaps dead-pin and no-pin
+    | holds older than the retention window (default 14d) and acks their pending
+    | outbox rows. Transient holds (hold-until-idle, target-blocked) are never
+    | reaped.
+    |
+    | Examples:
+    |   bd notify holds
+    |   bd notify holds --json
+    |   bd notify holds reap --dry-run
+    |   bd notify holds reap --older-than 14d
+    |   bd notify holds reap --older-than 7d --yes
+
+bd notify holds list
+  use: "list"
+  short: "List current holds (default when no subcommand)"
+  hidden: false
+  runnable: true
+
+bd notify holds reap
+  use: "reap"
+  short: "Reap stale dead-pin / no-pin holds past retention"
+  hidden: false
+  runnable: true
+  flag --dry-run type=bool default="false" usage="report eligible holds without writing"
+  flag --older-than type=string default="14d" usage="reap dead-pin/no-pin holds older than this (Nd or Go duration)"
+  flag --yes type=bool default="false" usage="apply the reap (required unless --dry-run)"
 
 bd notify pending
   use: "pending"
