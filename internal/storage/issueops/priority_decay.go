@@ -21,10 +21,14 @@ func DecayPriorityOnAttention(current int) (int, bool) {
 	return current + 1, true
 }
 
-// ApplyDecayOnAttention folds the decay into an update map: the policy seam
-// `bd update` stands on. An explicit priority write is the operator's word
-// and is never decayed in the same breath; machine actors (the sweep, defer
-// wakes) are not attention; everything else gives one rung back.
+// ApplyDecayOnAttention folds the decay into an update map. It belongs at
+// the INTERACTION layer (the bd update / bd comment commands), never inside
+// issueops: integrations (ADO sync, importers, federation) write through the
+// same storage seam, and a sync is machinery, not attention - decaying there
+// would mutate external state on every pull. An explicit priority write is
+// the operator's word and is never decayed in the same breath; machine actors
+// (the sweep, defer wakes) are not attention; everything else gives one rung
+// back.
 func ApplyDecayOnAttention(updates map[string]interface{}, currentPriority int, actor string) {
 	if _, explicit := updates["priority"]; explicit {
 		return

@@ -463,8 +463,6 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 	// rung back toward the P2 baseline. An explicit priority write is the
 	// operator's word and is never decayed in the same breath, and machine
 	// actors (the sweep, defer wakes) are not attention.
-	ApplyDecayOnAttention(updates, oldIssue.Priority, actor)
-
 	// Build SET clauses.
 	setClauses := []string{"updated_at = ?"}
 	args := []interface{}{time.Now().UTC()}

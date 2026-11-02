@@ -66,7 +66,10 @@ func TestProtocol_FieldsRoundTrip(t *testing.T) {
 	w := newWorkspace(t)
 	id := w.create("--title", "Round-trip subject",
 		"--type", "feature",
-		"--priority", "1",
+		// P2, not P1: decay-on-attention gives an escalated bead one rung
+		// back per CLI update, and this test proves field survival, not
+		// priority stability under attention.
+		"--priority", "2",
 		"--description", "Detailed description",
 		"--design", "Hexagonal architecture",
 		"--acceptance", "All tests pass",
@@ -84,7 +87,7 @@ func TestProtocol_FieldsRoundTrip(t *testing.T) {
 	// Assert each field
 	assertField(t, issue, "title", "Round-trip subject")
 	assertField(t, issue, "issue_type", "feature")
-	assertFieldFloat(t, issue, "priority", 1)
+	assertFieldFloat(t, issue, "priority", 2)
 	assertField(t, issue, "description", "Detailed description")
 	assertField(t, issue, "design", "Hexagonal architecture")
 	assertField(t, issue, "acceptance_criteria", "All tests pass")

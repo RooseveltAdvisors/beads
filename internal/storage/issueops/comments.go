@@ -315,44 +315,12 @@ func addIssueCommentInTx(ctx context.Context, tx DBTX, issueID, author, text str
 			return nil, err
 		}
 	}
-	if live && seats.MachineActor(author) == "" {
-		if err := decayPriorityOnCommentInTx(ctx, tx, isWisp, issueID, author); err != nil {
-			return nil, err
-		}
-	}
 	if err := RecordCommentEventInTx(ctx, tx, issueID, &EventComment{
 		ID: id, Author: author, Text: text, CreatedAt: stored, Source: CommentSourceStructured,
 	}); err != nil {
 		return nil, err
 	}
 	return comment, nil
-}
-
-// decayPriorityOnCommentInTx is the comment half of decay-on-attention
-// (captain order 2026-11-01): a comment is attention, so an escalated bead
-// gives one priority rung back toward the P2 baseline. The decay lands as its
-// own journal row, the same shape a field update writes.
-//
-//nolint:gosec // G201: issueTable comes from WispTableRouting (hardcoded constants)
-func decayPriorityOnCommentInTx(ctx context.Context, tx DBTX, isWisp bool, issueID, actor string) error {
-	issueTable, _, eventTable, _ := WispTableRouting(isWisp)
-	var current int
-	if err := tx.QueryRowContext(ctx, fmt.Sprintf(
-		`SELECT priority FROM %s WHERE id = ?`, issueTable), issueID).Scan(&current); err != nil {
-		return fmt.Errorf("decay: read priority %s: %w", issueID, err)
-	}
-	next, decayed := DecayPriorityOnAttention(current)
-	if !decayed {
-		return nil
-	}
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf(
-		`UPDATE %s SET priority = ?, row_lock = ? WHERE id = ? AND priority = ?`, issueTable),
-		next, freshRowLock(), issueID, current); err != nil {
-		return fmt.Errorf("decay: update priority %s: %w", issueID, err)
-	}
-	return RecordFullEventWithCommentInTable(ctx, tx, eventTable, issueID, "priority", actor,
-		fmt.Sprintf("%d", current), fmt.Sprintf("%d", next),
-		"decay-on-attention: comment gives one rung back toward P2")
 }
 
 // DeleteIssueCommentInTx removes one exact comment and records an audit event
