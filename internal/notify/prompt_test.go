@@ -58,3 +58,23 @@ func TestDefaultPrompt_KindLines(t *testing.T) {
 		}
 	}
 }
+
+// TestDefaultPrompt_PriorityTag pins the triage tag: a record carrying a
+// priority renders [P0]-[P4] beside the bead id; legacy rows without one
+// render clean (captain order 2026-11-02).
+func TestDefaultPrompt_PriorityTag(t *testing.T) {
+	p2 := 2
+	p0 := 0
+	withP := DefaultPrompt(Record{Kind: KindDue, Seat: "s", IssueID: "fm-1", Title: "T", Priority: &p2})
+	if !strings.Contains(withP, "Bead fm-1 [P2]") {
+		t.Errorf("priority tag missing:\n%s", withP)
+	}
+	withP0 := DefaultPrompt(Record{Kind: KindDue, Seat: "s", IssueID: "fm-1", Title: "T", Priority: &p0})
+	if !strings.Contains(withP0, "Bead fm-1 [P0]") {
+		t.Errorf("P0 tag missing:\n%s", withP0)
+	}
+	legacy := DefaultPrompt(Record{Kind: KindDue, Seat: "s", IssueID: "fm-1", Title: "T"})
+	if !strings.Contains(legacy, "Bead fm-1 fired") || strings.Contains(legacy, "[P") {
+		t.Errorf("legacy row must render without a tag:\n%s", legacy)
+	}
+}

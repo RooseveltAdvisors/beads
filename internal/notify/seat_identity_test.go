@@ -80,7 +80,7 @@ func TestSeatDeadEndpointStaysQueued(t *testing.T) {
 	if err := seats.Save(o.Dir(), r); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := o.Enqueue("seat:worker", "bd-1", KindDue, "title"); err != nil {
+	if _, err := o.Enqueue("seat:worker", "bd-1", KindDue, "title", nil); err != nil {
 		t.Fatal(err)
 	}
 	pins, err := o.LoadPins()

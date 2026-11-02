@@ -75,7 +75,7 @@ func TestE2E_MintRestartReregisterDeliverForeignShellRefused(t *testing.T) {
 	}
 
 	// The queue row carries the uuid even when the sender addresses the alias.
-	rec, err := o.Enqueue("dispatch-worker", "bd-1", KindDue, "wake")
+	rec, err := o.Enqueue("dispatch-worker", "bd-1", KindDue, "wake", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
