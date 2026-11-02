@@ -919,9 +919,12 @@ func TestListByTypeFilter(t *testing.T) {
 // Unlike TestDeferredParentExcludesChildren, this tests the issue's own defer.
 func TestDeferredExcludedFromReady(t *testing.T) {
 	scenario := func(w *workspace) {
-		id := w.create("--title", "Deferred task", "--type", "task", "--priority", "1")
+		// P2/P3, not P1/P2: decay-on-attention gives an escalated bead one
+		// rung back per CLI update (the defer below updates), and this test
+		// proves ready-set membership, not priority stability under decay.
+		id := w.create("--title", "Deferred task", "--type", "task", "--priority", "2")
 		w.run("update", id, "--defer", "2099-12-31")
-		w.create("--title", "Ready task", "--type", "task", "--priority", "2")
+		w.create("--title", "Ready task", "--type", "task", "--priority", "3")
 	}
 
 	baselineWS := newWorkspace(t, baselineBin)
