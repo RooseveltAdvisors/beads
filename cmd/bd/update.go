@@ -567,6 +567,18 @@ pointless).`,
 			// earlier transaction) silently erased concurrent writers' keys —
 			// both processes exited 0, one process's committed write vanished.
 			patch := basePatch
+			// Decay-on-attention (captain order 2026-11-01): a CLI update by
+			// a real actor gives an escalated bead one priority rung back
+			// toward the P2 baseline - escalation raised chronic missers to
+			// 92% of a live store and nothing ever came down. The per-issue
+			// patch copy carries it, an explicit --priority stands untouched,
+			// machine actors are not attention, and integrations writing
+			// through storage never decay.
+			if !patch.Priority.Set && !storageissueops.MachineActorForDecay(actor) {
+				if next, decayed := storageissueops.DecayPriorityOnAttention(issue.Priority); decayed {
+					patch.Priority = issueops.Field[int]{Set: true, Value: next}
+				}
+			}
 			// S6d: a store whose wire cannot carry closed_by_session still
 			// closes; the session is attribution only (remote_backend.go).
 			if patch.ClosedBySession.Set && !storeCarriesCallerAttribution(issueStore) {
