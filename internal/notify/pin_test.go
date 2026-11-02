@@ -158,7 +158,7 @@ func TestReapHoldsRetention(t *testing.T) {
 	if err := o.SetHold("blocked", Hold{Reason: HoldBlocked, Session: "s", PaneID: "w1:p2", UpdatedAt: old}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := o.Enqueue("antigravity", "wiseman-x", KindDue, "stale ping"); err != nil {
+	if _, err := o.Enqueue("antigravity", "wiseman-x", KindDue, "stale ping", nil); err != nil {
 		t.Fatal(err)
 	}
 

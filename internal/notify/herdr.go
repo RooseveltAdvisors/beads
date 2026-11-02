@@ -213,9 +213,13 @@ func DefaultPrompt(rec Record) string {
 		title = rec.IssueID
 	}
 	var b strings.Builder
+	prioTag := ""
+	if rec.Priority != nil {
+		prioTag = fmt.Sprintf(" [P%d]", *rec.Priority)
+	}
 	fmt.Fprintf(&b,
-		"BEADS NOTIFY (%s). Bead %s fired for seat %s: %s\n",
-		rec.Kind, rec.IssueID, rec.Seat, title,
+		"BEADS NOTIFY (%s). Bead %s%s fired for seat %s: %s\n",
+		rec.Kind, rec.IssueID, prioTag, rec.Seat, title,
 	)
 	fmt.Fprintf(&b, "%s\n\n", reminderLine(rec.Kind))
 	fmt.Fprintf(&b, "Read the thread: bd comments %s   (full detail: bd show %s)\n\n", rec.IssueID, rec.IssueID)

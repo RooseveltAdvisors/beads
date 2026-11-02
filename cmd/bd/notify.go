@@ -578,8 +578,8 @@ func runNotifyHoldsList(cmd *cobra.Command, args []string) error {
 		return HandleError("%v", err)
 	}
 	type row struct {
-		Seat      string       `json:"seat"`
-		Hold      notify.Hold  `json:"hold"`
+		Seat string      `json:"seat"`
+		Hold notify.Hold `json:"hold"`
 	}
 	rows := make([]row, 0, len(holds))
 	for seat, h := range holds {
@@ -633,6 +633,22 @@ func parseHoldRetention(s string) (time.Duration, error) {
 
 // pingCommentAssignee enqueues a pin-addressed notify for the bead's assignee
 // after a successful comment. Best-effort: never fails the comment.
+
+// issuePriorityPtr reads one bead's P0-P4 rung for a notify row, so the
+// recipient can triage the wake without opening the thread (captain order
+// 2026-11-02). Any failure renders as absent rather than blocking delivery.
+func issuePriorityPtr(id string) *int {
+	if store == nil {
+		return nil
+	}
+	issue, err := store.GetIssue(rootCtx, id)
+	if err != nil || issue == nil {
+		return nil
+	}
+	p := issue.Priority
+	return &p
+}
+
 func pingCommentAssignee(assignee, issueID, issueTitle, author, text string) {
 	if store != nil {
 		issue, err := store.GetIssue(rootCtx, issueID)
@@ -657,7 +673,7 @@ func pingCommentAssignee(assignee, issueID, issueTitle, author, text string) {
 		return
 	}
 	title := notify.CommentPingTitle(issueTitle, author, text)
-	if _, err := o.Enqueue(seat, issueID, notify.KindComment, title); err != nil {
+	if _, err := o.Enqueue(seat, issueID, notify.KindComment, title, issuePriorityPtr(issueID)); err != nil {
 		fmt.Fprintf(os.Stderr, "notify: enqueue comment ping: %v\n", err)
 		return
 	}
@@ -869,7 +885,7 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 					}
 				}
 			}
-			_, added, err := o.EnqueueUnique(seat.Assignee, id, kind, title)
+			_, added, err := o.EnqueueUnique(seat.Assignee, id, kind, title, issuePriorityPtr(id))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "notify: enqueue %s: %v\n", id, err)
 				continue
@@ -996,7 +1012,7 @@ func enqueueStaleClaimNotifies(skipIDs []string) {
 		} else {
 			title = title + " [" + sc.QuietFor + " quiet]"
 		}
-		if _, err := o.Enqueue(sc.Assignee, sc.ID, notify.KindStaleClaim, title); err != nil {
+		if _, err := o.Enqueue(sc.Assignee, sc.ID, notify.KindStaleClaim, title, issuePriorityPtr(sc.ID)); err != nil {
 			fmt.Fprintf(os.Stderr, "notify: enqueue stale-claim %s: %v\n", sc.ID, err)
 			continue
 		}

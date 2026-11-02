@@ -16,15 +16,15 @@ func TestOutboxEnqueuePendingAck(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r1, err := o.Enqueue("wiseman", "fm-a", KindDue, "Alpha")
+	r1, err := o.Enqueue("wiseman", "fm-a", KindDue, "Alpha", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r2, err := o.Enqueue("wiseman", "fm-b", KindDue, "Beta")
+	r2, err := o.Enqueue("wiseman", "fm-b", KindDue, "Beta", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := o.Enqueue("firstmate", "fm-c", KindEscalate, "Charlie"); err != nil {
+	if _, err := o.Enqueue("firstmate", "fm-c", KindEscalate, "Charlie", nil); err != nil {
 		t.Fatal(err)
 	}
 	if r1.Seq != 1 || r2.Seq != 2 {
@@ -79,7 +79,7 @@ func TestEmptySeatBecomesUnassigned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := o.Enqueue("", "fm-x", KindDue, "")
+	r, err := o.Enqueue("", "fm-x", KindDue, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestOutboxEnqueueUniqueSkipsUnackedDuplicate(t *testing.T) {
 	}
 	enqueue := func(seat, id string, kind Kind) bool {
 		t.Helper()
-		_, added, err := o.EnqueueUnique(seat, id, kind, "")
+		_, added, err := o.EnqueueUnique(seat, id, kind, "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -143,7 +143,7 @@ func TestOutboxPendingIsExactSeat(t *testing.T) {
 		{"bob", "fm-bob"},
 		{"", "fm-unassigned"},
 	} {
-		if _, err := o.Enqueue(rec.seat, rec.id, KindDue, ""); err != nil {
+		if _, err := o.Enqueue(rec.seat, rec.id, KindDue, "", nil); err != nil {
 			t.Fatal(err)
 		}
 	}
