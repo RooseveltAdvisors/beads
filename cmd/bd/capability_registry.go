@@ -275,6 +275,7 @@ var proxyCapabilityRegistry = []capabilityRow{
 	// who may hold an assignee_id in THIS clone, and the backfill re-keys local
 	// audit rows against it. All seven refuse over the proxy by design.
 	refusedPath("seat backfill", "proxy.seat.local-only", ProxyReasonDesign, ""),
+	refusedPath("misroute", "proxy.misroute.local-only", ProxyReasonDesign, ""),
 	refusedPath("seat import-pins", "proxy.seat.local-only", ProxyReasonDesign, ""),
 	refusedPath("seat list", "proxy.seat.local-only", ProxyReasonDesign, ""),
 	refusedPath("seat delete", "proxy.seat.local-only", ProxyReasonDesign, ""),

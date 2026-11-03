@@ -285,6 +285,7 @@ func TestProxyCapabilityRegistryReasonsAreAssignedIndividually(t *testing.T) {
 		// Reviewed 2026-10-13 during the upstream sync merge (repro-5at): the
 		// seat registry is clone-local (.beads/seats.json), so all seven seat
 		// commands are design refusals over the proxy.
+		"misroute":         true,
 		"seat backfill":    true,
 		"seat import-pins": true,
 		"seat delete":      true,
