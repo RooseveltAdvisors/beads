@@ -3,6 +3,7 @@ package issueops
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/steveyegge/beads/internal/config"
@@ -34,6 +35,21 @@ func QueueCapPerAssignee() int { return config.GetInt(QueueCapPerAssigneeKey) }
 // QueueCapTotal returns the store-wide ceiling (0 = off).
 func QueueCapTotal() int { return config.GetInt(QueueCapTotalKey) }
 
+// queueCapCeilingInTx reads a cap key the way the create path actually
+// answers: the workspace settings table first (that is what `bd config set`
+// writes - the key whose error message names it must be able to change the
+// refusal), the viper chain second (yaml, env, compiled default 100). A
+// stored parse failure falls through to viper rather than refusing every
+// create.
+func queueCapCeilingInTx(ctx context.Context, tx DBTX, key string, viperVal int) int {
+	if raw, err := GetConfigInTx(ctx, tx, key); err == nil && raw != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
+			return n
+		}
+	}
+	return viperVal
+}
+
 // ValidateQueueCap refuses a create that would push a queue past its ceiling.
 // It is called from CreateIssueInTxWithResult - the one body every non-public
 // create reaches - and from the public create validation, exactly where
@@ -54,7 +70,7 @@ func ValidateQueueCap(ctx context.Context, tx DBTX, bc *BatchContext, issue *typ
 	table, _ := TableRouting(issue)
 	assignee := strings.TrimSpace(issue.Assignee)
 
-	if per := QueueCapPerAssignee(); per > 0 {
+	if per := queueCapCeilingInTx(ctx, tx, QueueCapPerAssigneeKey, QueueCapPerAssignee()); per > 0 {
 		n, err := countOpenWorkInTx(ctx, tx, table, assignee)
 		if err != nil {
 			return fmt.Errorf("queue cap: %w", err)
@@ -68,7 +84,7 @@ func ValidateQueueCap(ctx context.Context, tx DBTX, bc *BatchContext, issue *typ
 		}
 	}
 
-	if total := QueueCapTotal(); total > 0 {
+	if total := queueCapCeilingInTx(ctx, tx, QueueCapTotalKey, QueueCapTotal()); total > 0 {
 		n, err := countOpenWorkInTx(ctx, tx, table, "")
 		if err != nil {
 			return fmt.Errorf("queue cap: %w", err)
