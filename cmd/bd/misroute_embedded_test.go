@@ -12,9 +12,6 @@ import (
 // label, 48h due, MISROUTE title prefix), and the refusals that stop a
 // lazy filing (empty description, missing --from).
 func TestMisrouteFilesToDispatchOwner(t *testing.T) {
-	if testing.Short() {
-		t.Skip("embedded build in short mode")
-	}
 	bd := buildEmbeddedBD(t)
 	dir, _, _ := bdInit(t, bd, "--prefix", "mr")
 
