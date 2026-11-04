@@ -21,7 +21,8 @@ func TestMisrouteFilesToDispatchOwner(t *testing.T) {
 	// The write gate requires a registered actor seat, and the dispatch
 	// owner's seat must exist for the assignee write. One row serves both:
 	// the filer and the dispatch owner share this test's workspace.
-	if _, err := bdRunWithFlockRetry(t, bd, dir, "seat", "register", "dispatch-owner",
+	const ownerUUID = "b0b9d6a0-6269-4376-a702-28db0143c3da"
+	if _, err := bdRunWithFlockRetry(t, bd, dir, "seat", "register", ownerUUID,
 		"--alias", "firstmate", "--session", "s", "--pane", "w1:pZ1",
 		"--agent-session", "/tmp/mr.jsonl"); err != nil {
 		t.Fatalf("seat register: %v", err)

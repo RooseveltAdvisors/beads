@@ -34,12 +34,21 @@ func ResolveIssueSeats(ctx context.Context, issue *types.Issue) error {
 		}
 	}
 	issue.AssigneeID, issue.Assignee = id, id
+	if id != "" && !seats.IsUUID(id) && seats.MachineActor(id) == "" {
+		return fmt.Errorf("assignee seat %q resolves to non-UUID identity %q: agent seat must be minted with a UUID (bd seat register --alias %s)", assignment, id, assignment)
+	}
 	for _, field := range []*string{&issue.CreatedBy, &issue.Owner, &issue.Actor} {
 		value, err := r.Resolve(*field)
 		if err != nil {
 			return err
 		}
 		*field = value
+	}
+	if issue.CreatedBy != "" && !seats.IsUUID(issue.CreatedBy) && seats.MachineActor(issue.CreatedBy) == "" {
+		return fmt.Errorf("creator seat %q resolves to non-UUID identity %q: agent seat must be minted with a UUID", issue.CreatedBy, issue.CreatedBy)
+	}
+	if issue.Actor != "" && !seats.IsUUID(issue.Actor) && seats.MachineActor(issue.Actor) == "" {
+		return fmt.Errorf("actor seat %q resolves to non-UUID identity %q: agent seat must be minted with a UUID", issue.Actor, issue.Actor)
 	}
 	return nil
 }
@@ -102,6 +111,12 @@ func ResolveSeatUpdates(ctx context.Context, updates map[string]interface{}) err
 		updates[key] = id
 		if key == "assignee" {
 			updates["assignee_id"] = id
+			if id != "" && !seats.IsUUID(id) && seats.MachineActor(id) == "" {
+				return fmt.Errorf("assignee seat %q resolves to non-UUID identity %q: agent seat must be minted with a UUID (bd seat register --alias %s)", value, id, value)
+			}
+		}
+		if (key == "created_by" || key == "actor") && id != "" && !seats.IsUUID(id) && seats.MachineActor(id) == "" {
+			return fmt.Errorf("%s seat %q resolves to non-UUID identity %q: agent seat must be minted with a UUID", key, value, id)
 		}
 	}
 	return nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -155,9 +156,17 @@ func init() {
 		if statePath == "" {
 			statePath = strings.TrimSpace(os.Getenv(seats.StateEnv))
 		}
+		if statePath == "" && len(aliases) > 0 {
+			if home, err := os.UserHomeDir(); err == nil && home != "" {
+				statePath = filepath.Join(home, ".local", "state", "beads", aliases[0]+".state")
+			}
+		}
 		endpoint := seats.Endpoint{Session: session, PaneID: pane, AgentSessionID: agent}
 		now := time.Now().UTC()
 		if len(args) > 0 {
+			if seats.IsPaneID(args[0]) {
+				return fmt.Errorf("invalid seat id %q: raw pane IDs cannot be seat identities (use an agent name like 'beads' or 'firstmate')", args[0])
+			}
 			// Operator path: register or rebind an explicitly named seat.
 			// Token-protected (minted) seats refuse it.
 			if err := seats.Update(o.Dir(), func(current seats.Registry) error {

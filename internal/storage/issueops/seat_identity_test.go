@@ -12,7 +12,8 @@ import (
 
 func TestSeatWriteRejectsUnknownName(t *testing.T) {
 	r := seats.Registry{}
-	if err := r.Register("seat:worker", []string{"worker"}, seats.Endpoint{Session: "s", PaneID: "p"}, time.Now()); err != nil {
+	workerUUID := "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+	if err := r.Register(workerUUID, []string{"worker"}, seats.Endpoint{Session: "s", PaneID: "p"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	ctx := seats.WithRegistry(context.Background(), r)
@@ -27,8 +28,23 @@ func TestSeatWriteRejectsUnknownName(t *testing.T) {
 	if err := ResolveIssueSeats(ctx, issue); err != nil {
 		t.Fatal(err)
 	}
-	if issue.AssigneeID != "seat:worker" || issue.Assignee != "seat:worker" || issue.CreatedBy != "seat:worker" || issue.Owner != "seat:worker" || issue.Actor != "seat:worker" {
+	if issue.AssigneeID != workerUUID || issue.Assignee != workerUUID || issue.CreatedBy != workerUUID || issue.Owner != workerUUID || issue.Actor != workerUUID {
 		t.Fatalf("identity copies drift: %+v", issue)
+	}
+}
+
+func TestSeatWriteRejectsNonUUIDIdentity(t *testing.T) {
+	r := seats.Registry{}
+	if err := r.Register("legacy-worker", []string{"legacy"}, seats.Endpoint{Session: "s", PaneID: "p"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	ctx := seats.WithRegistry(context.Background(), r)
+	issue := &types.Issue{Assignee: "legacy"}
+	if err := ResolveIssueSeats(ctx, issue); err == nil || !strings.Contains(err.Error(), "resolves to non-UUID identity") {
+		t.Fatalf("legacy name-keyed assignment accepted in strict mode: %v", err)
+	}
+	if err := ResolveSeatUpdates(ctx, map[string]any{"assignee": "legacy"}); err == nil || !strings.Contains(err.Error(), "resolves to non-UUID identity") {
+		t.Fatalf("legacy name-keyed update accepted in strict mode: %v", err)
 	}
 }
 
