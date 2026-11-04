@@ -43,6 +43,9 @@ func bindSeatIdentity(cmd *cobra.Command, beadsDir string, write bool) error {
 		if err != nil {
 			return err
 		}
+		if key == "assignee" && id != "" && !seats.IsUUID(id) && seats.MachineActor(id) == "" {
+			return fmt.Errorf("assignee seat %q resolves to non-UUID identity %q: agent seat must be minted with a UUID (bd seat register --alias %s)", flag.Value.String(), id, flag.Value.String())
+		}
 		if err := flag.Value.Set(id); err != nil {
 			return err
 		}
@@ -60,6 +63,9 @@ func bindSeatIdentity(cmd *cobra.Command, beadsDir string, write bool) error {
 	}
 	if id == "" {
 		return fmt.Errorf("write requires a registered actor seat")
+	}
+	if !seats.IsUUID(id) && seats.MachineActor(id) == "" {
+		return fmt.Errorf("actor seat %q has non-UUID identity %q: agent seat must be minted with a UUID (bd seat register --alias %s)", name, id, name)
 	}
 	actor = id
 	return nil

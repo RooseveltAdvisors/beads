@@ -26,7 +26,23 @@ const (
 	Dead  = "dead"
 )
 
-var validID = regexp.MustCompile(`^[a-zA-Z0-9_:\-]+$`)
+var (
+	validID       = regexp.MustCompile(`^[a-zA-Z0-9_:\-]+$`)
+	uuidPattern   = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	paneIDPattern = regexp.MustCompile(`(?i)^w[a-z0-9]+:p[a-z0-9]+$`)
+)
+
+// IsUUID reports whether s matches the 36-character RFC 4122 UUID format.
+func IsUUID(s string) bool {
+	return uuidPattern.MatchString(strings.TrimSpace(s))
+}
+
+// IsPaneID reports whether s is a raw Herdr pane identifier (e.g. w1:pX5).
+// Raw pane IDs must never be used as seat identities or aliases.
+func IsPaneID(s string) bool {
+	s = strings.TrimSpace(s)
+	return paneIDPattern.MatchString(s) || (strings.HasPrefix(s, "w") && strings.Contains(s, ":p"))
+}
 
 // Endpoint is an opaque exact locator, never derived from an alias or ID.
 type Endpoint struct {
@@ -63,6 +79,10 @@ type BackfillRow struct {
 }
 
 func ValidateID(id string) error {
+	id = strings.TrimSpace(id)
+	if IsPaneID(id) {
+		return fmt.Errorf("invalid seat id %q: raw pane IDs cannot be seat identities (use an agent name like 'beads' or 'firstmate')", id)
+	}
 	if !validID.MatchString(id) || strings.EqualFold(id, "unassigned") {
 		return fmt.Errorf("invalid seat id %q: use letters, digits, _, :, or -", id)
 	}
@@ -79,6 +99,9 @@ func (r Registry) Validate() error {
 			key := strings.ToLower(strings.TrimSpace(name))
 			if key == "" || key == "unassigned" {
 				return fmt.Errorf("seat %s has an empty or reserved alias", id)
+			}
+			if IsPaneID(name) {
+				return fmt.Errorf("seat %s has invalid alias %q: raw pane IDs cannot be seat aliases", id, name)
 			}
 			if prev, ok := seen[key]; ok && prev != id {
 				return fmt.Errorf("ambiguous seat name %q belongs to %s and %s", name, prev, id)
