@@ -56,9 +56,19 @@ func (p Pin) Valid() bool {
 }
 
 // Matches is exact: every field the pin sets must equal the instance.
+// Matches is exact, with a stable-first rule: when the pin carries an
+// agent-session id, that is the ONLY locator checked. The session file path
+// does not change when a pane moves, restarts, or gets reorganized, so a
+// pin with an agent-session id follows the agent across pane churn. The
+// session+pane pair is checked only for pins that predate agent-session
+// identity (legacy pins.json rows) - it is a volatile cache, not an
+// identity.
 func (p Pin) Matches(inst Instance) bool {
 	if !p.Valid() {
 		return false
+	}
+	if id := strings.TrimSpace(p.AgentSessionID); id != "" {
+		return id == strings.TrimSpace(inst.AgentSessionID)
 	}
 	if s := strings.TrimSpace(p.Session); s != "" {
 		if s != strings.TrimSpace(inst.Session) {
@@ -67,11 +77,6 @@ func (p Pin) Matches(inst Instance) bool {
 	}
 	if id := strings.TrimSpace(p.PaneID); id != "" {
 		if id != strings.TrimSpace(inst.PaneID) {
-			return false
-		}
-	}
-	if id := strings.TrimSpace(p.AgentSessionID); id != "" {
-		if id != strings.TrimSpace(inst.AgentSessionID) {
 			return false
 		}
 	}

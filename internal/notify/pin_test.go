@@ -215,3 +215,33 @@ func TestLoadPinsRejectsCorruptJSON(t *testing.T) {
 		t.Fatal("expected parse error")
 	}
 }
+
+// TestStalePaneFollowsAgentSession is the regression for the 2026-11-05
+// misroute: the wiseman pin carried a stale session+pane (wiseman/w1:p184,
+// the portal-iam pane) alongside a correct agent-session id. The old AND
+// matcher followed the stale pane to the wrong agent. The stable-first rule
+// matches by agent-session alone, so the delivery follows the agent across
+// pane churn.
+func TestStalePaneFollowsAgentSession(t *testing.T) {
+	t.Parallel()
+	live := []Instance{
+		{Session: "wiseman", PaneID: "w1:p184", Harness: "pi", Status: "idle",
+			AgentSessionID: "/sessions/other-agent.jsonl"},
+		{Session: "firstmate", PaneID: "wYK:p1", Harness: "pi", Status: "idle",
+			AgentSessionID: "/sessions/wiseman-real.jsonl"},
+	}
+	pins := map[string]Pin{
+		"13fd3891": {
+			Session:        "wiseman",                      // stale session
+			PaneID:         "w1:p184",                      // stale pane (portal-iam)
+			AgentSessionID: "/sessions/wiseman-real.jsonl", // correct anchor
+		},
+	}
+	got := DecideDelivery("13fd3891", pins, live)
+	if !got.OK {
+		t.Fatalf("agent-session pin must follow the agent, got %+v", got)
+	}
+	if got.Instance.PaneID != "wYK:p1" {
+		t.Fatalf("delivered to stale pane %s, want wYK:p1 (the agent's live pane)", got.Instance.PaneID)
+	}
+}
