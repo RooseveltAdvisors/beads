@@ -295,7 +295,7 @@ func outputSearchResults(issues []*types.Issue, query string, longFormat bool) {
 			}
 			assigneeStr := ""
 			if issue.Assignee != "" {
-				assigneeStr = fmt.Sprintf(" @%s", seatDisplay(issue.Assignee))
+				assigneeStr = fmt.Sprintf(" @%s", seatDisplayShort(issue.Assignee))
 			}
 			fmt.Printf("%s [P%d] [%s] %s%s%s - %s\n",
 				issue.ID, issue.Priority, issue.IssueType, issue.Status,

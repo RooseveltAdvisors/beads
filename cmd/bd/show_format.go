@@ -115,7 +115,7 @@ func formatIssueMetadataWithGates(issue *types.Issue, gates []*types.Issue) stri
 	// Line 1: Created by/Assignee · Type
 	metaParts := []string{}
 	if issue.CreatedBy != "" {
-		metaParts = append(metaParts, fmt.Sprintf("Created by: %s", issue.CreatedBy))
+		metaParts = append(metaParts, fmt.Sprintf("Created by: %s", seatDisplay(issue.CreatedBy)))
 	}
 	if issue.Assignee != "" {
 		metaParts = append(metaParts, fmt.Sprintf("Assignee: %s", seatDisplay(issue.Assignee)))
