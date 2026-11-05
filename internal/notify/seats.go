@@ -28,6 +28,18 @@ func ReconcileSeats(r seats.Registry, live []Instance, now time.Time, deadAfter 
 			continue
 		}
 		pin := Pin{Session: seat.Endpoint.Session, PaneID: seat.Endpoint.PaneID, AgentSessionID: seat.Endpoint.AgentSessionID}
+		// Shared session: a session file may rebind only the one seat that
+		// owns it. Multiple seats registered from the same process share the
+		// file; the stable-first Pin.Matches would move all of them onto the
+		// live pane and collapse routing. Hold instead of rebinding.
+		if seat.Session != "" && sessionOwnerCount(r, seat.Session) > 1 {
+			if seat.MissingSince == nil {
+				t := now.UTC()
+				seat.MissingSince = &t
+			}
+			r[id] = seat
+			continue
+		}
 		inst, found := FindPinnedInstance(pin, live)
 		// A session file may rebind only the one seat that owns it. Task seats
 		// registered from the same process share that file. Moving all of them
