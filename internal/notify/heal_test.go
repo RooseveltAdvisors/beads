@@ -47,8 +47,12 @@ func TestRebindKeepsUUIDAndMovesPaneAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := r[id]
-	if got.Endpoint.PaneID != "w1:pNEW" || got.Endpoint.AgentSessionID != "session-new" {
-		t.Fatalf("endpoint = %#v, want new pane and session", got.Endpoint)
+	// Endpoint carries agent-session only: pane is derived live, never stored.
+	if got.Endpoint.AgentSessionID != "session-new" {
+		t.Fatalf("endpoint = %#v, want agent-session new", got.Endpoint)
+	}
+	if got.Endpoint.PaneID != "" || got.Endpoint.Session != "" {
+		t.Fatalf("endpoint must not store session/pane: %#v", got.Endpoint)
 	}
 	if len(got.Aliases) != 1 || got.Aliases[0] != "THE-FM" {
 		t.Fatalf("aliases = %#v, want them unchanged", got.Aliases)
@@ -163,7 +167,7 @@ func TestHealRewritesPaneWhenSessionFileSurvives(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r["portal-ops"].Endpoint.PaneID != "w1:pNEW" || r["portal-ops"].Liveness != seats.Live {
+	if r["portal-ops"].Endpoint.AgentSessionID == "" || r["portal-ops"].Liveness != seats.Live {
 		t.Fatalf("reconcile endpoint = %#v liveness=%s", r["portal-ops"].Endpoint, r["portal-ops"].Liveness)
 	}
 }

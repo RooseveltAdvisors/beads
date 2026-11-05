@@ -27,7 +27,7 @@ func ReconcileSeats(r seats.Registry, live []Instance, now time.Time, deadAfter 
 		if seat.UpdatedAt.After(now) {
 			continue
 		}
-		pin := Pin{Session: seat.Endpoint.Session, PaneID: seat.Endpoint.PaneID, AgentSessionID: seat.Endpoint.AgentSessionID}
+		pin := Pin{AgentSessionID: seat.Endpoint.AgentSessionID}
 		// Shared session: a session file may rebind only the one seat that
 		// owns it. Multiple seats registered from the same process share the
 		// file; the stable-first Pin.Matches would move all of them onto the
@@ -57,7 +57,9 @@ func ReconcileSeats(r seats.Registry, live []Instance, now time.Time, deadAfter 
 			}
 		}
 		if found {
-			seat.Endpoint = seats.Endpoint{Session: inst.Session, PaneID: inst.PaneID, AgentSessionID: inst.AgentSessionID}
+			// Agent-session is the routing key; session/pane are live
+			// herdr facts, not stored truth.
+			seat.Endpoint = seats.Endpoint{AgentSessionID: inst.AgentSessionID}
 			seat.Liveness, seat.LastSeenAt, seat.MissingSince = seats.Live, now.UTC(), nil
 		} else {
 			if seat.MissingSince == nil {
