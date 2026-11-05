@@ -269,7 +269,7 @@ func formatQueryIssue(buf *strings.Builder, issue *types.Issue) {
 	}
 	assigneeStr := ""
 	if issue.Assignee != "" {
-		assigneeStr = fmt.Sprintf(" @%s", seatDisplay(issue.Assignee))
+		assigneeStr = fmt.Sprintf(" @%s", seatDisplayShort(issue.Assignee))
 	}
 
 	// Get styled status icon

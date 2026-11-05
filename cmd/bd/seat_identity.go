@@ -43,9 +43,10 @@ func bindSeatIdentity(cmd *cobra.Command, beadsDir string, write bool) error {
 		if err != nil {
 			return err
 		}
-		if key == "assignee" && id != "" && !seats.IsUUID(id) && seats.MachineActor(id) == "" {
+		if write && key == "assignee" && id != "" && !seats.IsUUID(id) && seats.MachineActor(id) == "" {
 			return fmt.Errorf("assignee seat %q resolves to non-UUID identity %q: agent seat must be minted with a UUID (bd seat register --alias %s)", flag.Value.String(), id, flag.Value.String())
 		}
+		_ = flag.Value.Set("")
 		if err := flag.Value.Set(id); err != nil {
 			return err
 		}
@@ -73,7 +74,28 @@ func bindSeatIdentity(cmd *cobra.Command, beadsDir string, write bool) error {
 
 func seatDisplay(id string) string {
 	if r, ok := seats.FromContext(rootCtx); ok {
-		return r.Display(id)
+		disp := r.Display(id)
+		if disp != id && seats.IsUUID(id) {
+			return fmt.Sprintf("%s (%s)", id, disp)
+		}
+		return disp
+	}
+	return id
+}
+
+func seatDisplayShort(id string) string {
+	if r, ok := seats.FromContext(rootCtx); ok {
+		disp := r.Display(id)
+		if disp != id && seats.IsUUID(id) {
+			return fmt.Sprintf("%s [%s]", disp, id[:8])
+		}
+		if seats.IsUUID(id) && len(id) >= 8 {
+			return id[:8]
+		}
+		return disp
+	}
+	if seats.IsUUID(id) && len(id) >= 8 {
+		return id[:8]
 	}
 	return id
 }
@@ -103,10 +125,14 @@ func projectSeatJSON(v any) (any, error) {
 				visit(child)
 			}
 		case map[string]any:
-			// Only project full issue objects; reports retain verbatim historic names.
+			// Ensure assignee holds the canonical UUID identity, not a display alias
+			// (captain directive 2026-11-04: remove human name noise from identity fields).
 			if _, issue := item["title"]; issue {
 				if id, _ := item["assignee_id"].(string); id != "" {
-					item["assignee"] = r.Display(id)
+					item["assignee"] = id
+					if disp := r.Display(id); disp != id {
+						item["assignee_display"] = disp
+					}
 				}
 			}
 			for _, child := range item {

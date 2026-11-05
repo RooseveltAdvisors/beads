@@ -41,7 +41,8 @@ func TestMisrouteFilesToDispatchOwner(t *testing.T) {
 		t.Fatalf("list --label misroute failed: %v", err)
 	}
 	for _, want := range []string{
-		`"assignee": "firstmate"`,
+		`"assignee": "` + ownerUUID + `"`,
+		`"assignee_display": "firstmate"`,
 		`"priority": 1`,
 		"MISROUTE: milestones landing on the wrong seat",
 	} {
