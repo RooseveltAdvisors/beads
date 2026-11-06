@@ -171,3 +171,70 @@ func TestHealRewritesPaneWhenSessionFileSurvives(t *testing.T) {
 		t.Fatalf("reconcile endpoint = %#v liveness=%s", r["portal-ops"].Endpoint, r["portal-ops"].Liveness)
 	}
 }
+
+// TestHealRefusesRebindFromDeadProcessEnv is the regression for the
+// 2026-11-06 clobber: a process carrying the wiseman durable state with a
+// dead session file in its env re-asserted a dead endpoint on every bd run,
+// overwriting a healthy rebind 8 minutes after it was written. A rebind whose
+// self does not resolve to a live instance must be skipped.
+func TestHealRefusesRebindFromDeadProcessEnv(t *testing.T) {
+	o, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	id, state := mintTestSeat(t, o, "wiseman", seats.Endpoint{
+		Session: "wiseman", PaneID: "w1:pHEALTHY", AgentSessionID: "live-session",
+	}, now)
+
+	// Live inventory has a different agent; the caller's env claims a dead session.
+	live := []Instance{{
+		Session: "wiseman", PaneID: "w9:p9", AgentSessionID: "other-session",
+	}}
+	self := Instance{
+		Session: "wiseman", PaneID: "w9:p9",
+		AgentSessionID: "dead-nov3-session",
+	}
+	if err := o.Heal(&state, self, live, now.Add(time.Minute), true); err != nil {
+		t.Fatal(err)
+	}
+	r, err := seats.Load(o.Dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := r[id]
+	if got.Endpoint.AgentSessionID != "live-session" {
+		t.Fatalf("dead-env rebind clobbered endpoint: %#v, want live-session preserved", got.Endpoint)
+	}
+	if got.Endpoint.PaneID != "w1:pHEALTHY" {
+		t.Fatalf("endpoint pane changed: %#v, want w1:pHEALTHY", got.Endpoint)
+	}
+}
+
+// The same self when it IS live rebinds normally.
+func TestHealRebindsWhenSelfIsLive(t *testing.T) {
+	o, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	id, state := mintTestSeat(t, o, "wiseman", seats.Endpoint{
+		Session: "wiseman", PaneID: "w1:pOLD", AgentSessionID: "old-session",
+	}, now)
+	live := []Instance{{
+		Session: "wiseman", PaneID: "w1:pNOW", AgentSessionID: "live-session",
+	}}
+	self := Instance{
+		Session: "wiseman", PaneID: "w1:pNOW", AgentSessionID: "live-session",
+	}
+	if err := o.Heal(&state, self, live, now.Add(time.Minute), true); err != nil {
+		t.Fatal(err)
+	}
+	r, err := seats.Load(o.Dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r[id].Endpoint.AgentSessionID != "live-session" {
+		t.Fatalf("live self did not rebind: %#v", r[id].Endpoint)
+	}
+}

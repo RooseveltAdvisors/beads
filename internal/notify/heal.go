@@ -17,8 +17,44 @@ func (o *Outbox) Heal(state *seats.AgentState, self Instance, live []Instance, n
 		if _, err := o.Reconcile(live, now, 5*time.Minute); err != nil {
 			return err
 		}
+		// A rebind re-asserts the caller's endpoint from ITS process env
+		// (HERDR_* / PI_SESSION_FILE). A process that outlives its herdr
+		// entry - a detached pane, a lingering shell - carries a session
+		// file no live instance reports, and its blind rebind clobbers a
+		// healthy endpoint with a dead one (observed 2026-11-06: the
+		// wiseman seat's endpoint was overwritten back to a dead Nov 3
+		// session 8 minutes after a correct rebind). Only rebind when the
+		// caller's self still resolves to a live instance; discovery
+		// unavailable (haveLive false) keeps the old best-effort path.
+		if !selfMatchesLive(self, live) {
+			return nil
+		}
 	}
 	return o.Rebind(state, self, now)
+}
+
+// selfMatchesLive reports whether the caller's own instance is among the live
+// inventory. A missing AgentSessionID falls back to session+pane, the legacy
+// locator for callers that predate agent-session env.
+func selfMatchesLive(self Instance, live []Instance) bool {
+	if strings.TrimSpace(self.AgentSessionID) != "" {
+		for _, inst := range live {
+			if strings.TrimSpace(inst.AgentSessionID) == strings.TrimSpace(self.AgentSessionID) {
+				return true
+			}
+		}
+		return false
+	}
+	if strings.TrimSpace(self.Session) == "" || strings.TrimSpace(self.PaneID) == "" {
+		return false
+	}
+	for _, inst := range live {
+		if strings.TrimSpace(inst.Session) == strings.TrimSpace(self.Session) &&
+			strings.TrimSpace(inst.PaneID) == strings.TrimSpace(self.PaneID) {
+			return true
+		}
+	}
+	return false
 }
 
 // Rebind re-asserts the endpoint of the seat the caller's durable state
