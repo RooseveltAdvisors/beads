@@ -17,18 +17,20 @@ func (o *Outbox) Heal(state *seats.AgentState, self Instance, live []Instance, n
 		if _, err := o.Reconcile(live, now, 5*time.Minute); err != nil {
 			return err
 		}
-		// A rebind re-asserts the caller's endpoint from ITS process env
-		// (HERDR_* / PI_SESSION_FILE). A process that outlives its herdr
-		// entry - a detached pane, a lingering shell - carries a session
-		// file no live instance reports, and its blind rebind clobbers a
-		// healthy endpoint with a dead one (observed 2026-11-06: the
-		// wiseman seat's endpoint was overwritten back to a dead Nov 3
-		// session 8 minutes after a correct rebind). Only rebind when the
-		// caller's self still resolves to a live instance; discovery
-		// unavailable (haveLive false) keeps the old best-effort path.
-		if !selfMatchesLive(self, live) {
-			return nil
-		}
+	}
+	// A rebind re-asserts the caller's endpoint from ITS process env
+	// (HERDR_* / PI_SESSION_FILE). A process that outlives its herdr
+	// entry - a detached pane, a lingering shell - carries a session
+	// file no live instance reports, and its blind rebind clobbers a
+	// healthy endpoint with a dead one (observed twice 2026-11-06: the
+	// wiseman seat was overwritten back to a dead Nov 3 session minutes
+	// after a correct rebind, including through the discovery-failure
+	// path). Never write an endpoint we cannot verify: no live match -
+	// whether discovery failed or self is simply dead - skips the rebind
+	// and leaves rows to hold. Deliberate re-registration remains the
+	// explicit `bd seat register --state` path.
+	if !haveLive || !selfMatchesLive(self, live) {
+		return nil
 	}
 	return o.Rebind(state, self, now)
 }
