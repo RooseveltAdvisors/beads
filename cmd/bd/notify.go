@@ -63,6 +63,7 @@ var notifyPendingCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		seat, _ := cmd.Flags().GetString("seat")
+		explicitSeat := cmd.Flags().Changed("seat")
 		if strings.TrimSpace(seat) == "" {
 			seat = currentNotifyActor()
 			if isUnassignedNotifySeat(seat) {
@@ -78,10 +79,22 @@ var notifyPendingCmd = &cobra.Command{
 			return err
 		}
 		if strings.TrimSpace(seat) != "" {
-			seat, err = o.ResolveSeat(seat)
-			if err != nil {
-				return err
+			resolved, rerr := o.ResolveSeat(seat)
+			if rerr != nil {
+				// An explicit --seat names a seat: the raw registry refusal
+				// is the answer. The DEFAULT actor (git user.name fallback)
+				// is not necessarily a seat on this host - after a seat
+				// retirement the bare command would otherwise dump an
+				// "unknown seat" wall of text with no way out. Guide to the
+				// two supported ways to name a seat instead.
+				if explicitSeat {
+					return rerr
+				}
+				return HandleErrorWithHint(
+					fmt.Sprintf("default actor seat %q is not registered", seat),
+					"pass --seat <seat> to list that seat's pending rows, or set BEADS_ACTOR=<seat>")
 			}
+			seat = resolved
 		}
 		pending, err := o.Pending(seat)
 		if err != nil {
