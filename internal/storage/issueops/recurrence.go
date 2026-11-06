@@ -366,11 +366,31 @@ func nextDueAfterMiss(c dueCandidate, now time.Time) (time.Time, bool) {
 			RepeatStart:   c.repeatStart,
 			RepeatEnd:     c.repeatEnd,
 		}
-		if next, ok := nextOccurrencePast(probe, c.dueAt, now); ok {
+		// Cron evaluates in the time's zone. The quiet window names the
+		// bead's intended timezone (repeat_window's zone); evaluating a
+		// pattern like "*/10 9-19" in UTC while the window read
+		// America/New_York left a 5h daily gap where the window was open
+		// but the cron was silent (observed 2026-11-05: fm-mw4xg last
+		// fired 14:50 ET then sat idle until 04:00 next day). Convert the
+		// walk inputs to the window's zone so hours match the window;
+		// NextOccurrence returns UTC instants either way.
+		dueAt, evaluationNow := c.dueAt, now
+		if w, err := timeparsing.ParseWindow(c.repeatWindow); err == nil && !w.IsZero() {
+			if loc, err := time.LoadLocation(w.Zone); err == nil {
+				dueAt, evaluationNow = dueAt.In(loc), now.In(loc)
+			}
+		}
+		if next, ok := nextOccurrencePast(probe, dueAt, evaluationNow); ok {
 			return next, true
 		}
 	}
 	return now.Add(DueMissGrace), false
+}
+
+// nextDueAfterMissInWindow is the test seam for the timezone threading: the
+// quiet window's zone is the evaluation zone for the cron walk.
+func nextDueAfterMissInWindow(c dueCandidate, now time.Time) (time.Time, bool) {
+	return nextDueAfterMiss(c, now)
 }
 
 // nextOccurrencePast finds the first occurrence of a series that lies strictly
