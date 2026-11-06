@@ -43,7 +43,7 @@ func (o *Outbox) Rebind(state *seats.AgentState, self Instance, now time.Time) e
 		return nil
 	}
 	return seats.Update(o.dir, func(r seats.Registry) error {
-		ep := seats.Endpoint{Session: self.Session, PaneID: self.PaneID, AgentSessionID: self.AgentSessionID}
+		ep := seats.Endpoint{AgentSessionID: self.AgentSessionID}
 		if cur, ok := r[state.AgentUUID]; ok && cur.Endpoint == ep && cur.Liveness == seats.Live {
 			return nil
 		}

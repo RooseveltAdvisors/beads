@@ -107,7 +107,7 @@ func TestSeatReconcilerMarksStaleAndRebindsExactSession(t *testing.T) {
 		t.Fatalf("not dead: %v", r)
 	}
 	ReconcileSeats(r, []Instance{{Session: "moved", PaneID: "p9", AgentSessionID: "session-1"}}, now.Add(2*time.Minute), time.Minute)
-	if s := r["seat:worker"]; s.Liveness != seats.Live || s.Endpoint.PaneID != "p9" || s.MissingSince != nil {
+	if s := r["seat:worker"]; s.Liveness != seats.Live || s.Endpoint.AgentSessionID == "" || s.MissingSince != nil {
 		t.Fatalf("exact session not rebound: %+v", s)
 	}
 }

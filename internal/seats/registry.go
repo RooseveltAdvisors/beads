@@ -216,12 +216,19 @@ func Save(dir string, r Registry) error {
 // A token-protected seat (one Mint created) refuses this path: rebinding it
 // requires the rebind token from the agent's durable state, so a foreign
 // shell that knows the uuid still cannot take the seat over.
+// endpointHasLocator reports whether the endpoint names at least one exact
+// locator: a session+pane pair, or an agent-session id. Agent-session is the
+// stable routing key; session+pane is a legacy/diagnostic cache.
+func endpointHasLocator(e Endpoint) bool {
+	return (e.Session != "" && e.PaneID != "") || e.AgentSessionID != ""
+}
+
 func (r Registry) Register(id string, aliases []string, endpoint Endpoint, now time.Time) error {
 	if err := ValidateID(id); err != nil {
 		return err
 	}
-	if endpoint.Session == "" || endpoint.PaneID == "" {
-		return fmt.Errorf("registration requires an exact endpoint session and pane id")
+	if !endpointHasLocator(endpoint) {
+		return fmt.Errorf("registration requires an endpoint: session+pane or agent-session id")
 	}
 	old, exists := r[id]
 	if exists && old.TokenSHA256 != "" {
@@ -272,8 +279,8 @@ func mintToken() (string, error) {
 // registry stores only the token hash; the caller persists the token in the
 // agent's durable state and presents it on every re-registration.
 func (r Registry) Mint(aliases []string, endpoint Endpoint, now time.Time) (id string, token string, err error) {
-	if endpoint.Session == "" || endpoint.PaneID == "" {
-		return "", "", fmt.Errorf("registration requires an exact endpoint session and pane id")
+	if !endpointHasLocator(endpoint) {
+		return "", "", fmt.Errorf("registration requires an endpoint: session+pane or agent-session id")
 	}
 	if len(aliases) == 0 {
 		return "", "", fmt.Errorf("mint requires at least one alias (first is the display name)")
@@ -308,8 +315,8 @@ func (r Registry) RebindWithToken(id string, endpoint Endpoint, token string, no
 	if err := ValidateID(id); err != nil {
 		return err
 	}
-	if endpoint.Session == "" || endpoint.PaneID == "" {
-		return fmt.Errorf("registration requires an exact endpoint session and pane id")
+	if !endpointHasLocator(endpoint) {
+		return fmt.Errorf("registration requires an endpoint: session+pane or agent-session id")
 	}
 	old, ok := r[id]
 	if !ok {

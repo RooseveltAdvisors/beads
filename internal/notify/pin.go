@@ -236,7 +236,17 @@ func LoadPins(dir string) (map[string]Pin, error) {
 	}
 	out := make(map[string]Pin, len(r))
 	for id, seat := range r {
-		out[id] = Pin{Session: seat.Endpoint.Session, PaneID: seat.Endpoint.PaneID, AgentSessionID: seat.Endpoint.AgentSessionID, Liveness: seat.Liveness}
+		// Read whatever the endpoint carries. New registrations store only
+		// agent-session (the stable routing key); legacy entries still have
+		// session+pane. Pin.Matches is stable-first: when agent-session is
+		// present it is the only locator checked, so a stale session+pane
+		// can never hijack a delivery (2026-11-05 misroute).
+		out[id] = Pin{
+			Session:        seat.Endpoint.Session,
+			PaneID:         seat.Endpoint.PaneID,
+			AgentSessionID: seat.Endpoint.AgentSessionID,
+			Liveness:       seat.Liveness,
+		}
 	}
 	return out, nil
 }
