@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -122,4 +124,51 @@ func TestDisciplineChecks_PriorityInflation(t *testing.T) {
 		}
 	}
 	t.Fatal("priority-inflation check missing")
+}
+
+// TestDisciplineChecks_LeakedAgentEnvironment tests detection of leaked agent environment
+// variables (BEADS_AGENT_STATE, BEADS_ACTOR) in global shell rc files.
+func TestDisciplineChecks_LeakedAgentEnvironment(t *testing.T) {
+	tempHome := t.TempDir()
+
+	// 1. Clean directory -> statusOK
+	c := checkLeakedAgentEnvInDir(tempHome)
+	if c.Status != statusOK {
+		t.Fatalf("expected clean dir to pass, got: %s (%s)", c.Status, c.Message)
+	}
+
+	// 2. Leaked .bashrc -> statusWarning
+	bashrcPath := filepath.Join(tempHome, ".bashrc")
+	if err := os.WriteFile(bashrcPath, []byte("export BEADS_AGENT_STATE=/some/path/wiseman.state\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c = checkLeakedAgentEnvInDir(tempHome)
+	if c.Status != statusWarning {
+		t.Fatalf("expected leaked .bashrc to warn, got: %s (%s)", c.Status, c.Message)
+	}
+	if !strings.Contains(c.Detail, ".bashrc") {
+		t.Fatalf("expected detail to mention .bashrc, got: %q", c.Detail)
+	}
+
+	// 3. Comments are ignored
+	if err := os.WriteFile(bashrcPath, []byte("# export BEADS_AGENT_STATE=/some/path/wiseman.state\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c = checkLeakedAgentEnvInDir(tempHome)
+	if c.Status != statusOK {
+		t.Fatalf("expected commented .bashrc to pass, got: %s (%s)", c.Status, c.Message)
+	}
+
+	// 4. Leaked .zshrc -> statusWarning
+	zshrcPath := filepath.Join(tempHome, ".zshrc")
+	if err := os.WriteFile(zshrcPath, []byte("BEADS_ACTOR=wiseman\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c = checkLeakedAgentEnvInDir(tempHome)
+	if c.Status != statusWarning {
+		t.Fatalf("expected leaked .zshrc to warn, got: %s (%s)", c.Status, c.Message)
+	}
+	if !strings.Contains(c.Detail, ".zshrc") {
+		t.Fatalf("expected detail to mention .zshrc, got: %q", c.Detail)
+	}
 }

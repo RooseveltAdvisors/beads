@@ -38,7 +38,7 @@ func TestRebindKeepsUUIDAndMovesPaneAfterRestart(t *testing.T) {
 
 	err = o.Rebind(&state, Instance{
 		Session: "firstmate", PaneID: "w1:pNEW", AgentSessionID: "session-new",
-	}, now.Add(time.Minute))
+	}, now.Add(time.Minute), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,11 +76,11 @@ func TestRebindWithoutDurableStateGuessesNothing(t *testing.T) {
 
 	self := Instance{Session: "wiseman", PaneID: "w1:p3G", AgentSessionID: "session-stranger"}
 	// No state at all.
-	if err := o.Rebind(nil, self, now.Add(time.Minute)); err != nil {
+	if err := o.Rebind(nil, self, now.Add(time.Minute), nil); err != nil {
 		t.Fatal(err)
 	}
 	// A state-shaped value with no uuid and no token.
-	if err := o.Rebind(&seats.AgentState{Alias: "wiseman"}, self, now.Add(2*time.Minute)); err != nil {
+	if err := o.Rebind(&seats.AgentState{Alias: "wiseman"}, self, now.Add(2*time.Minute), nil); err != nil {
 		t.Fatal(err)
 	}
 	r, err := seats.Load(o.Dir())
@@ -109,7 +109,7 @@ func TestForeignShellCannotRebindAMintedUUID(t *testing.T) {
 
 	foreign := seats.AgentState{AgentUUID: id, Alias: "wiseman", RebindToken: "not-the-token"}
 	self := Instance{Session: "wiseman", PaneID: "w1:pEVIL", AgentSessionID: "session-evil"}
-	if err := o.Rebind(&foreign, self, now.Add(time.Minute)); err != nil {
+	if err := o.Rebind(&foreign, self, now.Add(time.Minute), nil); err != nil {
 		t.Fatal(err)
 	}
 	r, err := seats.Load(o.Dir())
@@ -236,5 +236,37 @@ func TestHealRebindsWhenSelfIsLive(t *testing.T) {
 	}
 	if r[id].Endpoint.AgentSessionID != "live-session" {
 		t.Fatalf("live self did not rebind: %#v", r[id].Endpoint)
+	}
+}
+
+// TestHealRefusesToStealLiveEndpoint is the regression test for the 2026-11-08 incident:
+// an agent in another pane whose environment inherited the wiseman state file must not
+// steal the seat's binding while the legitimate registered instance is still live in herdr.
+func TestHealRefusesToStealLiveEndpoint(t *testing.T) {
+	o, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	id, state := mintTestSeat(t, o, "wiseman", seats.Endpoint{
+		Session: "wiseman", PaneID: "w1:pLEGIT", AgentSessionID: "legit-session",
+	}, now)
+
+	// Both the legit owner and a concurrent foreign agent are live in herdr.
+	live := []Instance{
+		{Session: "wiseman", PaneID: "w1:pLEGIT", AgentSessionID: "legit-session"},
+		{Session: "wiseman", PaneID: "w1:pOTHER", AgentSessionID: "other-session"},
+	}
+	// Foreign agent has the state file in its env and calls Heal.
+	self := Instance{Session: "wiseman", PaneID: "w1:pOTHER", AgentSessionID: "other-session"}
+	if err := o.Heal(&state, self, live, now.Add(time.Minute), true); err != nil {
+		t.Fatal(err)
+	}
+	r, err := seats.Load(o.Dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r[id].Endpoint.AgentSessionID != "legit-session" {
+		t.Fatalf("heal stole endpoint from live agent: %#v, want legit-session", r[id].Endpoint)
 	}
 }

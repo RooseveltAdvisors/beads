@@ -32,7 +32,7 @@ func (o *Outbox) Heal(state *seats.AgentState, self Instance, live []Instance, n
 	if !haveLive || !selfMatchesLive(self, live) {
 		return nil
 	}
-	return o.Rebind(state, self, now)
+	return o.Rebind(state, self, now, live)
 }
 
 // selfMatchesLive reports whether the caller's own instance is among the live
@@ -70,7 +70,7 @@ func selfMatchesLive(self Instance, live []Instance) bool {
 // uuid, or a token refusal leaves the registry untouched and never fails the
 // caller's command. The explicit `bd seat register` path surfaces those
 // errors instead.
-func (o *Outbox) Rebind(state *seats.AgentState, self Instance, now time.Time) error {
+func (o *Outbox) Rebind(state *seats.AgentState, self Instance, now time.Time, live []Instance) error {
 	self.Session = strings.TrimSpace(self.Session)
 	self.PaneID = strings.TrimSpace(self.PaneID)
 	self.AgentSessionID = strings.TrimSpace(self.AgentSessionID)
@@ -82,12 +82,39 @@ func (o *Outbox) Rebind(state *seats.AgentState, self Instance, now time.Time) e
 	}
 	return seats.Update(o.dir, func(r seats.Registry) error {
 		ep := seats.Endpoint{AgentSessionID: self.AgentSessionID}
-		if cur, ok := r[state.AgentUUID]; ok && cur.Endpoint == ep && cur.Liveness == seats.Live {
-			return nil
+		if cur, ok := r[state.AgentUUID]; ok {
+			if cur.Endpoint == ep && cur.Liveness == seats.Live {
+				return nil
+			}
+			// Live endpoint protection: if the registered seat's current endpoint resolves to a
+			// live instance in Herdr, and that instance is not self, auto-heal must never steal it.
+			if len(live) > 0 {
+				pin := Pin{
+					Session:        cur.Endpoint.Session,
+					PaneID:         cur.Endpoint.PaneID,
+					AgentSessionID: cur.Endpoint.AgentSessionID,
+				}
+				if pin.Valid() {
+					if inst, found := FindPinnedInstance(pin, live); found {
+						if !instancesMatch(inst, self) {
+							return nil
+						}
+					}
+				}
+			}
 		}
 		// A refused rebind (unknown uuid, token mismatch) is a hold, not a
 		// command failure: rows stay queued for the legitimate owner.
 		_ = r.RebindWithToken(state.AgentUUID, ep, state.RebindToken, now)
 		return nil
 	})
+}
+
+// instancesMatch reports whether two instances refer to the same agent.
+func instancesMatch(a, b Instance) bool {
+	if strings.TrimSpace(a.AgentSessionID) != "" && strings.TrimSpace(b.AgentSessionID) != "" {
+		return strings.TrimSpace(a.AgentSessionID) == strings.TrimSpace(b.AgentSessionID)
+	}
+	return strings.TrimSpace(a.Session) == strings.TrimSpace(b.Session) &&
+		strings.TrimSpace(a.PaneID) == strings.TrimSpace(b.PaneID)
 }

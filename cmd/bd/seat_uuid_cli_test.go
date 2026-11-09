@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -29,7 +30,9 @@ func resetSeatRegisterFlags(t *testing.T) {
 	cmd := seatRegisterCmd(t)
 	cmd.Flags().VisitAll(func(f *pflag.Flag) {
 		f.Changed = false
-		if err := f.Value.Set(f.DefValue); err != nil {
+		if sv, ok := f.Value.(pflag.SliceValue); ok {
+			_ = sv.Replace(nil)
+		} else if err := f.Value.Set(f.DefValue); err != nil {
 			t.Fatalf("reset flag %s: %v", f.Name, err)
 		}
 	})
@@ -115,5 +118,62 @@ func TestSeatRegisterMintReregisterForeignShellCLI(t *testing.T) {
 	}
 	if r, err := seats.Load(filepath.Join(beadsDir, "notify")); err != nil || len(r) != 1 {
 		t.Fatalf("corrupt state changed the registry: %v %v", r, err)
+	}
+}
+
+// TestSeatRegisterRefusesMismatchedAliasOnExistingState verifies that when an agent runs
+// bd seat register with an alias that does not match the existing durable state's seat,
+// the command refuses immediately instead of hijacking the existing seat.
+func TestSeatRegisterRefusesMismatchedAliasOnExistingState(t *testing.T) {
+	beadsDir := filepath.Join(t.TempDir(), ".beads")
+	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := configfile.DefaultConfig()
+	if err := cfg.Save(beadsDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BEADS_TEST_MODE", "1")
+	t.Setenv("BEADS_DIR", beadsDir)
+	t.Setenv(seats.StateEnv, "")
+	statePath := filepath.Join(t.TempDir(), "agent-state.json")
+
+	// Mint worker seat
+	if err := runSeatRegister(t, "--state", statePath, "--alias", "worker", "--session", "wiseman", "--pane", "w1:p1"); err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+
+	// Attempt to register with a completely mismatched alias using the same state
+	err := runSeatRegister(t, "--state", statePath, "--alias", "portal-qbo-reports", "--session", "wiseman", "--pane", "w1:p2")
+	if err == nil {
+		t.Fatal("expected error registering mismatched alias on existing state, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not match requested alias") {
+		t.Fatalf("unexpected error message: %v", err)
+	}
+
+	// Verify endpoint was NOT updated to w1:p2
+	r, err := seats.Load(filepath.Join(beadsDir, "notify"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := seats.ReadState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r[st.AgentUUID].Endpoint.PaneID != "w1:p1" {
+		t.Fatalf("endpoint was hijacked despite alias mismatch: %+v", r[st.AgentUUID].Endpoint)
+	}
+
+	// Re-registering with the matching alias succeeds and updates endpoint
+	if err := runSeatRegister(t, "--state", statePath, "--alias", "worker", "--session", "wiseman", "--pane", "w1:p1-new"); err != nil {
+		t.Fatalf("re-register with matching alias failed: %v", err)
+	}
+	r, err = seats.Load(filepath.Join(beadsDir, "notify"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r[st.AgentUUID].Endpoint.PaneID != "w1:p1-new" {
+		t.Fatalf("endpoint was not updated after matching re-register: %+v", r[st.AgentUUID].Endpoint)
 	}
 }
