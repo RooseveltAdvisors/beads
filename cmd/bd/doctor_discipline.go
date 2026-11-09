@@ -271,8 +271,8 @@ func checkLeakedAgentEnvInDir(home string) doctorCheck {
 	var offenders []string
 
 	for _, name := range candidates {
-		target := filepath.Join(home, name)
-		data, err := os.ReadFile(target)
+		target := filepath.Clean(filepath.Join(home, name))
+		data, err := os.ReadFile(target) // #nosec G304 -- candidate paths from user home directory
 		if err != nil {
 			continue
 		}
