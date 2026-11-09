@@ -1076,6 +1076,7 @@ go_test(
         "notify_comment_test.go",
         "notify_liveness_embedded_test.go",
         "notify_liveness_test.go",
+        "notify_pending_hint_test.go",
         "notion_store_test.go",
         "notion_test.go",
         "onboard_embedded_test.go",
