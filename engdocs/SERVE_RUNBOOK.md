@@ -1,6 +1,6 @@
 # `bd serve` operator runbook
 
-Last reviewed: 2026-08-10
+Last reviewed: 2026-11-08
 
 Freshness source: `internal/httpapi/server.go`,
 `internal/httpapi/events_watch.go`, `cmd/bd/serve.go` and
