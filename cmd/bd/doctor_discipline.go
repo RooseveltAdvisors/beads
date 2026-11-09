@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -241,7 +243,70 @@ func disciplineChecks(issues []*types.Issue, reg seats.Registry, now time.Time) 
 		"DECISION: pick the surviving copy, close the rest with per-copy reasons (recurrence-guard bypass).",
 		dupeGroups > 0)
 
+	homeDir := os.Getenv("HOME")
+	if homeDir == "" {
+		if h, err := os.UserHomeDir(); err == nil {
+			homeDir = h
+		}
+	}
+	checks = append(checks, checkLeakedAgentEnvInDir(homeDir))
+
 	return checks
+}
+
+var leakedEnvPattern = regexp.MustCompile(`^\s*(export\s+)?(BEADS_AGENT_STATE|BEADS_ACTOR)\s*=`)
+
+// checkLeakedAgentEnvInDir scans shell configuration files in home for leaked agent bearer tokens or identity exports.
+func checkLeakedAgentEnvInDir(home string) doctorCheck {
+	if strings.TrimSpace(home) == "" {
+		return doctorCheck{
+			Name:     "discipline.leaked-agent-environment",
+			Status:   statusOK,
+			Message:  "user home directory not found; skipped",
+			Fix:      "DECISION: remove BEADS_AGENT_STATE and BEADS_ACTOR from shell rc files; export them only within private agent pane environments.",
+			Category: "Discipline",
+		}
+	}
+	candidates := []string{".bashrc", ".zshrc", ".bash_profile", ".profile", ".zshenv"}
+	var offenders []string
+
+	for _, name := range candidates {
+		target := filepath.Clean(filepath.Join(home, name))
+		data, err := os.ReadFile(target) // #nosec G304 -- candidate paths from user home directory
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "#") {
+				continue
+			}
+			if leakedEnvPattern.MatchString(line) {
+				offenders = append(offenders, filepath.Join("~", name))
+				break
+			}
+		}
+	}
+
+	if len(offenders) > 0 {
+		return doctorCheck{
+			Name:     "discipline.leaked-agent-environment",
+			Status:   statusWarning,
+			Message:  fmt.Sprintf("%d shell configuration files export agent identity", len(offenders)),
+			Detail:   strings.Join(offenders, ", "),
+			Fix:      "DECISION: remove BEADS_AGENT_STATE and BEADS_ACTOR from shell rc files; export them only within private agent pane environments.",
+			Category: "Discipline",
+		}
+	}
+
+	return doctorCheck{
+		Name:     "discipline.leaked-agent-environment",
+		Status:   statusOK,
+		Message:  "0 shell configuration files export agent identity",
+		Fix:      "DECISION: remove BEADS_AGENT_STATE and BEADS_ACTOR from shell rc files; export them only within private agent pane environments.",
+		Category: "Discipline",
+	}
 }
 
 func countStatus(issues []*types.Issue, s types.Status) int {
