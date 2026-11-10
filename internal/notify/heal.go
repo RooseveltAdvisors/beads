@@ -86,20 +86,30 @@ func (o *Outbox) Rebind(state *seats.AgentState, self Instance, now time.Time, l
 			if cur.Endpoint == ep && cur.Liveness == seats.Live {
 				return nil
 			}
-			// Live endpoint protection: if the registered seat's current endpoint resolves to a
+			// Guard 1: Auto-heal never revives an unbound or dead seat.
+			// Deliberate activation requires explicit `bd seat register --state`.
+			pin := Pin{
+				Session:        cur.Endpoint.Session,
+				PaneID:         cur.Endpoint.PaneID,
+				AgentSessionID: cur.Endpoint.AgentSessionID,
+			}
+			if cur.Liveness == seats.Dead || !pin.Valid() {
+				return nil
+			}
+			// Guard 2: Live endpoint protection: if the registered seat's current endpoint resolves to a
 			// live instance in Herdr, and that instance is not self, auto-heal must never steal it.
 			if len(live) > 0 {
-				pin := Pin{
-					Session:        cur.Endpoint.Session,
-					PaneID:         cur.Endpoint.PaneID,
-					AgentSessionID: cur.Endpoint.AgentSessionID,
-				}
-				if pin.Valid() {
-					if inst, found := FindPinnedInstance(pin, live); found {
-						if !instancesMatch(inst, self) {
-							return nil
-						}
+				if inst, found := FindPinnedInstance(pin, live); found {
+					if !instancesMatch(inst, self) {
+						return nil
 					}
+				}
+			}
+			// Guard 3: Tab label protection: if caller is running in a named Herdr tab,
+			// the tab label must match at least one alias of the seat.
+			if tab := strings.TrimSpace(HerdrTabActor()); tab != "" {
+				if !aliasMatchesTab(cur.Aliases, tab) {
+					return nil
 				}
 			}
 		}
@@ -117,4 +127,28 @@ func instancesMatch(a, b Instance) bool {
 	}
 	return strings.TrimSpace(a.Session) == strings.TrimSpace(b.Session) &&
 		strings.TrimSpace(a.PaneID) == strings.TrimSpace(b.PaneID)
+}
+
+// aliasMatchesTab reports whether the tab label matches at least one alias of the seat.
+func aliasMatchesTab(aliases []string, tabLabel string) bool {
+	normTab := normalizeIdentifier(tabLabel)
+	if normTab == "" {
+		return true
+	}
+	for _, a := range aliases {
+		if normalizeIdentifier(a) == normTab {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeIdentifier(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	s = strings.TrimPrefix(s, "@")
+	s = strings.ReplaceAll(s, "-", "")
+	s = strings.ReplaceAll(s, "_", "")
+	s = strings.ReplaceAll(s, " ", "")
+	s = strings.ReplaceAll(s, ".", "")
+	return s
 }
