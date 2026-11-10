@@ -270,3 +270,65 @@ func TestHealRefusesToStealLiveEndpoint(t *testing.T) {
 		t.Fatalf("heal stole endpoint from live agent: %#v, want legit-session", r[id].Endpoint)
 	}
 }
+
+// TestHealRefusesToReviveDeadOrUnboundSeat verifies that an unbound or dead seat
+// is never automatically revived by background command healing.
+func TestHealRefusesToReviveDeadOrUnboundSeat(t *testing.T) {
+	o, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	id, state := mintTestSeat(t, o, "wiseman", seats.Endpoint{
+		Session: "wiseman", PaneID: "w1:pLEGIT", AgentSessionID: "legit-session",
+	}, now)
+
+	// Explicitly unbind the seat
+	if err := seats.Update(o.Dir(), func(r seats.Registry) error {
+		seat := r[id]
+		seat.Endpoint = seats.Endpoint{}
+		seat.Liveness = seats.Dead
+		r[id] = seat
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// An agent in another pane runs bd and triggers Heal
+	live := []Instance{{Session: "wiseman", PaneID: "w1:pNEW", AgentSessionID: "new-session"}}
+	self := Instance{Session: "wiseman", PaneID: "w1:pNEW", AgentSessionID: "new-session"}
+	if err := o.Heal(&state, self, live, now.Add(time.Minute), true); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := seats.Load(o.Dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r[id].Endpoint != (seats.Endpoint{}) {
+		t.Fatalf("heal revived dead/unbound endpoint: %#v", r[id].Endpoint)
+	}
+}
+
+// TestAliasMatchesTab verifies tab label normalization and matching against seat aliases.
+func TestAliasMatchesTab(t *testing.T) {
+	aliases := []string{"wiseman", "@wiseman", "dotfiles-keeper"}
+	if !aliasMatchesTab(aliases, "wiseman") {
+		t.Error("expected 'wiseman' to match")
+	}
+	if !aliasMatchesTab(aliases, "WISEMAN") {
+		t.Error("expected 'WISEMAN' to match")
+	}
+	if !aliasMatchesTab(aliases, "dotfiles keeper") {
+		t.Error("expected 'dotfiles keeper' to match 'dotfiles-keeper'")
+	}
+	if aliasMatchesTab(aliases, "portal-inventory") {
+		t.Error("expected 'portal-inventory' NOT to match 'wiseman'")
+	}
+	if aliasMatchesTab(aliases, "portal-qbo") {
+		t.Error("expected 'portal-qbo' NOT to match 'wiseman'")
+	}
+	if aliasMatchesTab(aliases, "beads") {
+		t.Error("expected 'beads' NOT to match 'wiseman'")
+	}
+}

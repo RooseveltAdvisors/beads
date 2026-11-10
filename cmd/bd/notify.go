@@ -715,11 +715,6 @@ func tryDrainCommentPing(o *notify.Outbox, seat string) {
 	}
 	discover := notify.HerdrDiscoverer{}
 	instances, discErr := discover.ListAllInstances()
-	if discErr == nil {
-		healSeatRuntime(o, instances, true)
-	} else {
-		healSeatRuntime(o, nil, false)
-	}
 	pins, err := o.LoadPins()
 	if err != nil {
 		return
