@@ -1,4 +1,7 @@
-# Beads — Contributor Agent Instructions
+# Beads - Contributor Agent Instructions
+
+- When a repository's documentation and its existing code disagree, follow the conventions used in the existing code, and in your final reply point out each inconsistency you found between the documentation and the code.
+- Use `rg` (ripgrep) for file content search, never `grep -rn`. Use `fd` for filename/directory search, never `find`. `rg` and `fd` ignore `.git`, `.gitignore`, and binary files by default. Pass `--hidden` (or `-H`) when searching hidden directories like `.github/`, `.beads/`, or `.config/`. Use `rg --max-columns 200` to prevent wide minified files from blowing up the context window. Plain `grep` remains fine for simple pipe filters (`cmd | grep pattern`).
 
 This file is for agents and humans **developing beads** (`bd`). If you are
 using `bd` to track work in your own project, read the user docs instead:
@@ -57,7 +60,7 @@ and not a substitute for the GitHub issue.
 ## Contributor protection
 
 External contributor PRs have priority. Read [CONTRIBUTING.md](CONTRIBUTING.md)
-— it contains promises we've made to contributors — and, before triaging,
+ - it contains promises we've made to contributors - and, before triaging,
 reviewing, landing, closing, or otherwise maintaining PRs,
 [PR_MAINTAINER_GUIDELINES.md](PR_MAINTAINER_GUIDELINES.md). The maintainer
 policy is to maximize community throughput: find useful contributor value,
@@ -67,11 +70,11 @@ request-changes only as a last resort.
 Before implementing any feature or fix, check for existing open PRs on the
 same topic. If one exists:
 
-1. **Review it first** — read the diff, understand the approach.
-2. **Build on their work, don't rewrite it** — check out their branch,
+1. **Review it first** - read the diff, understand the approach.
+2. **Build on their work, don't rewrite it** - check out their branch,
    fix/adapt as needed.
-3. **Preserve their tests** — keep them unless they're wrong.
-4. **Attribute properly** — `Co-authored-by:` in commits, reference their PR.
+3. **Preserve their tests** - keep them unless they're wrong.
+4. **Attribute properly** - `Co-authored-by:` in commits, reference their PR.
 5. **Never close or supersede their PR silently.** If a rewrite is
    unavoidable, explain why on the original PR and credit their design/tests.
 
@@ -109,12 +112,12 @@ guards exist only as Bazel targets. Install
 and pre-push hooks need it.
 
 ```bash
-make test          # bazel test //... --config=ci: the CI test lane (nogo, gofmt, guards, unit tests)
-make check         # testing.Short policy + make ci-pr-lint + make test
-make ci-pr-lint    # nogo lint + vet gate, native plus windows/darwin
-make check-docs    # bazel docsync + doc freshness, then the CLI flag check
-make bazel-sync    # after adding/removing/renaming Go files or changing imports/go.mod
-make install       # build and install bd to ~/.local/bin (canonical)
+make test # bazel test //... --config=ci: the CI test lane (nogo, gofmt, guards, unit tests)
+make check # testing.Short policy + make ci-pr-lint + make test
+make ci-pr-lint # nogo lint + vet gate, native plus windows/darwin
+make check-docs # bazel docsync + doc freshness, then the CLI flag check
+make bazel-sync # after adding/removing/renaming Go files or changing imports/go.mod
+make install # build and install bd to ~/.local/bin (canonical)
 ```
 
 - Each other tier has its own lane (`--config=integration`, `doltserver`,
@@ -203,7 +206,7 @@ and CLI design principles are in
 
 Agents cannot answer prompts. Use `cp -f`, `mv -f`, `rm -f`, `rm -rf`,
 `cp -rf` (these may be aliased to `-i`); `scp`/`ssh -o BatchMode=yes`;
-`apt-get -y`; `HOMEBREW_NO_AUTO_UPDATE=1 brew`. **DO NOT use `bd edit`** — it
+`apt-get -y`; `HOMEBREW_NO_AUTO_UPDATE=1 brew`. **DO NOT use `bd edit`** - it
 opens `$EDITOR`; use `bd update <id> --title/--description/--design/--acceptance/--append-notes`
 (pipe text with special characters via `--description=-`).
 
@@ -221,7 +224,7 @@ opens `$EDITOR`; use `bd update <id> --title/--description/--design/--acceptance
 | Dolt concurrency, server vs embedded mode | [engdocs/design/dolt-concurrency.md](engdocs/design/dolt-concurrency.md) |
 | Errors returned to users | [engdocs/ERROR_HANDLING.md](engdocs/ERROR_HANDLING.md) |
 | The `bd serve` HTTP surface | [engdocs/SERVE_RUNBOOK.md](engdocs/SERVE_RUNBOOK.md) |
-| A new example under `examples/` | `examples/README.md` — give the example its own README and link it there |
+| A new example under `examples/` | `examples/README.md` - give the example its own README and link it there |
 | Releases and version bumps | [RELEASING.md](RELEASING.md) |
 | Scope questions | [engdocs/PROJECT_CHARTER.md](engdocs/PROJECT_CHARTER.md) |
 | Planned work and priorities | [ROADMAP.md](ROADMAP.md) |
