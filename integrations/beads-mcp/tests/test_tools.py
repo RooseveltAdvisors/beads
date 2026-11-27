@@ -1,7 +1,7 @@
 """Integration tests for MCP tools."""
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -161,7 +161,7 @@ async def test_beads_create_issue_assigns_a_due_date_and_echoes_it_back():
     """In a workspace that opted into due.required, every created bead gets a
     deadline: an explicit due wins, otherwise the priority ladder supplies one
     and the result echoes the assigned date."""
-    now = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    now = datetime(2024, 1, 1, tzinfo=UTC)
     assigned = Issue(
         id="bd-9",
         title="New issue",
@@ -232,7 +232,7 @@ async def test_beads_create_issue_ladder_follows_the_due_required_gate():
 @pytest.mark.asyncio
 async def test_beads_create_issue_result_carries_due_at(sample_issue):
     """The tool result carries the assigned deadline on due_at."""
-    dated = sample_issue.model_copy(update={"due_at": datetime(2026, 3, 1, tzinfo=timezone.utc)})
+    dated = sample_issue.model_copy(update={"due_at": datetime(2026, 3, 1, tzinfo=UTC)})
     mock_client = AsyncMock()
     mock_client.get_config = AsyncMock(return_value="")
     mock_client.create = AsyncMock(return_value=dated)
@@ -240,7 +240,7 @@ async def test_beads_create_issue_result_carries_due_at(sample_issue):
     with patch("beads_mcp.tools._get_client", return_value=mock_client):
         issue = await beads_create_issue(title="New issue", priority=2)
 
-    assert issue.due_at == datetime(2026, 3, 1, tzinfo=timezone.utc)
+    assert issue.due_at == datetime(2026, 3, 1, tzinfo=UTC)
 
 
 @pytest.mark.asyncio

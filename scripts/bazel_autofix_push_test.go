@@ -1068,6 +1068,51 @@ esac
 				if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(fake), 0o755); err != nil {
 					t.Fatal(err)
 				}
+				// Host unzip on some macOS runners cannot materialize
+				// symlinks (Permission denied). Fake unzip that uses
+				// ln -s so the refuse path still exercises [ -L ].
+				fakeUnzip := `#!/usr/bin/env bash
+set -euo pipefail
+zip="" dest="." names=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) shift ;;
+    -d) dest="$2"; shift 2 ;;
+    -*) shift ;;
+    *)
+      if [ -z "$zip" ]; then zip="$1"; else names+=("$1"); fi
+      shift ;;
+  esac
+done
+python3 - "$zip" "$dest" "${names[@]}" <<'PY'
+import os, sys, zipfile
+zip_path, dest, *names = sys.argv[1:]
+os.makedirs(dest, exist_ok=True)
+with zipfile.ZipFile(zip_path) as zf:
+    want = set(names) if names else set(zf.namelist())
+    for info in zf.infolist():
+        if info.filename not in want:
+            continue
+        target = os.path.join(dest, info.filename)
+        parent = os.path.dirname(target)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        data = zf.read(info)
+        mode = (info.external_attr >> 16) & 0o170000
+        if mode == 0o120000:
+            if os.path.lexists(target):
+                os.unlink(target)
+            os.symlink(data.decode(), target)
+            print(f"    linking: {target}  -> {data.decode()}")
+            continue
+        with open(target, "wb") as out:
+            out.write(data)
+        print(f"  extracting: {target}")
+PY
+`
+				if err := os.WriteFile(filepath.Join(bin, "unzip"), []byte(fakeUnzip), 0o755); err != nil {
+					t.Fatal(err)
+				}
 				runner := filepath.Join(tmp, "runner")
 				workspace := filepath.Join(tmp, "workspace")
 				for _, d := range []string{runner, workspace} {
@@ -1128,11 +1173,7 @@ esac
 							entries[f] = "x\n"
 						}
 					}
-					// Relative target: macOS unzip refuses absolute links
-					// like /etc/passwd (Permission denied) and leaves no
-					// entry, so the workflow would report found=false
-					// instead of "is not a regular file".
-					out, outputs, _, err := run(t, entries, map[string]string{name: "../escape"}, listed)
+					out, outputs, _, err := run(t, entries, map[string]string{name: "/etc/passwd"}, listed)
 					if err == nil || strings.Contains(outputs, "found=true") || !strings.Contains(out, "is not a regular file") {
 						t.Errorf("err=%v outputs=%q\n%s", err, outputs, out)
 					}
