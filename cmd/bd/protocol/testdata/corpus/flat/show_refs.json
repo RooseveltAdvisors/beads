@@ -6,6 +6,7 @@
       "created_by": "protocol-test",
       "dependency_type": "duplicates",
       "description": "deterministic corpus-duplicate",
+      "due_source": "explicit",
       "id": "corpus-duplicate",
       "issue_type": "task",
       "labels": [
@@ -27,6 +28,7 @@
       "created_by": "protocol-test",
       "dependency_type": "supersedes",
       "description": "deterministic corpus-superseded",
+      "due_source": "explicit",
       "id": "corpus-superseded",
       "issue_type": "task",
       "labels": [

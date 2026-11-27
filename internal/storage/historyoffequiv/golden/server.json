@@ -1,5 +1,5 @@
 {
-  "recorded_from": "f35aef51b + gastownhall/beads#8024",
+  "recorded_from": "c49350cf5+fm-repair-beads-cadence",
   "steps": [
     "create a",
     "create b blocked by a",
@@ -199,8 +199,8 @@
         "applied_at",
         "content_hash"
       ],
-      "rows": 27,
-      "sha256": "7164db2c129cbaafbd9c426d27e809d043cafc77e8aef1f68d1760905a685acb"
+      "rows": 31,
+      "sha256": "7a5a703fab253a89d497d2cef731f8bd6ce10a94890572e6400c601ba450ca6c"
     },
     "interactions": {
       "columns": [
@@ -320,10 +320,17 @@
         "is_blocked",
         "row_lock",
         "storage_class",
-        "current_revision"
+        "repeat_pattern",
+        "repeat_start",
+        "repeat_end",
+        "due_source",
+        "due_missed",
+        "current_revision",
+        "assignee_id",
+        "repeat_window"
       ],
       "rows": 15,
-      "sha256": "1f81df40f4c4d458f20cfb6535ca13468fa03fbd10276c44752977813a4b7e20"
+      "sha256": "dda4659210ea25f8825200ec6f7a2b22b75d7e086bb93101721b9838198a4db4"
     },
     "labels": {
       "columns": [
@@ -402,8 +409,8 @@
         "version",
         "content_hash"
       ],
-      "rows": 69,
-      "sha256": "1d7a6ae809f330f8b4c3516af50ce7604c1db3cd4c1177af3e5c2f1991d74e14"
+      "rows": 74,
+      "sha256": "774ae47126f37a5bac6cd28c7d6a693de034b50475061a48d8de1789aea7afb8"
     },
     "store_epoch": {
       "columns": [
@@ -529,11 +536,18 @@
         "started_at",
         "row_lock",
         "storage_class",
+        "repeat_pattern",
+        "repeat_start",
+        "repeat_end",
+        "due_source",
+        "due_missed",
         "current_revision",
+        "assignee_id",
+        "repeat_window",
         "is_blocked"
       ],
       "rows": 6,
-      "sha256": "f28b157579dedd4373778dc6050b2d1995e1fe30e545e5c70c6b6ccf08ed75bf"
+      "sha256": "2d0108b04e33af02ee0907c487562cf20ccba6eefa45c755433d28f2f42b0373"
     }
   }
 }

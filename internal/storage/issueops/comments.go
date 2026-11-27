@@ -310,11 +310,10 @@ func addIssueCommentInTx(ctx context.Context, tx DBTX, issueID, author, text str
 		Text:      text,
 		CreatedAt: stored,
 	}
-	if live {
-		if err := TouchIssueActivityInTx(ctx, tx, issueID, stored); err != nil {
-			return nil, err
-		}
-	}
+	// Do not TouchIssueActivityInTx here: the Commenter / RowVersion
+	// contracts require a comment write to leave the anchor issue row
+	// untouched (updated_at and row_lock hold). Activity stays on the
+	// comment and event rows only.
 	if err := RecordCommentEventInTx(ctx, tx, issueID, &EventComment{
 		ID: id, Author: author, Text: text, CreatedAt: stored, Source: CommentSourceStructured,
 	}); err != nil {
@@ -356,9 +355,7 @@ func DeleteIssueCommentInTx(ctx context.Context, tx DBTX, issueID, commentID, ac
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE issue_id = ? AND id = ?`, commentTable), issueID, commentID); err != nil {
 		return nil, fmt.Errorf("delete comment: %w", err)
 	}
-	if err := TouchIssueActivityInTx(ctx, tx, issueID, time.Now().UTC()); err != nil {
-		return nil, err
-	}
+	// Same as AddIssueCommentInTx: never write the anchor issue row.
 	if err := AddCommentEventInTx(ctx, tx, issueID, actor, "Deleted comment "+commentID); err != nil {
 		return nil, err
 	}

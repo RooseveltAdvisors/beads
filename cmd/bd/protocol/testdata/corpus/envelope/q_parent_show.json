@@ -9,6 +9,7 @@
           "created_by": "protocol-test",
           "dependency_type": "parent-child",
           "description": "deterministic corpus-parent",
+          "due_source": "explicit",
           "id": "corpus-parent",
           "issue_type": "task",
           "labels": [

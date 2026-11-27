@@ -55,9 +55,6 @@ func ExecuteAddComment(ctx context.Context, tx *sql.Tx, request publicops.AddCom
 	}
 	tables := ChangedTables{}
 	tables.Add(commentTable)
-	if commentTable == "comments" {
-		tables.Add("issues")
-	}
 	return publicops.AddCommentResult{Comment: comment}, tables, nil
 }
 
@@ -86,13 +83,13 @@ func ExecuteDeleteComment(ctx context.Context, tx *sql.Tx, request publicops.Del
 		return publicops.DeleteCommentResult{}, nil, err
 	}
 	isWisp := IsActiveWispInTx(ctx, tx, request.IssueID)
-	issueTable, _, eventTable, _ := WispTableRouting(isWisp)
+	_, _, eventTable, _ := WispTableRouting(isWisp)
 	commentTable := "comments"
 	if isWisp {
 		commentTable = "wisp_comments"
 	}
 	tables := ChangedTables{}
-	tables.Add(commentTable, eventTable, issueTable)
+	tables.Add(commentTable, eventTable)
 	return publicops.DeleteCommentResult{Comment: comment}, tables, nil
 }
 

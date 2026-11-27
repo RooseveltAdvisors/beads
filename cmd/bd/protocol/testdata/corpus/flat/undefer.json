@@ -3,6 +3,7 @@
     "created_at": "<TS>",
     "created_by": "protocol-test",
     "description": "deterministic corpus-deferred",
+    "due_source": "explicit",
     "id": "corpus-deferred",
     "issue_type": "task",
     "labels": [

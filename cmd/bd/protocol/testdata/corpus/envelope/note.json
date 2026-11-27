@@ -3,6 +3,7 @@
     "created_at": "<TS>",
     "created_by": "protocol-test",
     "description": "deterministic corpus-note",
+    "due_source": "explicit",
     "id": "corpus-note",
     "issue_type": "task",
     "labels": [

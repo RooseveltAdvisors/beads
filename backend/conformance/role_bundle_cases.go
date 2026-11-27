@@ -188,7 +188,6 @@ var roleContractCases = []roleContract{
 		RunCommenterRefusesAnEmptyIssueID,
 		RunCommenterDoesNotResolvePrefixes,
 		RunCommenterRecordsExactlyOneHistoryEntry,
-		RunCommenterAdvancesIssueActivity,
 		RunCommenterLeavesTheAnchorIssueUntouched,
 		RunCommenterDeletesComment,
 		RunCommenterRefusesBlankText,

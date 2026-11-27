@@ -4,6 +4,7 @@
     "created_at": "<TS>",
     "created_by": "protocol-test",
     "description": "updated corpus root",
+    "due_source": "explicit",
     "heartbeat_at": "<TS>",
     "id": "corpus-root",
     "issue_type": "feature",
@@ -28,6 +29,7 @@
       "created_at": "<TS>",
       "created_by": "protocol-test",
       "description": "deterministic corpus-closer",
+      "due_source": "explicit",
       "id": "corpus-closer",
       "issue_type": "task",
       "labels": [

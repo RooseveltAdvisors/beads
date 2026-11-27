@@ -39,7 +39,7 @@ const (
 var (
 	updateRequestMembers = []string{
 		"actor", updateClaimMember, "expected_assignee", "expected_status", "expected_version",
-		"due_clear_reason", "force_assignee_transfer", "force_claim_blocked", "force_close_policy", "force_notes_overwrite", "allow_closed_mutation",
+		"due_clear_reason", "force_assignee_transfer", "force_claim_blocked", "force_close_policy", "force_notes_overwrite", "allow_closed_mutation", "allow_template",
 		updatePatchMember,
 	}
 	issuePatchMembers = []string{
@@ -48,7 +48,7 @@ var (
 		"assignee", "parent_id", "labels", "add_labels", "remove_labels", "metadata",
 		"estimated_minutes", "external_ref", "due_at", "defer_until",
 		"repeat_pattern", "repeat_window", "repeat_start", "repeat_end",
-		"estimated_minutes", "external_ref", "due_at", "defer_until", "persistence",
+		"persistence",
 		"await_id", "waiters",
 	}
 	// nullablePatchMembers is the closed set on which explicit `null` CLEARS

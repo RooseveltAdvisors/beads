@@ -126,6 +126,7 @@ func (r *commentSQLRepositoryImpl) InsertRecord(ctx context.Context, comment *ty
 }
 
 func (r *commentSQLRepositoryImpl) insertRecord(ctx context.Context, comment *types.Comment, opts domain.CommentOpts, live bool) (*types.Comment, error) {
+	_ = live // retained for call-site clarity: live vs import insert paths
 	if comment == nil {
 		return nil, fmt.Errorf("db: CommentSQLRepository.InsertRecord: comment must not be nil")
 	}
@@ -178,11 +179,8 @@ func (r *commentSQLRepositoryImpl) insertRecord(ctx context.Context, comment *ty
 		return nil, fmt.Errorf("db: CommentSQLRepository.InsertRecord: %w", err)
 	}
 	copy.CreatedAt = createdAt
-	if live {
-		if err := issueops.TouchIssueActivityInTx(ctx, r.runner, copy.IssueID, copy.CreatedAt); err != nil {
-			return nil, err
-		}
-	}
+	// Do not TouchIssueActivityInTx: Commenter / RowVersion contracts require
+	// the anchor issue row to stay untouched across a comment write.
 
 	if err := issueops.RecordCommentEventInTx(ctx, r.runner, copy.IssueID, &issueops.EventComment{
 		ID: copy.ID, Author: copy.Author, Text: copy.Text, CreatedAt: copy.CreatedAt, Source: issueops.CommentSourceStructured,
