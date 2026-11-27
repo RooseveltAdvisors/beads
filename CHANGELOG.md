@@ -170,7 +170,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remote URL. See
   [Sync failures](docs/recovery/sync-failures.md#credentials-in-a-remote-url-and-merge-commits).
 
+- **The Dolt server bd launches no longer lets SQL read and write any file.**
+  bd left Dolt's `secure_file_priv` at its default, the empty string, so
+  `LOAD_FILE`, `LOAD DATA INFILE` and `SELECT ... INTO OUTFILE` reached every
+  path the server process could. That server runs as you, and its
+  passwordless `root` holds the FILE privilege, so any local process able to
+  open the loopback port could read and write your files through SQL, even
+  one sandboxed away from the file system. The config bd generates now sets
+  `secure_file_priv` to `dolt-server-files` beside it
+  (`.beads/dolt-server-files`, or `~/.beads/shared-server/dolt-server-files`
+  for the shared server). bd does not create that directory, and while it
+  does not exist the server refuses those statements; bd itself never uses
+  them. To use them, create the directory and keep the files in it. A running
+  server keeps the old setting until it restarts (`bd dolt stop`, then
+  `bd dolt start`). Servers you configure and run yourself, and the proxied
+  server's config, which bd writes once and you may edit, are unchanged. See
+  [Server config file](docs/architecture/dolt.md).
+
 ### Added
+
+- **`hooks.manage` and `gitignore.manage`: per-repository opt-outs from bd's
+  hook and .gitignore management.** A repository that runs its own hook manager
+  or keeps its own `.beads/.gitignore` had no durable way to stop bd writing
+  them: `no-hooks` only turns off the issue-lifecycle hook runner,
+  `bd init --skip-hooks` lasts one invocation, and `doctor.suppress.*` only
+  hides a `bd doctor` warning. Set either key to `false` in the tracked
+  `.beads/config.yaml` (`bd config set hooks.manage false`). With
+  `hooks.manage: false`, `bd hooks install` and `bd migrate hooks --apply`
+  refuse with a message naming where the key is set and exit non-zero, while
+  `bd init`, `bd config apply` and `bd doctor --fix` skip the hooks;
+  `bd config drift`, `bd doctor` (`--check-health` too) and `bd info` stop
+  reporting them. With `gitignore.manage: false`, `bd init`, `bd bootstrap`,
+  `bd connect` and `bd doctor --fix` leave `.beads/.gitignore` and the project
+  `.gitignore` untouched; `bd init` then commits only its own files under
+  `.beads`, never the database, and `bd doctor` still warns, with no fix,
+  while `.beads/.gitignore` lacks a pattern bd requires. A user-level `false`
+  applies to every repository. Both keys default to `true` (bd-cxm9r).
 
 - **`bd comment` pings the assignee's pinned pane.** A comment on an assigned
   bead enqueues a `comment` notify row for that assignee and drains it through
@@ -693,6 +728,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   description and metadata are unchanged, and omitting the flag (or passing
   `0`) is byte-identical to today's output. JSON output is untouched;
   `--include-comments` still streams every comment there.
+- **`bd show --head`** prints a short view of a long issue
+  ([#7187](https://github.com/gastownhall/beads/issues/7187)): the last 1 KB
+  of the notes in place of the description, design, notes and acceptance
+  criteria, and the last 3 comments (`--comments-tail N` changes the count).
+  The notes are cut from the end, on a line start where one is near and
+  never inside a character, because notes are appended to and the newest
+  state is last. One line after the comments names what was withheld and its
+  size, or says that nothing was. The header, labels, metadata and both
+  dependency lists print as before, and a comment is never cut, so the view
+  is short but has no fixed size. Text output only: `--head` is refused with
+  `--json`, `--short`, `--long`, `--refs`, `--children`, `--thread`,
+  `--as-of` and `--watch`. Nothing is stored or moved, and `bd show` without
+  the flag prints what it printed before.
 - `GET /v0/beads/issues` accepts `no_assignee`, `title` and a repeatable `id`
   (one id per value, at most 200), each behind its own new capability token
   (`issues.list.noAssignee`, `issues.list.title`, `issues.list.ids`; additive,
@@ -917,6 +965,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--claim-next`).
 
 ### Changed
+
+- **`bd prune` no longer deletes a closed bead that a live bead still depends
+  on.** A prune deleted the closed parent of an open child, because the
+  reference protection scans text and a child names its parent by a
+  `parent-child` edge and a dotted id, not by citing it. The child stayed open
+  with no parent, and the epic's history was gone. `bd prune` now asks for the
+  protection `bd purge` already has
+  (`issueops.SweepRequest.ProtectLiveDependents`): a closed bead is kept while
+  a bead in any status that is not done depends on it through a
+  `parent-child`, `tracks` or `blocks` edge, so a closed blocker of an open
+  bead is kept too, until that bead closes. The held-back count is reported
+  as `live_dependent_skipped` in `--json` when it is not zero, and on its own
+  line in text output. The edges are read before the text scan, so a closed
+  bead that a live bead both depends on and cites is now counted there and no
+  longer in `referenced_skipped` or `referenced_ids_sample`. No flag turns the
+  protection off: `--ignore-references` covers citations in text only, so it
+  no longer deletes a cited bead that a live bead also depends on; `bd delete`
+  removes such a bead on purpose. On a `bd connect` workspace the server must
+  advertise `issues.sweep.liveDependents`, as `bd purge` already requires. No
+  `bd serve` up to 1.3.4 does, so against one `bd prune` is refused before
+  the request is sent, where it used to run without the protection.
 
 - **On macOS, bd no longer reads `~/Library/Application
   Support/bd/config.yaml` or `~/Library/Application Support/beads/PRIME.md`.**
@@ -1574,6 +1643,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`bd show` no longer prints `Lease: expires expired` for a lapsed lease.**
+  An in_progress issue keeps its lease row after the lease runs out, until
+  `bd reclaim` sweeps it, and the lease line then printed the verb twice and
+  no time. It now reads `Lease: expired 3 hours ago`; a live lease still reads
+  `Lease: expires in 3 mins`.
+
 - **Refusals before a schema migration no longer promise that reads keep
   working** ([#8571](https://github.com/gastownhall/beads/pull/8571)). Coming
   from bd 1.3.x, every issue read needs `arrival_seq` (migration 0073), so
@@ -2196,6 +2271,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backport, #8083). Such a failure now stops the command with an error that
   names the repository and says what to do, as does a failure to list the
   local beads.
+- GitHub sync leaves an issue transferred out of the configured repository
+  alone. GitHub follows the transfer, so fetching the bead's issue returned it
+  under the other repository's URL: conflict detection compared the bead with
+  it, a push could write the bead over it, and a pull by bead ID imported it
+  as a new bead or wrote it over a bead linked to its new URL. Pull, push and
+  the conflict check now skip it, with a warning naming the configured
+  repository; push and the conflict check do so once sync has read the
+  repository's current name from GitHub. A push also says when it skips a
+  bead linked outside the configured repository, in one line for a bulk push
+  and once per bead for a push by ID, and a pull says when an issue came back
+  under a URL outside it. A ref still names the configured repository when
+  it spells the host with a `www.` prefix, without `https://`, with an
+  explicit default port or with a trailing dot, and the host of the
+  repository's own URL counts as its host too, so an API proxy in front of
+  `github.com` keeps syncing (#7948).
+- `bd github push` and `bd github sync` on a GitHub Enterprise host whose
+  name does not contain `github.com` no longer take a bead linked to an
+  issue on that host for an unlinked one: a push updates the linked issue
+  instead of creating a second issue and relinking the bead to it. An issue
+  URL now counts as GitHub's when it contains `github.com`, in any letter
+  case, or sits on the host of `github.url` (#7948).
 - `bd compact` no longer discards writes that reach `main` while it runs. It
   finished by hard-resetting `main` onto the rebuilt history, which dropped
   changes in `main`'s working set that no Dolt commit held yet (a batch under
@@ -5589,8 +5685,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     "Live" is any status that is not done, including custom statuses. The
     held-back count is reported as `live_dependent_skipped` in `--json` (and
     on its own line in text output). The protection is on the role
-    (`issueops.SweepRequest.ProtectLiveDependents`); `bd prune` does not ask
-    for it.
+    (`issueops.SweepRequest.ProtectLiveDependents`); `bd prune` asks for it
+    too (see Changed).
   - **`--wisps-plane`** selects every closed row stored in the wisps table,
     including `--no-history` beads, which the default ephemeral selection
     leaves to `bd prune`. It works on embedded, server and proxied
