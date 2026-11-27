@@ -55,6 +55,12 @@ func TestIDRetentionContract(t *testing.T) {
 	t.Run("NeverMintsARetiredChildID", func(t *testing.T) {
 		conformance.RunIDRetentionNeverMintsARetiredChildID(t, ctx, fixture)
 	})
+	t.Run("APlainSweepKeepsTheChildSuffixReserved", func(t *testing.T) {
+		conformance.RunIDRetentionAPlainSweepKeepsTheChildSuffixReserved(t, ctx, fixture)
+	})
+	t.Run("APlainSweptChildIDStaysReusable", func(t *testing.T) {
+		conformance.RunIDRetentionAPlainSweptChildIDStaysReusable(t, ctx, fixture)
+	})
 	t.Run("DryRunRetiresNothing", func(t *testing.T) {
 		conformance.RunIDRetentionDryRunRetiresNothing(t, ctx, fixture)
 	})
@@ -78,6 +84,15 @@ func TestIDRetentionContract(t *testing.T) {
 	})
 	t.Run("AWispsPlaneRetainingSweepRetiresItsRows", func(t *testing.T) {
 		conformance.RunIDRetentionAWispsPlaneRetainingSweepRetiresItsRows(t, ctx, fixture)
+	})
+	t.Run("APlainSweepSkipsARetainedType", func(t *testing.T) {
+		conformance.RunIDRetentionAPlainSweepSkipsARetainedType(t, ctx, fixture)
+	})
+	t.Run("ARetainedTypeIsHeldBackBeforeTheProtectionsAndTheLimit", func(t *testing.T) {
+		conformance.RunIDRetentionARetainedTypeIsHeldBackBeforeTheProtectionsAndTheLimit(t, ctx, fixture)
+	})
+	t.Run("ARetainedTypeReadErrorFailsTheSweep", func(t *testing.T) {
+		conformance.RunIDRetentionARetainedTypeReadErrorFailsTheSweep(t, ctx, fixture)
 	})
 }
 
@@ -105,6 +120,10 @@ func newUOWIDRetentionFixture(t *testing.T, ctx context.Context, prefix string) 
 	if err != nil {
 		t.Fatalf("Importer(): %v", err)
 	}
+	workspaceConfig, err := provider.(WorkspaceConfigSource).WorkspaceConfig()
+	if err != nil {
+		t.Fatalf("WorkspaceConfig(): %v", err)
+	}
 	// The domain-level create WITHOUT CreateOnly is this backend's upsert
 	// door (the one domain/db's Insert serves with ON DUPLICATE KEY UPDATE),
 	// and the unit of work it runs in IS its transaction surface, so it serves
@@ -122,15 +141,16 @@ func newUOWIDRetentionFixture(t *testing.T, ctx context.Context, prefix string) 
 		})
 	}
 	return conformance.IDRetentionFixture{
-		IssuePrefix:  prefix,
-		Sweep:        sweep,
-		Lifecycle:    lifecycle,
-		Reader:       reader,
-		BatchApplier: applier,
-		BatchCreator: creator,
-		Importer:     importer,
-		UpsertCreate: upsert,
-		TxCreate:     upsert,
+		IssuePrefix:     prefix,
+		Sweep:           sweep,
+		Lifecycle:       lifecycle,
+		Reader:          reader,
+		BatchApplier:    applier,
+		BatchCreator:    creator,
+		Importer:        importer,
+		UpsertCreate:    upsert,
+		WorkspaceConfig: workspaceConfig,
+		TxCreate:        upsert,
 		CommittedRetired: func(ctx context.Context, id string) (bool, error) {
 			var count int
 			err := sweep.QueryScalar(ctx, "SELECT COUNT(*) FROM id_tombstones AS OF 'HEAD' WHERE id = ?", []any{id}, &count)

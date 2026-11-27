@@ -21,23 +21,20 @@ const wispIDTombstonesDDL = `CREATE TABLE IF NOT EXISTS wisp_id_tombstones (
     PRIMARY KEY (id)
 );`
 
-// TestLatestVersionIncludesMigration0079 pins the slots this migration claims,
-// main 0079 and ignored 0033, superseding 0077's own version of this test
+// TestLatestVersionIncludesMigration0079 pins the main slot this migration
+// claims, 0079, superseding 0077's own version of this test
 // (migration_0075_add_epoch_minted_addresses_test.go; only one such pin lives at
 // a time). Upstream numbered these 0074 and ignored 0030; the house migration
-// freeze renumbers them above the house ceiling of 0077, so the live slots are
-// 0079 and 0033. The slots sit directly above arrival_seq's (0078, ignored
-// 0032). A hardcoded literal for the reason the earlier ones were: a drift to
-// 79 for the wrong reason is caught by the shape test below failing to explain
-// why 79 is tombstone-shaped.
+// freeze renumbers them above the house ceiling, so the live main slot is 0079
+// (above arrival_seq's 0078). Its ignored twin, 0033, is no longer the top of
+// the ignored series: that pin moved to
+// TestLatestIgnoredVersionIncludesMigration0034 when ignored 0034 claimed the
+// next slot (upstream's ignored 0031 restore_preflip, renumbered past house
+// 0033).
 func TestLatestVersionIncludesMigration0079(t *testing.T) {
 	const want = 79
 	if got := LatestVersion(); got != want {
 		t.Fatalf("LatestVersion() = %d, want %d (id tombstone tables)", got, want)
-	}
-	const wantIgnored = 33
-	if got := LatestIgnoredVersion(); got != wantIgnored {
-		t.Fatalf("LatestIgnoredVersion() = %d, want %d (wisp_id_tombstones on fresh clones)", got, wantIgnored)
 	}
 }
 

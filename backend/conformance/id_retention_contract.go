@@ -33,6 +33,13 @@ import (
 //     reports the row, and id generation never produces a retired id, top
 //     level or under a parent (cases 9-10, 20).
 //
+// Cases 20-22 are the workspace's own guard on the plain sweeps: a type named
+// in types.retained is held back by every sweep that does not retain ids, and
+// taken — and retired — by one that does; it is held back before the
+// protections and Limit, so it neither steals their counters nor fills a
+// batch; and a sweep that cannot read the setting fails rather than deleting
+// on a guess.
+//
 // Case 14 is the property the halves add up to: a create racing the sweep of
 // its id never lands. Cases 15-16 race the doors that do NOT refuse up front —
 // the upsert-shaped create and the import — against the sweep, round after
@@ -78,6 +85,10 @@ type IDRetentionFixture struct {
 	// (storage.Storage.UpdateIssueID): it moves a live row from oldID to
 	// newID. Nil skips the rename case, by name.
 	Rename func(ctx context.Context, oldID, newID string, issue *types.Issue, actor string) error
+	// WorkspaceConfig writes the workspace's types.retained setting
+	// (issueops.SettingKeyTypesRetained). Nil skips the retained-type case, by
+	// name.
+	WorkspaceConfig publicops.WorkspaceConfig
 	// CommittedRetired reports whether the id_tombstones row for id is part of
 	// the committed history (an `AS OF 'HEAD'` read). Nil skips that clause of
 	// the history case.
@@ -491,6 +502,85 @@ func RunIDRetentionNeverMintsARetiredChildID(t *testing.T, ctx context.Context, 
 	idRetentionAssertAbsent(t, ctx, fixture, retired)
 }
 
+// RunIDRetentionAPlainSweepKeepsTheChildSuffixReserved pins GH#4750 on the
+// sweep's removal path: a plain sweep (no RetainIDs) of P.3, the highest of
+// P.1-P.3, leaves no tombstone but keeps suffix 3 used in P's counter, so the
+// next generated children are P.4 and P.5 even when the counter was missing
+// before the sweep. The case drops the counter by hand (Sweep.Exec), the shape
+// a database written before GH#4750 leaves. Without the reservation the mint's
+// high-water mark is the highest LIVE child, P.2, and it hands out P.3 again:
+// the id the swept row's history, links and references still name.
+func RunIDRetentionAPlainSweepKeepsTheChildSuffixReserved(t *testing.T, ctx context.Context, fixture IDRetentionFixture) {
+	t.Helper()
+	if fixture.Sweep.Exec == nil {
+		t.Skip("fixture has no Sweep.Exec; this case cannot drop the child counter")
+	}
+	parent := idRetentionID(fixture, "suffix", "parent")
+	if _, err := fixture.Lifecycle.Create(ctx, idRetentionCreate(parent, false)); err != nil {
+		t.Fatalf("Create(%s) = %v", parent, err)
+	}
+	for i := 1; i <= 3; i++ {
+		if got, want := idRetentionCreateChild(t, ctx, fixture, parent), fmt.Sprintf("%s.%d", parent, i); got != want {
+			t.Fatalf("child %d of %s = %s, want %s", i, parent, got, want)
+		}
+	}
+	if err := fixture.Sweep.Exec(ctx, []SQLStatement{{Query: "DELETE FROM child_counters WHERE parent_id = ?", Args: []any{parent}}}); err != nil {
+		t.Fatalf("dropping the child counter of %s: %v", parent, err)
+	}
+	swept := parent + ".3"
+	if _, err := fixture.Lifecycle.Close(ctx, publicops.CloseRequest{Actor: idRetentionActor, IssueID: swept, Reason: "id-retention"}); err != nil {
+		t.Fatalf("Close(%s) = %v", swept, err)
+	}
+	if result := sweeperSweep(t, ctx, fixture.Sweep, publicops.SweepRequest{Tier: publicops.SweepDurable, IDPattern: swept}); result.Swept != 1 {
+		t.Fatalf("plain sweep of %s Swept = %d, want 1", swept, result.Swept)
+	}
+	idRetentionAssertTombstones(t, ctx, fixture, swept, 0, 0)
+	for _, want := range []string{parent + ".4", parent + ".5"} {
+		if got := idRetentionCreateChild(t, ctx, fixture, parent); got != want {
+			t.Fatalf("next child of %s after a plain sweep of %s = %s, want %s: the swept child's suffix was re-minted", parent, swept, got, want)
+		}
+	}
+}
+
+// RunIDRetentionAPlainSweptChildIDStaysReusable pins the other half of
+// GH#4750's design: keeping a removed child's suffix reserved is a counter
+// floor, not a tombstone. A plain sweep of P.1 leaves no tombstone, and an
+// explicit create of P.1 succeeds afterwards; only RetainIDs retires an id.
+func RunIDRetentionAPlainSweptChildIDStaysReusable(t *testing.T, ctx context.Context, fixture IDRetentionFixture) {
+	t.Helper()
+	parent := idRetentionID(fixture, "reuse", "parent")
+	if _, err := fixture.Lifecycle.Create(ctx, idRetentionCreate(parent, false)); err != nil {
+		t.Fatalf("Create(%s) = %v", parent, err)
+	}
+	child := idRetentionCreateChild(t, ctx, fixture, parent)
+	if _, err := fixture.Lifecycle.Close(ctx, publicops.CloseRequest{Actor: idRetentionActor, IssueID: child, Reason: "id-retention"}); err != nil {
+		t.Fatalf("Close(%s) = %v", child, err)
+	}
+	if result := sweeperSweep(t, ctx, fixture.Sweep, publicops.SweepRequest{Tier: publicops.SweepDurable, IDPattern: child}); result.Swept != 1 {
+		t.Fatalf("plain sweep of %s Swept = %d, want 1", child, result.Swept)
+	}
+	idRetentionAssertTombstones(t, ctx, fixture, child, 0, 0)
+	if _, err := fixture.Lifecycle.Create(ctx, idRetentionCreate(child, false)); err != nil {
+		t.Fatalf("Create(%s) after a plain sweep = %v, want nil: a reserved suffix must not refuse an explicit recreate", child, err)
+	}
+}
+
+// idRetentionCreateChild creates the next generated child of parent and
+// returns its id.
+func idRetentionCreateChild(t *testing.T, ctx context.Context, fixture IDRetentionFixture, parent string) string {
+	t.Helper()
+	result, err := fixture.Lifecycle.Create(ctx, publicops.CreateRequest{
+		Actor:         idRetentionActor,
+		ParentID:      parent,
+		ForceIDPrefix: true,
+		Issue:         &types.Issue{Title: "id retention child of " + parent, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+	})
+	if err != nil {
+		t.Fatalf("Create(child of %s) = %v", parent, err)
+	}
+	return result.Issue.ID
+}
+
 // RunIDRetentionDryRunRetiresNothing pins that a dry run writes no tombstone
 // while echoing RetainIDs and counting what it would sweep.
 func RunIDRetentionDryRunRetiresNothing(t *testing.T, ctx context.Context, fixture IDRetentionFixture) {
@@ -855,6 +945,243 @@ func RunIDRetentionAWispsPlaneRetainingSweepRetiresItsRows(t *testing.T, ctx con
 		idRetentionAssertExpired(t, fixture.UpsertCreate(ctx, reissue(id), idRetentionActor), id)
 		idRetentionAssertAbsent(t, ctx, fixture, id)
 	}
+}
+
+// RunIDRetentionAPlainSweepSkipsARetainedType pins the workspace's guard on
+// the plain sweeps (issueops.SettingKeyTypesRetained): with a type named in
+// types.retained, a sweep WITHOUT RetainIDs — durable, ephemeral or
+// wisps-plane, dry run or not — holds every closed row of that type back and
+// counts it in Skipped.RetentionRequired, while a row of any other type goes
+// as before. A retaining sweep then takes the held rows and retires their ids.
+// The setting is read on each sweep, so unsetting it releases the next row of
+// that type to a plain sweep.
+//
+// The retained type is a built-in one (chore) so every backend accepts the
+// rows without a types.custom registration; the setting also names a type
+// derived from the prefix that no row has and no registry knows, which must
+// match nothing rather than be refused. The setting is unset afterwards.
+func RunIDRetentionAPlainSweepSkipsARetainedType(t *testing.T, ctx context.Context, fixture IDRetentionFixture) {
+	t.Helper()
+	if fixture.WorkspaceConfig == nil {
+		t.Skip("fixture has no WorkspaceConfig; types.retained cannot be set here")
+	}
+	const retainedType = types.TypeChore
+	retainedValue := fmt.Sprintf("%s-unregistered,%s", fixture.IssuePrefix, retainedType)
+	if _, err := fixture.WorkspaceConfig.SetSetting(ctx, publicops.SetSettingRequest{Key: publicops.SettingKeyTypesRetained, Value: retainedValue}); err != nil {
+		t.Fatalf("SetSetting(%s, %q): %v", publicops.SettingKeyTypesRetained, retainedValue, err)
+	}
+	unset := func() {
+		if _, err := fixture.WorkspaceConfig.UnsetSetting(ctx, publicops.UnsetSettingRequest{Key: publicops.SettingKeyTypesRetained}); err != nil {
+			t.Fatalf("UnsetSetting(%s): %v", publicops.SettingKeyTypesRetained, err)
+		}
+	}
+	unsetDone := false
+	defer func() {
+		if !unsetDone {
+			unset()
+		}
+	}()
+
+	const tag = "retained"
+	durable := sweeperIssue(fixture.Sweep, tag, "durable", false)
+	durable.IssueType = retainedType
+	sweeperSeed(t, ctx, fixture.Sweep, durable, nil)
+	noHistory := sweeperIssue(fixture.Sweep, tag, "nohist", false)
+	noHistory.IssueType = retainedType
+	noHistory.NoHistory = true
+	if err := fixture.Sweep.CreateWisp(ctx, noHistory, idRetentionActor); err != nil {
+		t.Fatalf("seeding %s: %v", noHistory.ID, err)
+	}
+	ephemeral := sweeperIssue(fixture.Sweep, tag, "eph", true)
+	ephemeral.IssueType = retainedType
+	sweeperSeed(t, ctx, fixture.Sweep, ephemeral, nil)
+	control := sweeperSeed(t, ctx, fixture.Sweep, sweeperIssue(fixture.Sweep, tag, "control", false), nil)
+	pattern := sweeperPattern(fixture.Sweep, tag)
+
+	assertHeld := func(name string, result publicops.SweepResult, swept, held int) {
+		t.Helper()
+		if result.Swept != swept || result.Skipped.RetentionRequired != held {
+			t.Errorf("%s: Swept = %d, Skipped.RetentionRequired = %d; want %d and %d", name, result.Swept, result.Skipped.RetentionRequired, swept, held)
+		}
+	}
+
+	durableReq := publicops.SweepRequest{Tier: publicops.SweepDurable, IDPattern: pattern}
+	assertHeld("durable dry run", sweeperSweep(t, ctx, fixture.Sweep, sweeperAsDryRun(durableReq)), 1, 2)
+	assertHeld("durable plain sweep", sweeperSweep(t, ctx, fixture.Sweep, durableReq), 1, 2)
+	sweeperAssertIssueRows(t, ctx, fixture.Sweep, 0, control)
+	assertHeld("ephemeral plain sweep", sweeperSweep(t, ctx, fixture.Sweep, publicops.SweepRequest{Tier: publicops.SweepEphemeral, IDPattern: pattern}), 0, 1)
+	wispsReq := publicops.SweepRequest{Tier: publicops.SweepWispsPlane, IDPattern: pattern}
+	assertHeld("wisps-plane plain sweep", sweeperSweep(t, ctx, fixture.Sweep, wispsReq), 0, 2)
+	sweeperAssertIssueRows(t, ctx, fixture.Sweep, 1, durable.ID)
+	sweeperAssertWispRows(t, ctx, fixture.Sweep, 2, noHistory.ID, ephemeral.ID)
+	for _, id := range []string{durable.ID, noHistory.ID, ephemeral.ID} {
+		idRetentionAssertTombstones(t, ctx, fixture, id, 0, 0)
+	}
+
+	wispsReq.RetainIDs = true
+	assertHeld("wisps-plane retaining sweep", sweeperSweep(t, ctx, fixture.Sweep, wispsReq), 2, 0)
+	durableReq.RetainIDs = true
+	assertHeld("durable retaining sweep", sweeperSweep(t, ctx, fixture.Sweep, durableReq), 1, 0)
+	sweeperAssertIssueRows(t, ctx, fixture.Sweep, 0, durable.ID)
+	sweeperAssertWispRows(t, ctx, fixture.Sweep, 0, noHistory.ID, ephemeral.ID)
+	idRetentionAssertTombstones(t, ctx, fixture, durable.ID, 1, 0)
+	idRetentionAssertTombstones(t, ctx, fixture, noHistory.ID, 0, 1)
+	idRetentionAssertTombstones(t, ctx, fixture, ephemeral.ID, 0, 1)
+
+	unset()
+	unsetDone = true
+	released := sweeperIssue(fixture.Sweep, tag, "released", false)
+	released.IssueType = retainedType
+	sweeperSeed(t, ctx, fixture.Sweep, released, nil)
+	assertHeld("plain sweep after the setting is unset", sweeperSweep(t, ctx, fixture.Sweep, publicops.SweepRequest{Tier: publicops.SweepDurable, IDPattern: released.ID}), 1, 0)
+	idRetentionAssertTombstones(t, ctx, fixture, released.ID, 0, 0)
+}
+
+// RunIDRetentionARetainedTypeIsHeldBackBeforeTheProtectionsAndTheLimit pins
+// WHERE the retained-type partition sits in the narrowing order the Sweeper
+// contract states: before the live-dependent and reference protections, and
+// before Limit.
+//
+// The Limit half is the one an orchestrator's batch loop depends on. A loop
+// takes the oldest closed rows first and stops when a call sweeps nothing; if
+// the partition ran after Limit, old retained rows would fill every batch
+// (Swept 0, Remaining > 0) and the closed backlog behind them would never
+// drain. So a retained row closed EARLIER than a plain one must not cost the
+// plain row its place: a Limit-1 sweep takes the plain row, counts the retained
+// one, and reports nothing remaining.
+//
+// The protection half pins the counters, which the contract calls part of the
+// answer: a retained row that an open bead also cites, or that a live bead
+// depends on, is counted in RetentionRequired and in neither protection's
+// counter. The live-dependent clause needs the fixture's AddDependencies hook
+// and is skipped, by name, without one. The setting is unset afterwards.
+func RunIDRetentionARetainedTypeIsHeldBackBeforeTheProtectionsAndTheLimit(t *testing.T, ctx context.Context, fixture IDRetentionFixture) {
+	t.Helper()
+	if fixture.WorkspaceConfig == nil {
+		t.Skip("fixture has no WorkspaceConfig; types.retained cannot be set here")
+	}
+	const retainedType = types.TypeChore
+	if _, err := fixture.WorkspaceConfig.SetSetting(ctx, publicops.SetSettingRequest{Key: publicops.SettingKeyTypesRetained, Value: string(retainedType)}); err != nil {
+		t.Fatalf("SetSetting(%s, %q): %v", publicops.SettingKeyTypesRetained, retainedType, err)
+	}
+	defer func() {
+		if _, err := fixture.WorkspaceConfig.UnsetSetting(ctx, publicops.UnsetSettingRequest{Key: publicops.SettingKeyTypesRetained}); err != nil {
+			t.Errorf("UnsetSetting(%s): %v", publicops.SettingKeyTypesRetained, err)
+		}
+	}()
+	retained := func(tag, name string, ephemeral bool) *types.Issue {
+		issue := sweeperIssue(fixture.Sweep, tag, name, ephemeral)
+		issue.IssueType = retainedType
+		return issue
+	}
+
+	t.Run("before the limit", func(t *testing.T) {
+		const tag = "retlimit"
+		early := retained(tag, "early", true)
+		earlier := sweeperClosedAt.Add(-24 * time.Hour)
+		early.ClosedAt = &earlier
+		sweeperSeed(t, ctx, fixture.Sweep, early, nil)
+		plain := sweeperSeed(t, ctx, fixture.Sweep, sweeperIssue(fixture.Sweep, tag, "plain", true), nil)
+
+		request := publicops.SweepRequest{Tier: publicops.SweepEphemeral, IDPattern: sweeperPattern(fixture.Sweep, tag), Limit: 1}
+		for _, step := range []struct {
+			name    string
+			request publicops.SweepRequest
+		}{{"dry run", sweeperAsDryRun(request)}, {"sweep", request}} {
+			result := sweeperSweep(t, ctx, fixture.Sweep, step.request)
+			if result.Swept != 1 || result.Skipped.RetentionRequired != 1 || result.Remaining != 0 {
+				t.Errorf("%s with Limit 1: Swept = %d, RetentionRequired = %d, Remaining = %d; want 1, 1 and 0 — "+
+					"the older retained row must be held back before the limit, not fill the batch",
+					step.name, result.Swept, result.Skipped.RetentionRequired, result.Remaining)
+			}
+		}
+		sweeperAssertWispRows(t, ctx, fixture.Sweep, 0, plain)
+		sweeperAssertWispRows(t, ctx, fixture.Sweep, 1, early.ID)
+	})
+
+	t.Run("before the reference protection", func(t *testing.T) {
+		const tag = "retref"
+		cited := sweeperSeed(t, ctx, fixture.Sweep, retained(tag, "cited", false), nil)
+		citing := sweeperIssue(fixture.Sweep, tag, "live", false)
+		citing.Description = fmt.Sprintf("follows (%s)", cited)
+		sweeperSeedOpen(t, ctx, fixture.Sweep, citing)
+
+		result := sweeperSweep(t, ctx, fixture.Sweep, publicops.SweepRequest{
+			Tier: publicops.SweepDurable, IDPattern: sweeperPattern(fixture.Sweep, tag), ProtectReferenced: true,
+		})
+		if result.Swept != 0 || result.Skipped.RetentionRequired != 1 || result.Skipped.Referenced != 0 {
+			t.Errorf("Swept = %d, RetentionRequired = %d, Referenced = %d; want 0, 1 and 0 — "+
+				"a cited retained row is held back as retained before the reference scan sees it",
+				result.Swept, result.Skipped.RetentionRequired, result.Skipped.Referenced)
+		}
+		sweeperAssertIssueRows(t, ctx, fixture.Sweep, 1, cited)
+	})
+
+	t.Run("before the live-dependent protection", func(t *testing.T) {
+		if fixture.Sweep.AddDependencies == nil {
+			t.Skip("fixture has no AddDependencies hook; cannot wire the edge this clause needs")
+		}
+		const tag = "retdep"
+		parent := sweeperSeed(t, ctx, fixture.Sweep, retained(tag, "parent", true), nil)
+		child := sweeperIssue(fixture.Sweep, tag, "child", true)
+		child.Status = types.StatusOpen
+		child.ClosedAt = nil
+		sweeperSeed(t, ctx, fixture.Sweep, child, nil)
+		if err := fixture.Sweep.AddDependencies(ctx, publicops.AddDependenciesRequest{
+			Actor: idRetentionActor,
+			Edges: []publicops.DependencyEdge{{IssueID: child.ID, DependsOnID: parent, Type: publicops.DepParentChild}},
+		}); err != nil {
+			t.Fatalf("wiring dependencies: %v", err)
+		}
+
+		result := sweeperSweep(t, ctx, fixture.Sweep, publicops.SweepRequest{
+			Tier: publicops.SweepWispsPlane, IDPattern: sweeperPattern(fixture.Sweep, tag), ProtectLiveDependents: true,
+		})
+		if result.Swept != 0 || result.Skipped.RetentionRequired != 1 || result.Skipped.LiveDependent != 0 {
+			t.Errorf("Swept = %d, RetentionRequired = %d, LiveDependent = %d; want 0, 1 and 0 — "+
+				"a retained row with a live dependent is held back as retained first",
+				result.Swept, result.Skipped.RetentionRequired, result.Skipped.LiveDependent)
+		}
+		sweeperAssertWispRows(t, ctx, fixture.Sweep, 1, parent)
+	})
+}
+
+// RunIDRetentionARetainedTypeReadErrorFailsTheSweep pins that the retained
+// types are a REQUIRED read: a plain sweep that cannot read the workspace's
+// config fails and deletes nothing, rather than treating "unreadable" as
+// "nothing retained" and deleting rows it should have held back. The read is
+// broken by renaming the config table for the length of one sweep, through
+// the fixture's raw door; a fixture without one skips, by name.
+func RunIDRetentionARetainedTypeReadErrorFailsTheSweep(t *testing.T, ctx context.Context, fixture IDRetentionFixture) {
+	t.Helper()
+	if fixture.Sweep.Exec == nil {
+		t.Skip("fixture has no raw Exec door; the config read cannot be broken here")
+	}
+	id := idRetentionSeedClosed(t, ctx, fixture, "retainedread", false)
+	const hidden = "config_hidden_by_id_retention_contract"
+	if err := fixture.Sweep.Exec(ctx, []SQLStatement{{Query: "ALTER TABLE config RENAME TO " + hidden}}); err != nil {
+		t.Fatalf("hiding the config table: %v", err)
+	}
+	restored := false
+	restore := func() {
+		if err := fixture.Sweep.Exec(ctx, []SQLStatement{{Query: "ALTER TABLE " + hidden + " RENAME TO config"}}); err != nil {
+			t.Fatalf("restoring the config table: %v", err)
+		}
+		restored = true
+	}
+	defer func() {
+		if !restored {
+			restore()
+		}
+	}()
+
+	_, err := fixture.Sweep.Sweeper.Sweep(ctx, publicops.SweepRequest{Tier: publicops.SweepDurable, IDPattern: id})
+	restore()
+	if err == nil {
+		t.Fatalf("plain sweep with an unreadable config = nil error, want the sweep to fail")
+	}
+	t.Logf("plain sweep with an unreadable config: %v", err)
+	sweeperAssertIssueRows(t, ctx, fixture.Sweep, 1, id)
 }
 
 // idRetentionRaceDoor runs idRetentionRaceRounds rounds of one door against

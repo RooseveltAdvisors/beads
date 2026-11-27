@@ -21,6 +21,7 @@ import (
 	"github.com/steveyegge/beads/internal/types"
 	"github.com/steveyegge/beads/internal/ui"
 	"github.com/steveyegge/beads/internal/utils"
+	"github.com/steveyegge/beads/issueops"
 )
 
 // openMigrationPlanningStore opens the personal planning workspace's store for
@@ -178,9 +179,9 @@ func uncommittedTables(ctx context.Context, st storage.DoltStorage) ([]string, e
 // wrote config.json, bd run there finds no workspace in, or it holds several
 // databases). Every other metadata-less .beads is left to
 // initializePlanningRepo. It writes nothing. A .beads that has a metadata.json
-// is refused here for what bd's admission refuses from its contents (a format
-// this build cannot open, a historical SQLite workspace, a legacy Dolt
-// workspace) and, as a routed create refuses it (refuseExistingCreateTarget),
+// is refused here for what bd's admission refuses from its contents (a
+// historical SQLite workspace, a legacy Dolt workspace) and, as a routed
+// create refuses it (refuseExistingCreateTarget),
 // when its own config selects Dolt server mode while its metadata names no
 // dolt_mode and this process would open it embedded; it is otherwise left to
 // the open, which refuses what it cannot use. A targetRefusal is
@@ -440,6 +441,9 @@ func runMigratePersonal(cmd *cobra.Command, args []string) error {
 	if err := refuseSelfPlanningRepo(planningPath, planningBeadsDir, resolveCommandBeadsDir(dbPath)); err != nil {
 		return err
 	}
+	if err := refuseDependentsLeftBehind(ctx, store, personal); err != nil {
+		return err
+	}
 
 	fmt.Printf("Move to planning repo: %s\n\n", ui.RenderAccent(remedy.PrintedValue(planningPath)))
 
@@ -523,17 +527,16 @@ func refusePlanningRepo(format string, args ...any) error {
 // planningOpenError renders a failed openMigrationPlanningStore. A refusal of
 // the planning repo (planningRepoRefusal) is returned as it is: nothing
 // failed to open, so it carries no "failed to open planning store" prefix. A
-// planning repo bd's own command admission refuses (an unsupported format, a
-// legacy store) is rendered as that refusal is, naming the planning repo: the
-// Error line, plus the Hint line and exit 16 for a format. migratePersonalCmd
-// silences cobra, so neither "Error: exit code N" nor a usage dump follows
-// either.
+// planning repo bd's own command admission refuses (a legacy store) is
+// rendered as that refusal is, naming the planning repo: the Error line.
+// migratePersonalCmd silences cobra, so neither "Error: exit code N" nor a
+// usage dump follows it.
 func planningOpenError(planningPath string, err error) error {
 	var refusal *planningRepoRefusal
 	switch {
 	case errors.As(err, &refusal):
 		return refusal
-	case isUnsupportedWorkspaceFormat(err) || isLegacyUpgradeRefusal(err):
+	case isLegacyUpgradeRefusal(err):
 		return handleWorkspaceGuardError(fmt.Errorf("planning repo %s: %w", remedy.PrintedValue(planningPath), err))
 	}
 	// The open error is bd's own and can span lines (a server-mode open
@@ -672,16 +675,43 @@ func commitPlanningWrites(ctx context.Context, dst storage.DoltStorage, message 
 	return maybeAutoCommitStore(ctx, dst, doltAutoCommitParams{MessageOverride: message})
 }
 
+// refuseDependentsLeftBehind refuses, before anything is copied, a move whose
+// phase 2 delete would be refused: one that takes an issue that a bead it
+// leaves in the project database depends on, such as a bead someone else
+// created. That delete runs with cascade and force off, so it refuses such an
+// issue, but only once phase 1 has committed the copy, which left the issue in
+// both databases. The same delete is run here as a dry run, whose dependents
+// guard runs before it returns; it writes nothing. The ephemeral and
+// no-history beads the move takes are part of that request on both stores, as
+// in the delete itself (issueops.DeleteIssuesBesideWispsInTx), so a wisp child
+// does not count as a dependent left behind.
+func refuseDependentsLeftBehind(ctx context.Context, projectStore storage.DoltStorage, personal []*types.Issue) error {
+	ids := make([]string, len(personal))
+	for i, issue := range personal {
+		ids[i] = issue.ID
+	}
+	_, err := projectStore.DeleteIssues(ctx, ids, false, false, true)
+	var blocked *issueops.DependentsOutsideRequestError
+	switch {
+	case errors.As(err, &blocked):
+		return fmt.Errorf("issue %s has dependents that would stay in the project database (%s), depending on an issue it no longer holds; remove those dependencies with `bd dep remove`, then rerun; nothing was moved", remedy.PrintedValue(blocked.IssueID), remedy.PrintedList(blocked.Dependents, ", "))
+	case err != nil:
+		return fmt.Errorf("failed to check the project DB for dependents of the issues to move: %w", err)
+	}
+	return nil
+}
+
 // deleteMovedIssues is phase 2 of runMigratePersonal: it deletes the moved
 // issues from the project DB in a single transaction, under the command's
 // dolt.auto-commit policy (issueOpsContext), as bd delete does. Both halves of
 // the move then follow it: with on, a server-mode project commits the delete
 // as it runs and phase 1 commits the copy; with batch or off, the delete stays
 // in the working set, as phase 1 leaves the copy in an embedded planning store
-// (commitsPlanningWrites). The planning copy is complete at this point. If the
-// delete fails, the planning repo already holds the good copy and the project
-// DB is untouched, so the user is told to resolve the duplicate rather than
-// silently losing data.
+// (commitsPlanningWrites). The planning copy is complete at this point. Its
+// dependents guard already passed as a dry run before the copy
+// (refuseDependentsLeftBehind). If the delete fails all the same, the planning
+// repo already holds the good copy and the project DB is untouched, so the
+// user is told to resolve the duplicate rather than silently losing data.
 func deleteMovedIssues(ctx context.Context, projectStore storage.DoltStorage, ids []string, planningPath string) error {
 	opsCtx, err := issueOpsContext(ctx)
 	if err == nil {

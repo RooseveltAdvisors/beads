@@ -458,12 +458,15 @@ var versionExemptions = map[string]string{
 	"RecomputeIsBlockedAfterMergeInTx": "is_blocked is derived state",
 	"RecomputeAllIsBlockedInTx":        "is_blocked is derived state",
 	"MarkIsBlockedInTx":                "is_blocked is derived state",
+	"MarkIsBlockedInTxWithResult":      "is_blocked is derived state",
 
 	// the delete family — no surviving row to version; the deleted-Versioned-
 	// Bead guarantee is Phase 3 (#6358). DeleteInTx versions its NEIGHBOURS
 	// through RewriteDeletedReferencesInTx, never the deleted rows.
 	"DeleteIssueInTx":                 "delete family: no surviving row (Phase 3)",
+	"DeleteIssueInTxWithResult":       "delete family: no surviving row (Phase 3)",
 	"DeleteIssuesInTx":                "delete family: no surviving row (Phase 3)",
+	"DeleteIssuesBesideWispsInTx":     "delete family: no surviving row (Phase 3)",
 	"DeleteResolvedSetInTx":           "delete family: no surviving row (Phase 3)",
 	"DeleteInTx":                      "delete family: no surviving row (Phase 3); neighbours version via RewriteDeletedReferencesInTx",
 	"SweepInTx":                       "delete family: no surviving row (Phase 3)",
@@ -495,6 +498,7 @@ var versionExemptions = map[string]string{
 
 	// aux tables matched via templated %s, not work-bead state
 	"ReconcileChildCounters":        "child_counters are derived CLI acceleration state",
+	"ReserveChildSuffixesInTx":      "raises the child_counters high-water mark (GH#4750): counter state, not work-bead state",
 	"GetNextChildIDTx":              "child_counters allocation, not work-bead state",
 	"RecordEventInTable":            "writes the events audit table (templated %s), not work-bead state",
 	"RecordFullEventInTable":        "writes the events audit table (templated %s), not work-bead state",
@@ -547,8 +551,11 @@ var versionNeverMints = map[string]string{
 	"RecomputeIsBlockedAfterMergeInTx": "is_blocked is derived state",
 	"RecomputeAllIsBlockedInTx":        "is_blocked is derived state",
 	"MarkIsBlockedInTx":                "is_blocked is derived state",
+	"MarkIsBlockedInTxWithResult":      "is_blocked is derived state",
 	"DeleteIssueInTx":                  "delete family (Phase 3)",
+	"DeleteIssueInTxWithResult":        "delete family (Phase 3)",
 	"DeleteIssuesInTx":                 "delete family (Phase 3)",
+	"DeleteIssuesBesideWispsInTx":      "delete family (Phase 3)",
 	"DeleteResolvedSetInTx":            "delete family (Phase 3)",
 	"DeleteIssuesBySourceRepoInTx":     "bulk delete (Phase 3)",
 	"UpdateIssueIDInTx":                "rename: out of contract by design",

@@ -15,7 +15,7 @@ const (
 	// matched, so the two halves of the one path exception cannot drift apart.
 	customMethodPathValue = "idop"
 	// customMethodPattern is that one registration. Every row carrying a
-	// customMethod declares it, and s.handler collapses them into a single
+	// customMethod declares it, and s.mounts collapses them into a single
 	// ServeMux entry.
 	customMethodPattern = "/v0/beads/issues/{" + customMethodPathValue + "}"
 	// customMethodIDValue is where the dispatcher leaves the id it split out,
@@ -211,6 +211,16 @@ const CapDependenciesBlockingIsBlocked = "dependencies.blocking.isBlocked"
 // events_journal_disabled when the journal is off.
 const CapIssuesArrivalSeq = "issues.arrivalSeq"
 
+// CapIssuesDeleteContainmentCascade is the behavior capability announcing
+// that issues:delete's `cascade` follows PARENT-CHILD edges only (GH#6301):
+// the closure is the named beads' containment tree, and a bead joined to it by
+// any other edge survives and comes back in `orphaned`. It names no new
+// request member — an older server accepts the same `cascade` and deletes
+// every transitive dependent — so the token is how a client learns which
+// meaning it will get. bd's client refuses a cascade (preview included)
+// against a server that does not advertise it (wire.CapDeleteContainmentCascade).
+const CapIssuesDeleteContainmentCascade = "issues.delete.containmentCascade"
+
 // CapIssuesSweepWispsPlane is the behavior capability that advertises the
 // `wisps-plane` value of SweepRequest.tier (sweep.go, spec SweepRequest.tier):
 // a third, wider tier that clears the whole wisps table plus any durable bead
@@ -255,6 +265,21 @@ const CapIssuesSweepLimit = "issues.sweep.limit"
 // MUST check this token and refuse to sweep without it, never fall back to a
 // sweep that leaves the ids reusable.
 const CapIssuesSweepRetainIDs = "issues.sweep.retainIds"
+
+// CapIssuesSweepRetainedTypes is the behavior capability that advertises the
+// workspace's retained-type protection on issues:sweep and the paired
+// SweepSkips.retention_required response member (sweep.go): a sweep without
+// retain_ids holds back every candidate whose issue type the workspace's
+// types.retained setting names (issueops.SettingKeyTypesRetained,
+// issueops.SweepSkips.RetentionRequired). It names no request member — the
+// protection is the server's, keyed on a stored setting — so an older server
+// answers a plain sweep without complaint and deletes the retained beads
+// without retiring their ids. The token is how a client learns which it is
+// talking to: before a plain sweep, bd's client reads it and, against a
+// server without it, reads types.retained itself and refuses the sweep before
+// the dial when the setting names a type (httpclient's
+// refuseAnUnguardedPlainSweep; wire.CapSweepRetainedTypes).
+const CapIssuesSweepRetainedTypes = "issues.sweep.retainedTypes"
 
 // CapBatchApplyDepAddLineage is the behavior capability that advertises
 // ApplyDepAddItem's `has_spawner` and `thread_id` members (batch_apply.go):
@@ -307,6 +332,22 @@ const CapIssuesUpdatePersistence = "issues.update.persistence"
 // claim beside anything else before the dial, naming this token. One token
 // covers both planes: no server has served `claim` on one plane only.
 const CapIssuesUpdateClaim = "issues.update.claim"
+
+// CapIssuesUpdateForceClaimBlocked is the behavior capability that advertises
+// UpdateIssueRequest's `force_claim_blocked` member (update.go): updateIssue
+// refuses a claim of an issue with a live local blocker — the same refusal
+// `bd close` gives a close, on the claim — answering `409 not_claimable`
+// naming `claim` with the blockers in the problem's `blockers` member, and
+// `force_claim_blocked` is that refusal's bypass, honored inside the update's
+// own transaction. It is a token of its own rather than riding
+// CapIssuesUpdateClaim because the refusal is newer than the member that
+// earns it: an older server accepts a claim of a blocked issue silently, so
+// a client that does not see the token cannot know whether its unforced
+// claim was refused for a reason it can override, and must refuse a
+// `force_claim_blocked` before the dial rather than send a member the server
+// would reject as unknown. The token covers the refusal and the bypass
+// together: no server refuses the claim without also honoring the member.
+const CapIssuesUpdateForceClaimBlocked = "issues.update.forceClaimBlocked"
 
 // CapIssuesCreateDefaultPriority is the behavior capability that advertises
 // that issues.create, issues.batchCreate and issues.batchApply's create items
@@ -412,7 +453,7 @@ func customMethodTarget(rows []route, segment string) (route, string, *Result) {
 // route is one row of the surface: an operation, where it lives in the
 // document, where it lives in the router, and what the request lifecycle owes
 // it. TestSpecRouteParity compares this table against the spec's paths, and
-// s.handler builds the router from it, so "the routes" and "the document" are
+// s.mounts builds the router from it, so "the routes" and "the document" are
 // the same statement made twice.
 type route struct {
 	// op is the spec's operationId. It also names the operation in the
@@ -1166,13 +1207,13 @@ const (
 var behaviorCapabilities = []string{
 	CapProjectEnforce, CapBatchApplyLarge, CapIssuesListSort, CapIssuesCountScope,
 	CapIssuesSweepWispsPlane, CapIssuesSweepLiveDependents, CapIssuesSweepLimit,
-	CapIssuesSweepRetainIDs,
+	CapIssuesSweepRetainIDs, CapIssuesSweepRetainedTypes,
 	CapBatchApplyDepAddLineage, CapIssuesUpdateAllowTemplate, CapIssuesCreateDefaultPriority,
 	CapIssuesCreateRepeat, CapIssuesUpdateDueClearReason,
 	CapIssuesCloseAutoCloseMolecule, CapIssuesListSearch,
 	CapIssuesListNoAssignee, CapIssuesListTitle, CapListIDs, CapIssuesUpdatePersistence, CapDependenciesBlockingIsBlocked, CapIssuesUpdateClaim,
 	CapIssuesCreateGates, CapIssuesUpdateGates, CapIssuesListFilters,
-	CapIssuesArrivalSeq,
+	CapIssuesArrivalSeq, CapIssuesDeleteContainmentCascade, CapIssuesUpdateForceClaimBlocked,
 }
 
 // Capabilities lists what this build advertises in ContextResponse.capabilities:

@@ -1,5 +1,5 @@
 {
-  "recorded_from": "fm/upstream-sync-2026-10-28",
+  "recorded_from": "9e22efbb4 + fix/bd-n8984f",
   "steps": [
     "create a",
     "create b blocked by a",
@@ -93,8 +93,8 @@
         "parent_id",
         "last_child"
       ],
-      "rows": 0,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "rows": 1,
+      "sha256": "753b8feea7bdc0fc74468faa597a32984edc501e9873e9f4ee1df7b59d56d0a6"
     },
     "comments": {
       "columns": [
@@ -169,7 +169,7 @@
         "id"
       ],
       "rows": 39,
-      "sha256": "372c6143415ba862a0d951695e2c942670fc0a24a3b828d6755df97dbb34ade1"
+      "sha256": "3e7d84b529bc1fad81e4abefaeb4efa63a30fbfaf4265a6733b9ed56fcc5cfa8"
     },
     "federation_peers": {
       "columns": [
@@ -191,8 +191,8 @@
         "applied_at",
         "content_hash"
       ],
-      "rows": 30,
-      "sha256": "eea213ee540b7bd3ba888959ddda24a179338d730e3638df1738fdd74cc1e5dd"
+      "rows": 27,
+      "sha256": "7164db2c129cbaafbd9c426d27e809d043cafc77e8aef1f68d1760905a685acb"
     },
     "interactions": {
       "columns": [
@@ -312,16 +312,10 @@
         "is_blocked",
         "row_lock",
         "storage_class",
-        "repeat_pattern",
-        "repeat_start",
-        "repeat_end",
-        "due_source",
-        "due_missed",
-        "current_revision",
-        "assignee_id"
+        "current_revision"
       ],
       "rows": 12,
-      "sha256": "47595fd08a11a21ed0a9ca724a9c2e6d4d2842baac919be453cbc6130229c682"
+      "sha256": "92e9eb8264175b0a6723941b3e946cd796afe4539cf9927798ce62800cab67ef"
     },
     "labels": {
       "columns": [
@@ -400,8 +394,8 @@
         "version",
         "content_hash"
       ],
-      "rows": 72,
-      "sha256": "8f497acf2831086d3d8f187ed76ab6ca8e92716c5458d90abc2a95e5f099ff9c"
+      "rows": 69,
+      "sha256": "1d7a6ae809f330f8b4c3516af50ce7604c1db3cd4c1177af3e5c2f1991d74e14"
     },
     "store_epoch": {
       "columns": [
@@ -460,7 +454,7 @@
         "created_at"
       ],
       "rows": 27,
-      "sha256": "34d262640e93ffdc948862667d4bc5f01a9f655bc22d8e11abdfc777731a5771"
+      "sha256": "dd46c35aeb2dc13a5351683d40e5d1fb6b64272801fd2ed983c028e3c52bdb4d"
     },
     "wisp_labels": {
       "columns": [
@@ -527,17 +521,11 @@
         "started_at",
         "row_lock",
         "storage_class",
-        "repeat_pattern",
-        "repeat_start",
-        "repeat_end",
-        "due_source",
-        "due_missed",
         "current_revision",
-        "assignee_id",
         "is_blocked"
       ],
       "rows": 7,
-      "sha256": "938e0272f40afc1e0e5d1d03c518da09252be3f6aad9d7dbbc97fa2fcf32ff81"
+      "sha256": "f6885bac56aee7d91b48fdf56c657128ff0b530fa186fabfb52bbf271a3bc09b"
     }
   }
 }

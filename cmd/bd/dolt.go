@@ -197,12 +197,20 @@ Use this before switching to server mode to ensure the server is running.`,
 // error. This typically happens when the remote was added via `dolt remote add`
 // (filesystem config) but not via `bd dolt remote add` (which also registers it
 // in the SQL server's dolt_remotes table).
+//
+// The fetch+merge pull route (bd-e2q8zs) also surfaces dolt's
+// ErrUnknownRemote — "unknown remote; '<name>' does not appear to be a dolt
+// database. ..." — because DOLT_FETCH/DOLT_MERGE reject an unconfigured remote
+// in that wording, and `dolt fetch <remote> <branch>` likewise fails there.
+// Without accepting it, the "Remote <name> is not configured" hint never
+// fired and the benign no-remote case looked like an opaque sync failure.
 func isRemoteNotFoundErr(err error) bool {
 	if err == nil {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "remote") && strings.Contains(msg, "not found")
+	return (strings.Contains(msg, "remote") && strings.Contains(msg, "not found")) ||
+		strings.Contains(msg, "unknown remote")
 }
 
 // remoteLister is the narrow store surface needed to confirm the structured
@@ -219,19 +227,26 @@ type persistedRemoteProber interface {
 }
 
 // isConfirmedNoRemote reports whether a push/pull failure is the benign
-// "no remote configured" case that may exit 0. isRemoteNotFoundErr alone is a
-// loose string match that also fires on deleted/renamed remote-side repos,
-// missing remote branches, and typoed remote names — real sync failures that
-// must keep a non-zero exit so agents and CI notice (bd-6dnrw.7). Only an
-// actually-empty dolt_remotes table makes the skip safe; if the remotes can't
-// be listed, treat the failure as real. An empty table alone is still not
-// proof in server mode: a freshly auto-started sql-server can report empty
-// dolt_remotes at cold start even though remotes are persisted on disk
-// (GH#2118) — the same reason the remote-migrate gate reads repo_state.json
-// directly — so the on-disk probe must agree before the skip fires
-// (bd-578h9.10).
+// "no remote configured" case that may exit 0. isNoRemoteConfiguredErr (the
+// sync classifier, itself a superset of isRemoteNotFoundErr) is only a loose
+// string match that also fires on
+// deleted/renamed remote-side repos, missing remote branches, and typoed
+// remote names — real sync failures that must keep a non-zero exit so agents
+// and CI notice (bd-6dnrw.7). Only an actually-empty dolt_remotes table makes
+// the skip safe; if the remotes can't be listed, treat the failure as real.
+// An empty table alone is still not proof in server mode: a freshly
+// auto-started sql-server can report empty dolt_remotes at cold start even
+// though remotes are persisted on disk (GH#2118) — the same reason the
+// remote-migrate gate reads repo_state.json directly — so the on-disk probe
+// must agree before the skip fires (bd-578h9.10). Using the wider classifier
+// (bd-e2q8zs) keeps the `bd dolt pull` exit-0 gate in step with the
+// fetch+merge route's error wordings, including the bare `no remote` error
+// DOLT_FETCH produces for a default remote that was never configured.
+// Embedded mode's pull has always fetched first and failed with that bare
+// error, so an embedded `bd dolt pull` with no remote now exits 0 as well,
+// where it used to exit 1.
 func isConfirmedNoRemote(ctx context.Context, st remoteLister, err error) bool {
-	if !isRemoteNotFoundErr(err) {
+	if !isNoRemoteConfiguredErr(err) {
 		return false
 	}
 	return hasNoRemoteConfigured(ctx, st)
@@ -701,8 +716,40 @@ func printDivergedHistoryGuidance(operation string) {
 	fmt.Fprintln(os.Stderr, "existing remote instead of 'bd init' to avoid divergent histories.")
 }
 
+// remoteFromArgs resolves the remote `bd dolt push|pull` targets: the
+// optional positional name, else --remote. "" means the default remote.
+// Cobra's default ArbitraryArgs used to accept `bd dolt push 1st` and RunE
+// dropped the name, so the push went to the default remote (GH#3720).
+func remoteFromArgs(cmd *cobra.Command, args []string) (string, error) {
+	flagRemote, _ := cmd.Flags().GetString("remote")
+	if len(args) == 0 {
+		return flagRemote, nil
+	}
+	remote := args[0]
+	// An empty name (`bd dolt push "$R"` with R unset) must not fall back to
+	// the default remote: that is the same silent misdirection.
+	if strings.TrimSpace(remote) == "" {
+		return "", HandleError("remote name is empty: name a remote (see 'bd dolt remote list') or omit the argument to use the default")
+	}
+	// Letting either spelling win would silently discard a selector the
+	// user typed, the bug class this resolves.
+	if flagRemote != "" && flagRemote != remote {
+		return "", HandleError("remote named twice: %q as an argument and %q with --remote; name it once", remote, flagRemote)
+	}
+	return remote, nil
+}
+
+// validateRemoteArg runs remoteFromArgs as cobra's Args validation, which
+// executes before PersistentPreRunE opens the store, so a bad remote argument
+// fails before any server start or migration (as validateCreateArgs does).
+func validateRemoteArg(cmd *cobra.Command, args []string) error {
+	_, err := remoteFromArgs(cmd, args)
+	return err
+}
+
 var doltPushCmd = &cobra.Command{
-	Use:           "push",
+	Use:           "push [remote]",
+	Args:          cobra.MatchAll(cobra.MaximumNArgs(1), validateRemoteArg),
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	Short:         "Push commits to Dolt remote",
@@ -718,8 +765,9 @@ variables for authentication.
 Use --force to overwrite remote changes (e.g., when the remote has
 uncommitted changes in its working set).
 
-Use --remote to push to a specific named remote instead of the default.
-The remote must already exist (see 'bd dolt remote add').`,
+Name a remote to push to it instead of the default: 'bd dolt push <remote>'
+or 'bd dolt push --remote <remote>'. The remote must already exist (see
+'bd dolt remote add').`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if config.GetBool("no-push") {
 			fmt.Println("skipping push: rig is local-only (no-push: true)")
@@ -743,7 +791,10 @@ The remote must already exist (see 'bd dolt remote add').`,
 			return HandleError("no store available")
 		}
 		force, _ := cmd.Flags().GetBool("force")
-		remote, _ := cmd.Flags().GetString("remote")
+		remote, err := remoteFromArgs(cmd, args)
+		if err != nil {
+			return err
+		}
 		if remote != "" {
 			fmt.Printf("Pushing to Dolt remote %q...\n", remote)
 			if err := st.PushRemote(ctx, remote, force); err != nil {
@@ -805,7 +856,8 @@ The remote must already exist (see 'bd dolt remote add').`,
 }
 
 var doltPullCmd = &cobra.Command{
-	Use:           "pull",
+	Use:           "pull [remote]",
+	Args:          cobra.MatchAll(cobra.MaximumNArgs(1), validateRemoteArg),
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	Short:         "Pull commits from Dolt remote",
@@ -815,8 +867,9 @@ Requires a Dolt remote to be configured in the database directory.
 For Hosted Dolt, set DOLT_REMOTE_USER and DOLT_REMOTE_PASSWORD environment
 variables for authentication.
 
-Use --remote to pull from a specific named remote instead of the default.
-The remote must already exist (see 'bd dolt remote add').
+Name a remote to pull from it instead of the default: 'bd dolt pull <remote>'
+or 'bd dolt pull --remote <remote>'. The remote must already exist (see
+'bd dolt remote add').
 
 Use --strategy ours|theirs to resolve conflicts the auto-resolver declines
 (e.g. both sides edited the same issue since the last sync) instead of
@@ -841,7 +894,10 @@ reports conflicts.`,
 		if st == nil {
 			return HandleError("no store available")
 		}
-		remote, _ := cmd.Flags().GetString("remote")
+		remote, err := remoteFromArgs(cmd, args)
+		if err != nil {
+			return err
+		}
 		strategy, _ := cmd.Flags().GetString("strategy")
 		if strategy != "" {
 			if err := versioncontrolops.ValidateConflictStrategy(strategy); err != nil {
@@ -889,7 +945,6 @@ reports conflicts.`,
 			return HandleError("%v", err)
 		}
 		fmt.Println("Pulling from Dolt remote...")
-		var err error
 		if strategy != "" {
 			err = puller.PullWithStrategy(ctx, strategy)
 		} else {
@@ -1396,8 +1451,8 @@ is shown as not running, and the next bd command launches it.`,
 		if beadsDir == "" {
 			return HandleErrorWithHint(activeWorkspaceNotFoundError(), diagHint())
 		}
-		// A workspace in a format this build cannot open is refused before
-		// configfile.Load, which would first migrate a legacy config.json.
+		// A historical SQLite workspace is refused before configfile.Load,
+		// which would first migrate a legacy config.json.
 		if err := checkDiscoveredForOpen(beadsDir); err != nil {
 			return handleWorkspaceGuardError(err)
 		}
@@ -1595,6 +1650,19 @@ func runExternalDoltStatus(beadsDir string, cfg *configfile.Config) {
 	runExternalDoltStatusAt(doltserver.ResolveEndpoint(beadsDir, cfg), cfg)
 }
 
+// endpointTrustErrForCredential reports a workspace-pin violation when password
+// is non-empty, so a caller that builds its own authenticated DSN (rather than
+// going through the store's gated open) refuses to send BEADS_DOLT_PASSWORD or a
+// credentials-file password to a shared-config endpoint it never pinned
+// (GH#7886). It is nil when nothing authenticates (no password) and a no-op for
+// bd's own local server and the vendor default.
+func endpointTrustErrForCredential(ep doltserver.Endpoint, cfg *configfile.Config, password string) error {
+	if password == "" {
+		return nil
+	}
+	return ep.EnsureTrustedForCredential(cfg)
+}
+
 // runExternalDoltStatusAt is runExternalDoltStatus for ep, an endpoint the
 // caller already resolved for cfg's workspace (doltserver.ResolveEndpoint).
 // It names the server it dialed: the unix socket when it dialed one (Socket,
@@ -1619,6 +1687,12 @@ func runExternalDoltStatusAt(ep doltserver.Endpoint, cfg *configfile.Config) {
 		// No port resolved and no socket: nothing to dial. Give the store's
 		// advice for this server, not a dial of 127.0.0.1:0.
 		connErr = unresolved
+	} else if trustErr := endpointTrustErrForCredential(ep, cfg, password); trustErr != nil {
+		// The password would be sent to a shared-config host (metadata.json
+		// dolt_server_host / config.yaml dolt.host) the workspace never pinned:
+		// refuse the authenticated probe rather than hand BEADS_DOLT_PASSWORD to
+		// it (the store's open refuses the same change — GH#7886).
+		connErr = trustErr
 	} else {
 		// The connection the store makes, over its transport: a live unix
 		// socket first, else TCP (doltserver.Endpoint.Transport). Resolved
@@ -1911,6 +1985,9 @@ func purgeDroppedDatabases(ctx context.Context, conn versioncontrolops.DBConn) e
 type doltRemoteAddStore interface {
 	ListRemotes(ctx context.Context) ([]storage.RemoteInfo, error)
 	AddRemote(ctx context.Context, name, url string) error
+	// AddRemoteWithRef is AddRemote for a git-backed remote whose Dolt data
+	// lives on the git ref ref; an empty ref is AddRemote.
+	AddRemoteWithRef(ctx context.Context, name, url, ref string) error
 	RemoveRemote(ctx context.Context, name string) error
 }
 
@@ -1936,13 +2013,52 @@ func confirmDoltRemoteOverwrite(surface, name, existingURL, newURL string) bool 
 	return response == "y" || response == "yes"
 }
 
-func findDoltRemoteURL(remotes []storage.RemoteInfo, name string) string {
+// findDoltRemote returns the named remote's whole record — URL and git ref —
+// so a caller re-registering it can carry what it recorded; the zero
+// storage.RemoteInfo when absent.
+func findDoltRemote(remotes []storage.RemoteInfo, name string) storage.RemoteInfo {
 	for _, remote := range remotes {
 		if remote.Name == name {
-			return remote.URL
+			return remote
 		}
 	}
-	return ""
+	return storage.RemoteInfo{}
+}
+
+func findDoltRemoteURL(remotes []storage.RemoteInfo, name string) string {
+	return findDoltRemote(remotes, name).URL
+}
+
+// registerPersistedDoltRemote registers on the server a remote that the
+// server does not list but the served database records on disk at a URL
+// matching url. The server resolves push, pull and fetch through that
+// listing and reads repo_state.json only when it loads the database, so
+// the recorded remote is added, its URL (the spelling a restart would load)
+// and git ref, and the server ends where a listed match leaves it.
+func registerPersistedDoltRemote(ctx context.Context, st doltRemoteAddStore, persisted storage.RemoteInfo, url string) error {
+	if len(persisted.CLIOnlyParams) > 0 {
+		// The server rewrites the remote's record from the add, which
+		// carries only the URL and git ref: it would erase these for good,
+		// where a restart loads them.
+		return fmt.Errorf("its recorded parameters %s cannot be set over SQL, and the add would erase them; restart the Dolt server so it loads the remote as recorded", remedy.PrintedList(persisted.CLIOnlyParams, ", "))
+	}
+	addErr := st.AddRemoteWithRef(ctx, persisted.Name, persisted.URL, persisted.Ref)
+	if addErr == nil || !strings.Contains(strings.ToLower(addErr.Error()), "already exists") {
+		return addErr
+	}
+	// The server checks the add against the set it lists, which lacked the
+	// remote, so a concurrent add registered it in between. That is the
+	// state this add wanted, as the push path's re-add takes it
+	// (prepareCLIRouteForGitProtocol), once the server lists the remote at
+	// a matching URL.
+	remotes, err := st.ListRemotes(ctx)
+	if err != nil {
+		return fmt.Errorf("%w (listing remotes again: %v)", addErr, err)
+	}
+	if !doltutil.RemoteURLsMatch(findDoltRemoteURL(remotes, persisted.Name), url) {
+		return addErr
+	}
+	return nil
 }
 
 func ensureDoltRemote(ctx context.Context, st doltRemoteAddStore, name, url string, confirm doltRemoteOverwriteConfirmer) (doltRemoteAddResult, error) {
@@ -1952,15 +2068,18 @@ func ensureDoltRemote(ctx context.Context, st doltRemoteAddStore, name, url stri
 	}
 
 	existingURL := findDoltRemoteURL(remotes, name)
+	var persisted storage.RemoteInfo
 	existingFromDiskOnly := false
 	if existingURL == "" {
 		// An empty listing is not proof the remote is absent: a freshly
 		// (auto-)started sql-server can report empty dolt_remotes while the
 		// remote is persisted on disk (GH#2118, wy-6k7f7). Recover the
-		// persisted URL so the add gets the same match/confirm treatment it
-		// would after the window, instead of silently writing over an
-		// invisible remote.
-		existingURL = findDoltRemoteURL(persistedRemoteInfosFor(st), name)
+		// persisted record — URL and git ref — so a match below can register
+		// it on the server and a URL disagreement still gets the confirm
+		// treatment it would after the window, instead of silently writing
+		// over an invisible remote.
+		persisted = findDoltRemote(persistedRemoteInfosFor(st), name)
+		existingURL = persisted.URL
 		existingFromDiskOnly = existingURL != ""
 	}
 	if existingURL == "" {
@@ -1971,6 +2090,11 @@ func ensureDoltRemote(ctx context.Context, st doltRemoteAddStore, name, url stri
 	}
 
 	if doltutil.RemoteURLsMatch(existingURL, url) {
+		if existingFromDiskOnly {
+			if err := registerPersistedDoltRemote(ctx, st, persisted, url); err != nil {
+				return doltRemoteAddResult{}, fmt.Errorf("add remote %s: %w", name, err)
+			}
+		}
 		return doltRemoteAddResult{}, nil
 	}
 
@@ -2342,8 +2466,8 @@ func showDoltConfig(testConnection bool) error {
 		return HandleErrorWithHint(activeWorkspaceNotFoundError(), diagHint())
 	}
 
-	// A workspace in a format this build cannot open is refused before
-	// configfile.Load, which would first migrate a legacy config.json.
+	// A historical SQLite workspace is refused before configfile.Load, which
+	// would first migrate a legacy config.json.
 	if err := checkDiscoveredForOpen(beadsDir); err != nil {
 		return handleWorkspaceGuardError(err)
 	}
@@ -2817,27 +2941,59 @@ func testHTTPConnectivity(url string) bool {
 // does not connect through here: it stays usable against such a server so
 // it can still diagnose and repair (see doctor/fix.openFixDB).
 func openDoltServerConnection() (*sql.DB, func(), error) {
+	db, _, cleanup, err := openDoltServerConnectionAt()
+	return db, cleanup, err
+}
+
+// openDoltServerConnectionAt is openDoltServerConnection, and also names the
+// server it reached for a message: unix:<socket> when it dialed the
+// workspace's socket, else host:port, through the remedy printer.
+//
+// It dials over the store's transport: a live unix socket first, else TCP at
+// host:port (doltserver.SocketTransport). Beside a live socket, TCP alone
+// would reach whatever listens at the port, which can be another server
+// holding a database of the same name: a drop there removes the wrong
+// project's data. A socket is an address of its own, so a workspace whose
+// server only a socket names is dialed there rather than refused for want of
+// a port.
+func openDoltServerConnectionAt() (*sql.DB, string, func(), error) {
 	beadsDir := selectedDoltBeadsDir()
 	if beadsDir == "" {
-		return nil, nil, HandleErrorWithHint(activeWorkspaceNotFoundError(), diagHint())
+		return nil, "", nil, HandleErrorWithHint(activeWorkspaceNotFoundError(), diagHint())
 	}
 
 	cfg, err := loadDoltBackendConfig(beadsDir)
 	if err != nil {
-		return nil, nil, HandleError("%v", err)
+		return nil, "", nil, HandleError("%v", err)
 	}
 
 	host := cfg.GetDoltServerHost()
 	dc := doltserver.DialConfig(beadsDir)
 	port := dc.Port
-	if advice := unresolvedServerPortAdvice(host, port); advice != "" {
-		fmt.Fprintf(os.Stderr, "Error: no Dolt server port configured; %s\n", advice)
-		return nil, nil, SilentExit()
+	configuredSocket := cfg.GetDoltServerSocket()
+	if configuredSocket == "" {
+		if advice := unresolvedServerPortAdvice(host, port); advice != "" {
+			fmt.Fprintf(os.Stderr, "Error: no Dolt server port configured; %s\n", advice)
+			return nil, "", nil, SilentExit()
+		}
 	}
 	user := cfg.GetDoltServerUser()
 	password := os.Getenv("BEADS_DOLT_PASSWORD")
+	if password != "" {
+		// Refuse to send BEADS_DOLT_PASSWORD to a shared-config host the
+		// workspace never pinned, as the store's open does (GH#7886).
+		if err := doltserver.CheckEndpointTrust(beadsDir, cfg, host, port, configuredSocket); err != nil {
+			return nil, "", nil, HandleError("%v", err)
+		}
+	}
 
+	socket := doltserver.SocketTransport(configuredSocket, host, port, 500*time.Millisecond)
+	location := doltutil.PrintedServerAddr(host, port)
+	if socket != "" {
+		location = remedy.PrintedValue("unix:" + socket)
+	}
 	connStr := doltutil.ServerDSN{
+		Socket:   socket,
 		Host:     host,
 		Port:     port,
 		User:     user,
@@ -2847,7 +3003,7 @@ func openDoltServerConnection() (*sql.DB, func(), error) {
 
 	db, err := sql.Open("mysql", connStr)
 	if err != nil {
-		return nil, nil, HandleError("connecting to Dolt server: %v", err)
+		return nil, "", nil, HandleError("connecting to Dolt server: %v", err)
 	}
 
 	db.SetMaxOpenConns(2)
@@ -2859,21 +3015,25 @@ func openDoltServerConnection() (*sql.DB, func(), error) {
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		fmt.Fprintf(os.Stderr, "Error: cannot reach Dolt server at %s: %v\n", doltutil.PrintedServerAddr(host, port), remedy.PrintedError(err))
-		fmt.Fprintln(os.Stderr, unreachableServerAdvice(beadsDir, host, dc))
-		return nil, nil, SilentExit()
+		fmt.Fprintf(os.Stderr, "Error: cannot reach Dolt server at %s: %v\n", location, remedy.PrintedError(err))
+		if socket != "" {
+			fmt.Fprintln(os.Stderr, "Verify the Dolt server is running and listening on that unix socket.")
+		} else {
+			fmt.Fprintln(os.Stderr, unreachableServerAdvice(beadsDir, host, dc))
+		}
+		return nil, "", nil, SilentExit()
 	}
 
-	subject := "dolt sql-server at " + doltutil.PrintedServerAddr(host, port)
+	subject := "dolt sql-server at " + location
 	if err := doltversion.CheckServer(ctx, db, subject, func(err error) {
 		debug.Logf("dolt: could not determine the version of %s; not checking it against the required minimum %s: %v\n",
 			subject, doltversion.RequiredMin, remedy.PrintedError(err))
 	}); err != nil {
 		_ = db.Close()
-		return nil, nil, HandleError("%s", err.Error())
+		return nil, "", nil, HandleError("%s", err.Error())
 	}
 
-	return db, func() { _ = db.Close() }, nil
+	return db, location, func() { _ = db.Close() }, nil
 }
 
 // unreachableServerAdvice is what to do about a Dolt server at host and dc's

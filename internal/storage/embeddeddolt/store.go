@@ -34,6 +34,7 @@ var _ storage.Flattener = (*EmbeddedDoltStore)(nil)
 var _ storage.Compactor = (*EmbeddedDoltStore)(nil)
 var _ storage.SchemaMigrator = (*EmbeddedDoltStore)(nil)
 var _ storage.EventsJournalConfigurer = (*EmbeddedDoltStore)(nil)
+var _ storage.EventsJournalShapeChecker = (*EmbeddedDoltStore)(nil)
 var _ storage.VersionedHistoryConfigurer = (*EmbeddedDoltStore)(nil)
 var _ storage.VersionedHistoryDeferrer = (*EmbeddedDoltStore)(nil)
 var _ storage.ExternalRefHistoryQuerier = (*EmbeddedDoltStore)(nil)
@@ -56,6 +57,18 @@ type EmbeddedDoltStore struct {
 	// eventsJournalEnabled activates the durable events journal for THIS store
 	// instance only (storage.EventsJournalConfigurer); never process-global.
 	eventsJournalEnabled atomic.Bool
+	// journalShape caches the ONE INFORMATION_SCHEMA probe SetEventsJournalEnabled
+	// runs on activation (issueops.ProbeJournalShape, PR A1), over a short-lived
+	// connection since this store has no persistent db handle. Nil means the
+	// journal is disabled or the probe produced no shape; transactions then get
+	// the canonical column list — see journalActivationErr.
+	journalShape atomic.Pointer[issueops.JournalShape]
+	// journalActivationErr holds the probe's *issueops.JournalShapeError when
+	// SetEventsJournalEnabled(true) found a table shape the journal cannot run
+	// against (a missing required column, or a missing table). Nil otherwise,
+	// including when the probe could not run at all
+	// (issueops.JournalActivationError). See storage.EventsJournalShapeChecker.
+	journalActivationErr atomic.Pointer[error]
 	// versionedHistory activates dual-write issue-version history for THIS
 	// store instance only (storage.VersionedHistoryConfigurer); never
 	// process-global. Activation usually leaves it pending
@@ -118,8 +131,9 @@ const (
 	// open. Used by Open.
 	openStrict openIntent = iota
 	// openReadOnlyCommand relaxes both refusals for read-only commands: they
-	// must keep working on the current schema until the operator makes the
-	// migrate-or-adopt decision (bd-578h9.5), and must not be bricked by
+	// must keep working on the current schema (while it has every column this
+	// binary's reads select) until the operator makes the migrate-or-adopt
+	// decision (bd-578h9.5), and must not be bricked by
 	// dirty tables either. Used by OpenForReadOnlyCommand.
 	openReadOnlyCommand
 	// openWorkingSetReconcile relaxes both refusals for working-set-reconcile
@@ -469,7 +483,7 @@ func (s *EmbeddedDoltStore) recheckBlockedAfterCommit(ctx context.Context, pendi
 	ctx, cancel := issueops.BlockedRecheckContext(ctx)
 	defer cancel()
 	if _, err := s.commitConn(ctx, true, func(tx *sql.Tx) error {
-		return issueops.RecomputeIsBlockedInTx(ctx, tx, pending.IssueIDs, pending.WispIDs)
+		return issueops.RecomputeIsBlockedInTx(ctx, tx, pending.IssueIDs, pending.WispIDs, pending.Actor)
 	}); err != nil {
 		return issueops.BlockedRecheckFailed(err)
 	}
@@ -508,8 +522,17 @@ func (s *EmbeddedDoltStore) commitConn(ctx context.Context, commit bool, fn func
 	}
 	clearSeats := issueops.ScopeSeatRegistryTransaction(tx, filepath.Join(s.beadsDir, "notify"))
 	defer clearSeats()
+	// The activation switch deliberately does NOT depend on the cached shape:
+	// an enabled store whose probe produced no shape writes with the canonical
+	// column list, so a table the journal cannot run against fails the write
+	// loudly instead of letting the mutation commit with no journal row
+	// (storage.EventsJournalShapeChecker). Reads (commit=false callers) are
+	// never gated by this switch — only by the shape — since ReadEventsJournal
+	// has no enabled/disabled concept of its own.
 	clearJournalScope := issueops.ScopeEventsJournalTransaction(tx, s.eventsJournalEnabled.Load())
 	defer clearJournalScope()
+	clearJournalShapeScope := issueops.ScopeEventsJournalShape(tx, s.journalShape.Load())
+	defer clearJournalShapeScope()
 	// Only a transaction that commits answers a pending switch: a read rolls
 	// back whatever it does, so the row is read inside the first write and
 	// costs a read-only command nothing. A write whose read fails is rolled
@@ -546,8 +569,53 @@ func (s *EmbeddedDoltStore) commitConn(ctx context.Context, commit bool, fn func
 }
 
 // SetEventsJournalEnabled activates the journal for this store instance only.
+//
+// Activating probes bd_events_journal's actual shape ONCE
+// (issueops.ProbeJournalShape, PR A1), over a short-lived connection opened
+// and closed just for the probe since this store keeps no persistent db
+// handle, and caches the result for this instance's lifetime;
+// EventsJournalActivationError reports whether that probe found a shape the
+// journal cannot run against. The open and the probe share one
+// issueops.JournalShapeProbeTimeout, and either failing to run degrades to
+// the canonical shape (issueops.JournalActivationError). Deactivating clears
+// both and skips the probe entirely — a disabled store accepts any shape.
 func (s *EmbeddedDoltStore) SetEventsJournalEnabled(enabled bool) {
 	s.eventsJournalEnabled.Store(enabled)
+	if !enabled {
+		s.journalShape.Store(nil)
+		s.journalActivationErr.Store(nil)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), issueops.JournalShapeProbeTimeout)
+	defer cancel()
+	shape, err := s.probeJournalShape(ctx)
+	s.journalShape.Store(shape)
+	if activationErr := issueops.JournalActivationError(err); activationErr != nil {
+		s.journalActivationErr.Store(&activationErr)
+		return
+	}
+	s.journalActivationErr.Store(nil)
+}
+
+// probeJournalShape runs issueops.ProbeJournalShape over a connection opened
+// and closed just for it.
+func (s *EmbeddedDoltStore) probeJournalShape(ctx context.Context) (*issueops.JournalShape, error) {
+	db, cleanup, err := OpenSQL(ctx, s.dataDir, s.database, s.branch)
+	if err != nil {
+		return nil, fmt.Errorf("journal: open connection to probe shape: %w", err)
+	}
+	defer func() { _ = cleanup() }()
+	return issueops.ProbeJournalShape(ctx, db)
+}
+
+// EventsJournalActivationError implements storage.EventsJournalShapeChecker:
+// nil unless the last SetEventsJournalEnabled(true) call found a table shape
+// the journal cannot run against.
+func (s *EmbeddedDoltStore) EventsJournalActivationError() error {
+	if p := s.journalActivationErr.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 // SetVersionedHistoryEnabled activates dual-write issue-version history for
@@ -787,7 +855,7 @@ func (s *EmbeddedDoltStore) GetIssueByExternalRef(ctx context.Context, externalR
 func (s *EmbeddedDoltStore) DeleteIssue(ctx context.Context, id string) error {
 	return s.withConn(ctx, true, func(tx *sql.Tx) error {
 		// storage.DeleteIssue carries no actor, so the journal rows record none.
-		return issueops.DeleteIssueInTx(ctx, tx, id, "")
+		return issueops.DeleteIssueInTx(ctx, tx, id, issueops.NoRequestActor)
 	})
 }
 
@@ -1144,7 +1212,7 @@ func (s *EmbeddedDoltStore) Flatten(ctx context.Context) error {
 
 // Compact squashes old Dolt commits while preserving recent ones.
 // Pins a single *sql.Conn for session-scoped stored procedures.
-func (s *EmbeddedDoltStore) Compact(ctx context.Context, initialHash, boundaryHash string, oldCommits int, recentHashes []string) error {
+func (s *EmbeddedDoltStore) Compact(ctx context.Context, initialHash, boundaryHash, headHash string, oldCommits int, recentHashes []string) error {
 	return s.withMutatingDBConn(ctx, func(db versioncontrolops.DBConn) error {
 		// withDBConn returns *sql.DB; pin a single connection for
 		// session-scoped operations (checkout, reset, cherry-pick).
@@ -1154,9 +1222,9 @@ func (s *EmbeddedDoltStore) Compact(ctx context.Context, initialHash, boundaryHa
 				return err
 			}
 			defer conn.Close()
-			return versioncontrolops.Compact(ctx, conn, initialHash, boundaryHash, oldCommits, recentHashes)
+			return versioncontrolops.Compact(ctx, conn, initialHash, boundaryHash, headHash, oldCommits, recentHashes)
 		}
-		return versioncontrolops.Compact(ctx, db, initialHash, boundaryHash, oldCommits, recentHashes)
+		return versioncontrolops.Compact(ctx, db, initialHash, boundaryHash, headHash, oldCommits, recentHashes)
 	})
 }
 
@@ -1329,7 +1397,7 @@ func (s *EmbeddedDoltStore) DeleteIssues(ctx context.Context, ids []string, casc
 	err := s.withConn(ctx, !dryRun, func(tx *sql.Tx) error {
 		var err error
 		// storage.DeleteIssues carries no actor, so the journal rows record none.
-		result, err = issueops.DeleteIssuesInTx(ctx, tx, ids, cascade, force, dryRun, "")
+		result, err = issueops.DeleteIssuesInTx(ctx, tx, ids, cascade, force, dryRun, issueops.NoRequestActor)
 		return err
 	})
 	return result, err

@@ -55,6 +55,12 @@ func TestIDRetentionContract(t *testing.T) {
 	t.Run("NeverMintsARetiredChildID", func(t *testing.T) {
 		conformance.RunIDRetentionNeverMintsARetiredChildID(t, ctx, fixture)
 	})
+	t.Run("APlainSweepKeepsTheChildSuffixReserved", func(t *testing.T) {
+		conformance.RunIDRetentionAPlainSweepKeepsTheChildSuffixReserved(t, ctx, fixture)
+	})
+	t.Run("APlainSweptChildIDStaysReusable", func(t *testing.T) {
+		conformance.RunIDRetentionAPlainSweptChildIDStaysReusable(t, ctx, fixture)
+	})
 	t.Run("DryRunRetiresNothing", func(t *testing.T) {
 		conformance.RunIDRetentionDryRunRetiresNothing(t, ctx, fixture)
 	})
@@ -69,6 +75,15 @@ func TestIDRetentionContract(t *testing.T) {
 	})
 	t.Run("AWispsPlaneRetainingSweepRetiresItsRows", func(t *testing.T) {
 		conformance.RunIDRetentionAWispsPlaneRetainingSweepRetiresItsRows(t, ctx, fixture)
+	})
+	t.Run("APlainSweepSkipsARetainedType", func(t *testing.T) {
+		conformance.RunIDRetentionAPlainSweepSkipsARetainedType(t, ctx, fixture)
+	})
+	t.Run("ARetainedTypeIsHeldBackBeforeTheProtectionsAndTheLimit", func(t *testing.T) {
+		conformance.RunIDRetentionARetainedTypeIsHeldBackBeforeTheProtectionsAndTheLimit(t, ctx, fixture)
+	})
+	t.Run("ARetainedTypeReadErrorFailsTheSweep", func(t *testing.T) {
+		conformance.RunIDRetentionARetainedTypeReadErrorFailsTheSweep(t, ctx, fixture)
 	})
 	t.Run("RefusesARenameOntoARetiredID", func(t *testing.T) {
 		conformance.RunIDRetentionRefusesARenameOntoARetiredID(t, ctx, fixture)
@@ -132,16 +147,22 @@ func newDoltIDRetentionFixtureFor(t *testing.T, store *DoltStore, storeCleanup f
 		cleanup()
 		t.Fatalf("BatchCreator(): %v", err)
 	}
+	workspaceConfig, err := store.WorkspaceConfig()
+	if err != nil {
+		cleanup()
+		t.Fatalf("WorkspaceConfig(): %v", err)
+	}
 	return conformance.IDRetentionFixture{
-		IssuePrefix:  prefix,
-		Sweep:        sweep,
-		Lifecycle:    lifecycle,
-		Reader:       reader,
-		BatchApplier: applier,
-		BatchCreator: creator,
-		Importer:     conformance.IDRetentionUpsertImporter(store),
-		UpsertCreate: store.CreateIssue,
-		Rename:       store.UpdateIssueID,
+		IssuePrefix:     prefix,
+		Sweep:           sweep,
+		Lifecycle:       lifecycle,
+		Reader:          reader,
+		BatchApplier:    applier,
+		BatchCreator:    creator,
+		Importer:        conformance.IDRetentionUpsertImporter(store),
+		UpsertCreate:    store.CreateIssue,
+		WorkspaceConfig: workspaceConfig,
+		Rename:          store.UpdateIssueID,
 		TxCreate: func(ctx context.Context, issue *types.Issue, actor string) error {
 			return store.RunInTransaction(ctx, "id-retention contract", func(tx storage.Transaction) error {
 				return tx.CreateIssue(ctx, issue, actor)

@@ -83,35 +83,26 @@ func probeIDOccupancyInTx(ctx context.Context, tx DBTX, id string) (live bool, r
 	return false, retired, nil
 }
 
-// IDTakenInTx reports whether a fresh create may not mint id into table
-// ("issues" or "wisps"): a live row of that table holds it, or a tombstone in
-// either tombstone table retired it. One statement, so the id generators pay
-// no extra round trip for the tombstone check.
-func IDTakenInTx(ctx context.Context, tx DBTX, table, id string) (bool, error) {
-	if table != "issues" && table != "wisps" {
-		return false, fmt.Errorf("id taken: unknown table %q", table)
-	}
-	var count int
-	//nolint:gosec // G201: table is checked against two constants above; the tombstone tables are constants.
-	query := fmt.Sprintf(`SELECT (SELECT COUNT(*) FROM %s WHERE id = ?) + (SELECT COUNT(*) FROM %s WHERE id = ?) + (SELECT COUNT(*) FROM %s WHERE id = ?)`,
-		table, IDTombstoneTable, WispIDTombstoneTable)
-	if err := tx.QueryRowContext(ctx, query, id, id, id).Scan(&count); err != nil {
-		return false, fmt.Errorf("check whether %q is taken in %s: %w", id, table, err)
-	}
-	return count > 0, nil
-}
+// idTakenSQL counts, in one statement, every place that keeps an id from a
+// fresh mint: a live row in either row table and a tombstone in either
+// tombstone table.
+const idTakenSQL = `SELECT (SELECT COUNT(*) FROM issues WHERE id = ?) + (SELECT COUNT(*) FROM wisps WHERE id = ?) + (SELECT COUNT(*) FROM id_tombstones WHERE id = ?) + (SELECT COUNT(*) FROM wisp_id_tombstones WHERE id = ?)`
 
-// idRetiredSQL counts id's tombstones across both tombstone tables in one
-// statement.
-const idRetiredSQL = `SELECT (SELECT COUNT(*) FROM id_tombstones WHERE id = ?) + (SELECT COUNT(*) FROM wisp_id_tombstones WHERE id = ?)`
-
-// IDRetiredInTx reports whether a tombstone in either table retired id. It is
-// one statement, for the paths that ask about one id at a time (the counter
-// mints); RetiredIDsInTx serves id lists.
-func IDRetiredInTx(ctx context.Context, tx DBTX, id string) (bool, error) {
+// IDTakenInTx reports whether a fresh create may not mint id: a live row of
+// EITHER plane holds it, or a tombstone in either tombstone table retired it.
+// One statement, so the id generators pay no extra round trip for the second
+// plane or the tombstones.
+//
+// BOTH PLANES, whichever one the id is minted for. issues and wisps share one
+// id space and every create guard reads both (EnsureIssueIDAvailableInTx,
+// checkCrossTableIDCollision), so a candidate free only in its own plane was
+// minted and then refused, ErrAlreadyExists on a create that named no id, or
+// on a path that does not take the guard was written beside the other plane's
+// row (GH#5106).
+func IDTakenInTx(ctx context.Context, tx DBTX, id string) (bool, error) {
 	var count int
-	if err := tx.QueryRowContext(ctx, idRetiredSQL, id, id).Scan(&count); err != nil {
-		return false, fmt.Errorf("check whether %q is retired: %w", id, err)
+	if err := tx.QueryRowContext(ctx, idTakenSQL, id, id, id, id).Scan(&count); err != nil {
+		return false, fmt.Errorf("check whether %q is taken: %w", id, err)
 	}
 	return count > 0, nil
 }
