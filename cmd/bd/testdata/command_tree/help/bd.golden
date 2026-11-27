@@ -132,6 +132,7 @@ Additional Commands:
   init-safety       Explain bd init flag semantics and the destroy-token format
   mail              Delegate to mail provider (e.g., gt mail)
   metrics           Show or change anonymous usage-metrics settings
+  misroute          File a mis-routed task instead of working it
   mol               Molecule commands (work templates)
   notify            Seat-addressed notify outbox (beads-owned delivery)
   notion            Notion integration commands

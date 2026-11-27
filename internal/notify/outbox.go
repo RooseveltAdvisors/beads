@@ -55,11 +55,15 @@ const UnassignedSeat = "unassigned"
 
 // Record is one seat-addressed notify row.
 type Record struct {
-	Seq       int64  `json:"seq"`
-	Seat      string `json:"seat"`
-	IssueID   string `json:"issue_id"`
-	Kind      Kind   `json:"kind"`
-	Title     string `json:"title,omitempty"`
+	Seq     int64  `json:"seq"`
+	Seat    string `json:"seat"`
+	IssueID string `json:"issue_id"`
+	Kind    Kind   `json:"kind"`
+	Title   string `json:"title,omitempty"`
+	// Priority is the bead's P0-P4 rung at enqueue time, so a recipient
+	// can triage the wake without opening the thread (captain order
+	// 2026-11-02). Zero-value on legacy rows: rendered as absent.
+	Priority  *int   `json:"priority,omitempty"`
 	CreatedAt string `json:"created_at"`
 }
 
@@ -86,7 +90,7 @@ func Open(beadsDir string) (*Outbox, error) {
 func (o *Outbox) Dir() string { return o.dir }
 
 // Enqueue appends one row for seat/issue. Empty seat becomes UnassignedSeat.
-func (o *Outbox) Enqueue(seat, issueID string, kind Kind, title string) (Record, error) {
+func (o *Outbox) Enqueue(seat, issueID string, kind Kind, title string, priority *int) (Record, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	release, lockErr := seats.LockFile(filepath.Join(o.dir, "outbox.lock"))
@@ -94,12 +98,12 @@ func (o *Outbox) Enqueue(seat, issueID string, kind Kind, title string) (Record,
 		return Record{}, lockErr
 	}
 	defer release()
-	return o.enqueueLocked(seat, issueID, kind, title)
+	return o.enqueueLocked(seat, issueID, kind, title, priority)
 }
 
 // EnqueueUnique appends a row unless an unacked row already exists for the
 // same seat, issue, and kind. Returns false when the existing row is kept.
-func (o *Outbox) EnqueueUnique(seat, issueID string, kind Kind, title string) (Record, bool, error) {
+func (o *Outbox) EnqueueUnique(seat, issueID string, kind Kind, title string, priority *int) (Record, bool, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	release, lockErr := seats.LockFile(filepath.Join(o.dir, "outbox.lock"))
@@ -133,11 +137,11 @@ func (o *Outbox) EnqueueUnique(seat, issueID string, kind Kind, title string) (R
 			return rec, false, nil
 		}
 	}
-	rec, err := o.enqueueLocked(seat, issueID, kind, title)
+	rec, err := o.enqueueLocked(seat, issueID, kind, title, priority)
 	return rec, err == nil, err
 }
 
-func (o *Outbox) enqueueLocked(seat, issueID string, kind Kind, title string) (Record, error) {
+func (o *Outbox) enqueueLocked(seat, issueID string, kind Kind, title string, priority *int) (Record, error) {
 	var resolveErr error
 	if strings.TrimSpace(seat) == "" {
 		seat = UnassignedSeat
@@ -169,6 +173,7 @@ func (o *Outbox) enqueueLocked(seat, issueID string, kind Kind, title string) (R
 		IssueID:   issueID,
 		Kind:      kind,
 		Title:     strings.TrimSpace(title),
+		Priority:  priority,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 	line, err := json.Marshal(rec)
@@ -195,7 +200,7 @@ func (o *Outbox) EnqueueSeatBatch(seat string, ids []string, kind Kind, titles m
 		if titles != nil {
 			title = titles[id]
 		}
-		rec, err := o.Enqueue(seat, id, kind, title)
+		rec, err := o.Enqueue(seat, id, kind, title, nil)
 		if err != nil {
 			return out, err
 		}

@@ -18,7 +18,45 @@ func (o *Outbox) Heal(state *seats.AgentState, self Instance, live []Instance, n
 			return err
 		}
 	}
-	return o.Rebind(state, self, now)
+	// A rebind re-asserts the caller's endpoint from ITS process env
+	// (HERDR_* / PI_SESSION_FILE). A process that outlives its herdr
+	// entry - a detached pane, a lingering shell - carries a session
+	// file no live instance reports, and its blind rebind clobbers a
+	// healthy endpoint with a dead one (observed twice 2026-11-06: the
+	// wiseman seat was overwritten back to a dead Nov 3 session minutes
+	// after a correct rebind, including through the discovery-failure
+	// path). Never write an endpoint we cannot verify: no live match -
+	// whether discovery failed or self is simply dead - skips the rebind
+	// and leaves rows to hold. Deliberate re-registration remains the
+	// explicit `bd seat register --state` path.
+	if !haveLive || !selfMatchesLive(self, live) {
+		return nil
+	}
+	return o.Rebind(state, self, now, live)
+}
+
+// selfMatchesLive reports whether the caller's own instance is among the live
+// inventory. A missing AgentSessionID falls back to session+pane, the legacy
+// locator for callers that predate agent-session env.
+func selfMatchesLive(self Instance, live []Instance) bool {
+	if strings.TrimSpace(self.AgentSessionID) != "" {
+		for _, inst := range live {
+			if strings.TrimSpace(inst.AgentSessionID) == strings.TrimSpace(self.AgentSessionID) {
+				return true
+			}
+		}
+		return false
+	}
+	if strings.TrimSpace(self.Session) == "" || strings.TrimSpace(self.PaneID) == "" {
+		return false
+	}
+	for _, inst := range live {
+		if strings.TrimSpace(inst.Session) == strings.TrimSpace(self.Session) &&
+			strings.TrimSpace(inst.PaneID) == strings.TrimSpace(self.PaneID) {
+			return true
+		}
+	}
+	return false
 }
 
 // Rebind re-asserts the endpoint of the seat the caller's durable state
@@ -32,7 +70,7 @@ func (o *Outbox) Heal(state *seats.AgentState, self Instance, live []Instance, n
 // uuid, or a token refusal leaves the registry untouched and never fails the
 // caller's command. The explicit `bd seat register` path surfaces those
 // errors instead.
-func (o *Outbox) Rebind(state *seats.AgentState, self Instance, now time.Time) error {
+func (o *Outbox) Rebind(state *seats.AgentState, self Instance, now time.Time, live []Instance) error {
 	self.Session = strings.TrimSpace(self.Session)
 	self.PaneID = strings.TrimSpace(self.PaneID)
 	self.AgentSessionID = strings.TrimSpace(self.AgentSessionID)
@@ -43,13 +81,74 @@ func (o *Outbox) Rebind(state *seats.AgentState, self Instance, now time.Time) e
 		return nil
 	}
 	return seats.Update(o.dir, func(r seats.Registry) error {
-		ep := seats.Endpoint{Session: self.Session, PaneID: self.PaneID, AgentSessionID: self.AgentSessionID}
-		if cur, ok := r[state.AgentUUID]; ok && cur.Endpoint == ep && cur.Liveness == seats.Live {
-			return nil
+		ep := seats.Endpoint{AgentSessionID: self.AgentSessionID}
+		if cur, ok := r[state.AgentUUID]; ok {
+			if cur.Endpoint == ep && cur.Liveness == seats.Live {
+				return nil
+			}
+			// Guard 1: Auto-heal never revives an unbound or dead seat.
+			// Deliberate activation requires explicit `bd seat register --state`.
+			pin := Pin{
+				Session:        cur.Endpoint.Session,
+				PaneID:         cur.Endpoint.PaneID,
+				AgentSessionID: cur.Endpoint.AgentSessionID,
+			}
+			if cur.Liveness == seats.Dead || !pin.Valid() {
+				return nil
+			}
+			// Guard 2: Live endpoint protection: if the registered seat's current endpoint resolves to a
+			// live instance in Herdr, and that instance is not self, auto-heal must never steal it.
+			if len(live) > 0 {
+				if inst, found := FindPinnedInstance(pin, live); found {
+					if !instancesMatch(inst, self) {
+						return nil
+					}
+				}
+			}
+			// Guard 3: Tab label protection: if caller is running in a named Herdr tab,
+			// the tab label must match at least one alias of the seat.
+			if tab := strings.TrimSpace(HerdrTabActor()); tab != "" {
+				if !aliasMatchesTab(cur.Aliases, tab) {
+					return nil
+				}
+			}
 		}
 		// A refused rebind (unknown uuid, token mismatch) is a hold, not a
 		// command failure: rows stay queued for the legitimate owner.
 		_ = r.RebindWithToken(state.AgentUUID, ep, state.RebindToken, now)
 		return nil
 	})
+}
+
+// instancesMatch reports whether two instances refer to the same agent.
+func instancesMatch(a, b Instance) bool {
+	if strings.TrimSpace(a.AgentSessionID) != "" && strings.TrimSpace(b.AgentSessionID) != "" {
+		return strings.TrimSpace(a.AgentSessionID) == strings.TrimSpace(b.AgentSessionID)
+	}
+	return strings.TrimSpace(a.Session) == strings.TrimSpace(b.Session) &&
+		strings.TrimSpace(a.PaneID) == strings.TrimSpace(b.PaneID)
+}
+
+// aliasMatchesTab reports whether the tab label matches at least one alias of the seat.
+func aliasMatchesTab(aliases []string, tabLabel string) bool {
+	normTab := normalizeIdentifier(tabLabel)
+	if normTab == "" {
+		return true
+	}
+	for _, a := range aliases {
+		if normalizeIdentifier(a) == normTab {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeIdentifier(s string) string {
+	s = strings.TrimSpace(strings.ToLower(s))
+	s = strings.TrimPrefix(s, "@")
+	s = strings.ReplaceAll(s, "-", "")
+	s = strings.ReplaceAll(s, "_", "")
+	s = strings.ReplaceAll(s, " ", "")
+	s = strings.ReplaceAll(s, ".", "")
+	return s
 }

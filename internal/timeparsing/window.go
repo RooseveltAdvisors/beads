@@ -105,3 +105,24 @@ func (w QuietWindow) Contains(t time.Time) bool {
 	// Wraps midnight: live from StartMin to 24:00 and 00:00 to EndMin.
 	return minutes >= w.StartMin || minutes < w.EndMin
 }
+
+// NextOpen returns the first instant strictly after t at which the window
+// is live again (Contains true). The bool is false for a zero window or a
+// zone that no longer loads: the caller keeps due_at untouched, which is no
+// worse than never having asked.
+func (w QuietWindow) NextOpen(t time.Time) (time.Time, bool) {
+	if w.IsZero() {
+		return time.Time{}, false
+	}
+	loc, err := time.LoadLocation(w.Zone)
+	if err != nil {
+		return time.Time{}, false
+	}
+	lt := t.In(loc)
+	midnight := time.Date(lt.Year(), lt.Month(), lt.Day(), 0, 0, 0, 0, loc)
+	todayOpen := midnight.Add(time.Duration(w.StartMin) * time.Minute)
+	if todayOpen.After(t) {
+		return todayOpen, true
+	}
+	return todayOpen.AddDate(0, 0, 1), true
+}

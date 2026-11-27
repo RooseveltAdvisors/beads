@@ -1768,6 +1768,11 @@ bd doctor
     |     (stale JSONL, SQLite files, cruft .beads dirs). Use with --clean.
     |   - conventions: Check for convention drift (lint warnings, stale
     |     issues, orphaned issues). Advisory only - warns, never blocks.
+    |   - discipline: Report bead-discipline metrics (claimless in_progress,
+    |     unresolvable or dead-seat assignees, machine actors as owners,
+    |     overdue non-recurring, chronic misses, priority inflation,
+    |     duplicate live titles) with per-finding remediation. Advisory;
+    |     JSON via --output for THE-FM's monitoring loop.
     |   - pollution: Detect and optionally clean test issues from database
     |   - validate: Run focused data-integrity checks (duplicates, orphaned
     |     deps, test pollution, git conflicts). Use with --fix to auto-repair.
@@ -4937,6 +4942,33 @@ bd migrate-personal
     |   bd migrate-personal -y     # Non-interactive: skip confirmation
   flag --yes -y type=bool default="false" usage="Skip confirmation prompt"
 
+bd misroute
+  use: "misroute <what-was-misrouted>"
+  short: "File a mis-routed task instead of working it"
+  hidden: false
+  runnable: true
+  long:
+    | File a mis-routed task as a bead assigned to the dispatch owner.
+    |
+    | Captain rule (2026-11-03): work that arrives at a seat that does not own it
+    | is never silently worked, acked, or re-pointed by hand. The receiving seat
+    | files it here and stops. The filing reaches THE-FM through the notify
+    | pipeline - exact uuid-seat delivery, held until live - which a pane prompt
+    | cannot promise: pane ids move on restart, and a mis-pointed report address
+    | is how lanes have drifted twice in one day.
+    |
+    | The filed bead carries priority 1, the misroute label, a 48h due, and
+    | acceptance criteria naming the dispatch contract: the owner routes the work
+    | to the owning seat and fixes the sending lane's report address.
+    |
+    | Examples:
+    |   bd misroute "deid-fhir lane milestones arriving at wiseman w1:p13F" \
+    |       --from fm-deidfhir --corr deid-fhir-skill
+    |   bd misroute "Covenant Ads wake pings for a thread I do not own" \
+    |       --from bd-due-trigger --corr fm-mw4xg
+  flag --corr type=string default="" usage="Correlation id of the misrouted thread, if any"
+  flag --from type=string default="" usage="Sender, lane, or seat the misrouted work came from (required)"
+
 bd mol
   use: "mol"
   aliases: ["protomolecule"]
@@ -5566,6 +5598,9 @@ bd notify
     |   bd notify drain --seat wiseman --print
     |   bd notify drain --seat wiseman --exec 'echo "$BD_NOTIFY_ID"'
     |   bd notify seats
+    |   bd notify holds
+    |   bd notify holds reap --dry-run
+    |   bd notify holds reap --yes
 
 bd notify ack
   use: "ack"
@@ -5608,6 +5643,40 @@ bd notify drain
   flag --no-ack type=bool default="false" usage="do not mark rows delivered"
   flag --print type=bool default="false" usage="print rows only (no herdr prompt)"
   flag --seat type=string default="" usage="assignee seat to drain"
+
+bd notify holds
+  use: "holds"
+  short: "List or reap parent-escalation holds"
+  hidden: false
+  runnable: true
+  long:
+    | Holds mark seats whose drain could not deliver (no-pin, pinned-target-dead,
+    | target-blocked). Detection already works; retention reaps dead-pin and no-pin
+    | holds older than the retention window (default 14d) and acks their pending
+    | outbox rows. Transient holds (hold-until-idle, target-blocked) are never
+    | reaped.
+    |
+    | Examples:
+    |   bd notify holds
+    |   bd notify holds --json
+    |   bd notify holds reap --dry-run
+    |   bd notify holds reap --older-than 14d
+    |   bd notify holds reap --older-than 7d --yes
+
+bd notify holds list
+  use: "list"
+  short: "List current holds (default when no subcommand)"
+  hidden: false
+  runnable: true
+
+bd notify holds reap
+  use: "reap"
+  short: "Reap stale dead-pin / no-pin holds past retention"
+  hidden: false
+  runnable: true
+  flag --dry-run type=bool default="false" usage="report eligible holds without writing"
+  flag --older-than type=string default="14d" usage="reap dead-pin/no-pin holds older than this (Nd or Go duration)"
+  flag --yes type=bool default="false" usage="apply the reap (required unless --dry-run)"
 
 bd notify pending
   use: "pending"

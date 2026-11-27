@@ -1,10 +1,12 @@
 package notify
 
 import (
-	"github.com/steveyegge/beads/internal/seats"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/steveyegge/beads/internal/seats"
 )
 
 func lookalikeInstances() []Instance {
@@ -134,6 +136,76 @@ func TestLoadPinsAndHolds(t *testing.T) {
 	}
 }
 
+func TestReapHoldsRetention(t *testing.T) {
+	beads := filepath.Join(t.TempDir(), ".beads")
+	if err := os.MkdirAll(beads, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	o, err := Open(beads)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	old := now.Add(-20 * 24 * time.Hour).Format(time.RFC3339)
+	fresh := now.Add(-2 * 24 * time.Hour).Format(time.RFC3339)
+
+	if err := o.SetHold("antigravity", Hold{Reason: HoldNoPin, Pending: 617, UpdatedAt: old}); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.SetHold("fresh-dead", Hold{Reason: HoldDeadPin, Session: "s", PaneID: "w1:p1", UpdatedAt: fresh}); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.SetHold("blocked", Hold{Reason: HoldBlocked, Session: "s", PaneID: "w1:p2", UpdatedAt: old}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.Enqueue("antigravity", "wiseman-x", KindDue, "stale ping", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	dry, err := o.ReapHolds(DefaultHoldRetention, now, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dry.DryRun != true || len(dry.Cleared) != 1 || dry.Cleared[0].Seat != "antigravity" {
+		t.Fatalf("dry = %+v", dry)
+	}
+	if dry.Cleared[0].PendingAcked != 1 {
+		t.Fatalf("dry pending_acked = %d", dry.Cleared[0].PendingAcked)
+	}
+	holds, _ := o.Holds()
+	if len(holds) != 3 {
+		t.Fatalf("dry-run must not write; holds=%d", len(holds))
+	}
+
+	got, err := o.ReapHolds(DefaultHoldRetention, now, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Cleared) != 1 || got.Cleared[0].Seat != "antigravity" || got.Skipped != 2 {
+		t.Fatalf("reap = %+v", got)
+	}
+	holds, err = o.Holds()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := holds["antigravity"]; ok {
+		t.Fatal("antigravity hold should be cleared")
+	}
+	if _, ok := holds["fresh-dead"]; !ok {
+		t.Fatal("fresh dead-pin hold must survive retention")
+	}
+	if _, ok := holds["blocked"]; !ok {
+		t.Fatal("target-blocked hold must never be reaped")
+	}
+	pending, err := o.Pending("antigravity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("reaped seat pending should be acked, got %d", len(pending))
+	}
+}
+
 func TestLoadPinsRejectsCorruptJSON(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, seats.File), []byte("{"), 0o644); err != nil {
@@ -141,5 +213,35 @@ func TestLoadPinsRejectsCorruptJSON(t *testing.T) {
 	}
 	if _, err := LoadPins(dir); err == nil {
 		t.Fatal("expected parse error")
+	}
+}
+
+// TestStalePaneFollowsAgentSession is the regression for the 2026-11-05
+// misroute: the wiseman pin carried a stale session+pane (wiseman/w1:p184,
+// the portal-iam pane) alongside a correct agent-session id. The old AND
+// matcher followed the stale pane to the wrong agent. The stable-first rule
+// matches by agent-session alone, so the delivery follows the agent across
+// pane churn.
+func TestStalePaneFollowsAgentSession(t *testing.T) {
+	t.Parallel()
+	live := []Instance{
+		{Session: "wiseman", PaneID: "w1:p184", Harness: "pi", Status: "idle",
+			AgentSessionID: "/sessions/other-agent.jsonl"},
+		{Session: "firstmate", PaneID: "wYK:p1", Harness: "pi", Status: "idle",
+			AgentSessionID: "/sessions/wiseman-real.jsonl"},
+	}
+	pins := map[string]Pin{
+		"13fd3891": {
+			Session:        "wiseman",                      // stale session
+			PaneID:         "w1:p184",                      // stale pane (portal-iam)
+			AgentSessionID: "/sessions/wiseman-real.jsonl", // correct anchor
+		},
+	}
+	got := DecideDelivery("13fd3891", pins, live)
+	if !got.OK {
+		t.Fatalf("agent-session pin must follow the agent, got %+v", got)
+	}
+	if got.Instance.PaneID != "wYK:p1" {
+		t.Fatalf("delivered to stale pane %s, want wYK:p1 (the agent's live pane)", got.Instance.PaneID)
 	}
 }

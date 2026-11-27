@@ -8,12 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/steveyegge/beads/internal/remedy"
 )
 
 // Instance is one live herdr-hosted agent of any harness (pi, claude, codex, …).
@@ -203,79 +200,54 @@ func (h HerdrDiscoverer) Deliver(inst Instance, text string, mode DeliveryMode) 
 }
 
 // DefaultPrompt builds the standard beads notify prompt for a record.
-// Kind-specific footers teach finish-line commands so harnesses that only
-// chat or write status files still learn: done means bd close with a real reason.
+//
+// The notification is a follow-up reminder, never a steering order
+// (captain order 2026-11-01): it must not interrupt, redirect, or park the
+// agent that receives it. The old command playbooks made agents over-apply -
+// stopping work, stamping, and going idle on a comment's arrival - so the
+// body now names what happened, points at the thread, and explicitly
+// disclaims any change to the agent's priorities.
 func DefaultPrompt(rec Record) string {
 	title := rec.Title
 	if title == "" {
 		title = rec.IssueID
 	}
 	var b strings.Builder
+	prioTag := ""
+	if rec.Priority != nil {
+		prioTag = fmt.Sprintf(" [P%d]", *rec.Priority)
+	}
 	fmt.Fprintf(&b,
-		"BEADS NOTIFY (%s). Bead %s just fired for seat %s: %s\n\n",
-		rec.Kind, rec.IssueID, rec.Seat, title,
+		"BEADS NOTIFY (%s). Bead %s%s fired for seat %s: %s\n",
+		rec.Kind, rec.IssueID, prioTag, rec.Seat, title,
 	)
-	b.WriteString(promptPlaybook(rec.Kind, rec.IssueID))
-	b.WriteString("\nDo the work yourself. Stamp progress on the bead. Go idle. Do not ask the captain.")
+	fmt.Fprintf(&b, "%s\n\n", reminderLine(rec.Kind))
+	fmt.Fprintf(&b, "Read the thread: bd comments %s   (full detail: bd show %s)\n\n", rec.IssueID, rec.IssueID)
+	b.WriteString(reminderFooter)
 	return b.String()
 }
 
-// promptPlaybook is the educational body agents see on every wake.
-// Stale-claim / progress kinds get the strongest "you must close via bd" copy.
-func promptPlaybook(kind Kind, issueID string) string {
-	id := strings.TrimSpace(issueID)
-	// Every command below pastes the bead id, so it goes in as a shell word:
-	// an id the store holds that is not a plain word becomes a placeholder
-	// named escaped after the playbook, so pasting the wake runs no part of it
-	// (remedy.CommandArg). The no-id case keeps the literal <id> it always had.
-	arg, note := "<id>", ""
-	if id != "" {
-		arg, note = remedy.CommandArg(runtime.GOOS, id, "<id>")
-	}
+// reminderFooter is the anti-over-application core: the notification is a
+// nudge in case the bead slipped, and nothing in it licenses stopping,
+// reprioritizing, or idling.
+const reminderFooter = `This is a reminder in case the bead slipped, nothing more. It does not
+change your priorities, asks for no status change, and is never a reason to
+stop or go idle. Continue your current work and fold this in when it fits.
+The bead's own thread carries any real follow-up.`
+
+// reminderLine is the one kind-specific sentence. It names what happened
+// without commanding anything.
+func reminderLine(kind Kind) string {
 	switch kind {
-	case KindStaleClaim:
-		return fmt.Sprintf(`This bead is still open/in_progress under your seat - finishing in chat or a status file is NOT done in beads.
-
-Finish-line (pick one):
-  1) If the work is actually finished:
-       bd comment %s "what landed (PR/link/result)"
-       bd close %s --reason "short real reason (not the word Closed)"
-  2) If still working: leave a delta comment, then continue the task:
-       bd comment %s "blocked on X / next is Y"
-  3) If you should not own it: bd update %s --assignee <seat> (or unassign) and comment why.
-
-House rule: comment.progress_required - bare bd close fails on assigned work; default reason "Closed" does not count. Escape only if needed: bd close %s --force-no-comment --reason "why".
-`, arg, arg, arg, arg, arg) + note
-	case KindProgress:
-		return fmt.Sprintf(`Progress trail missing on an assigned bead (comment.progress_required).
-
-Do this before any close:
-  bd comment %s "current state / what changed"
-When finished:
-  bd close %s --reason "what landed"
-Do not only update chat or state/*.status - the bead thread is the handoff.
-`, arg, arg) + note
-	case KindEscalate:
-		return fmt.Sprintf(`Escalation wake. Inspect the bead, act, and end in beads:
-  bd show %s
-  bd comment %s "what you found / did"
-  bd close %s --reason "..."   # only if the work is truly finished
-`, arg, arg, arg) + note
 	case KindComment:
-		return fmt.Sprintf(`Someone commented on a bead assigned to you. Read it, act, stamp progress.
-
-  bd comments %s
-  bd comment %s "what you did next"
-When the work is finished:
-  bd close %s --reason "short real reason"
-Do not only reply in chat. Do not ask the captain.
-`, arg, arg, arg) + note
+		return "New comment on a bead your seat owns."
+	case KindStaleClaim:
+		return "This bead is still open under your seat; a finished bead closes in beads with a real reason."
+	case KindProgress:
+		return "The progress trail on this bead wants a delta comment the next time you touch it."
+	case KindEscalate:
+		return "This bead escalated after repeated misses; it deserves attention when you can give it."
 	default:
-		// due / defer / manual - still teach the finish line without drowning the body.
-		return fmt.Sprintf(`When the work is finished, close it in beads (harness-agnostic):
-  bd comment %s "what landed"    # optional if --reason is explicit
-  bd close %s --reason "short real reason"
-Assigned work cannot bare-close (comment.progress_required). Chat-only done is not done.
-`, arg, arg) + note
+		return "This bead's due date arrived."
 	}
 }

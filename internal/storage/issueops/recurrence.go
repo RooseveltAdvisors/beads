@@ -220,9 +220,24 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 	now := time.Now().UTC()
 	for _, c := range candidates {
 		// A recurring bead outside its quiet window does not fire: the
-		// silence is designed. Its due_at stays put and the wake re-checks
-		// at the window edge.
+		// silence is designed. But due_at must not stay in the past:
+		// bd-due-wake sleeps until the earliest due_at across stores, so a
+		// skipped candidate wedges the clock at its sleep floor until the
+		// window opens (observed live: hours of MIN_SLEEP re-sweeps,
+		// 2026-10-30, fm-mw4xg). Reschedule to the opening edge - the
+		// instant the old comment promised the wake would re-check at.
+		// Not a miss: nothing failed, the bead is quiet by design.
 		if c.repeatPattern != "" && repeatWindowQuiet(c.repeatWindow, now) {
+			if open, ok := quietWindowReschedule(c, now); ok {
+				args := append([]any{open, now, freshRowLock(), c.id, c.dueAt}, statusArgs...)
+				if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
+					UPDATE %s
+					SET due_at = ?, updated_at = ?, row_lock = ?
+					WHERE id = ? AND due_at = ? AND status IN (%s)
+				`, table, statusList), args...); err != nil {
+					return nil, nil, fmt.Errorf("due sweep: quiet reschedule %s: %w", c.id, err)
+				}
+			}
 			continue
 		}
 		next, fromPattern := nextDueAfterMiss(c, now)
@@ -351,11 +366,31 @@ func nextDueAfterMiss(c dueCandidate, now time.Time) (time.Time, bool) {
 			RepeatStart:   c.repeatStart,
 			RepeatEnd:     c.repeatEnd,
 		}
-		if next, ok := nextOccurrencePast(probe, c.dueAt, now); ok {
+		// Cron evaluates in the time's zone. The quiet window names the
+		// bead's intended timezone (repeat_window's zone); evaluating a
+		// pattern like "*/10 9-19" in UTC while the window read
+		// America/New_York left a 5h daily gap where the window was open
+		// but the cron was silent (observed 2026-11-05: fm-mw4xg last
+		// fired 14:50 ET then sat idle until 04:00 next day). Convert the
+		// walk inputs to the window's zone so hours match the window;
+		// NextOccurrence returns UTC instants either way.
+		dueAt, evaluationNow := c.dueAt, now
+		if w, err := timeparsing.ParseWindow(c.repeatWindow); err == nil && !w.IsZero() {
+			if loc, err := time.LoadLocation(w.Zone); err == nil {
+				dueAt, evaluationNow = dueAt.In(loc), now.In(loc)
+			}
+		}
+		if next, ok := nextOccurrencePast(probe, dueAt, evaluationNow); ok {
 			return next, true
 		}
 	}
 	return now.Add(DueMissGrace), false
+}
+
+// nextDueAfterMissInWindow is the test seam for the timezone threading: the
+// quiet window's zone is the evaluation zone for the cron walk.
+func nextDueAfterMissInWindow(c dueCandidate, now time.Time) (time.Time, bool) {
+	return nextDueAfterMiss(c, now)
 }
 
 // nextOccurrencePast finds the first occurrence of a series that lies strictly
@@ -837,6 +872,30 @@ func findActiveRecurrenceCover(ctx context.Context, tx DBTX, title, currentID st
 		return "", nil
 	}
 	return coverID, err
+}
+
+// quietWindowReschedule gives the instant a quiet candidate's due_at moves
+// to: the window's next opening edge, or - when the series has ended and
+// that edge would fall past repeat_end - the fire path's own grace fallback,
+// so no path of the sweep ever leaves a past due_at in the past.
+func quietWindowReschedule(c dueCandidate, now time.Time) (time.Time, bool) {
+	w, err := timeparsing.ParseWindow(c.repeatWindow)
+	if err != nil || w.IsZero() {
+		return time.Time{}, false
+	}
+	open, ok := w.NextOpen(now)
+	if !ok {
+		return time.Time{}, false
+	}
+	// The instant is UTC-normalized before it reaches SQL: a zone-local
+	// time.Time serializes as its wall clock against a naive DATETIME
+	// column, which landed a 13:00Z edge back at 09:00 and re-wedged the
+	// very clock this reschedule exists to free (found live 2026-10-30).
+	open = open.UTC()
+	if c.repeatEnd != nil && open.After(*c.repeatEnd) {
+		return now.Add(DueMissGrace), true
+	}
+	return open, true
 }
 
 // repeatWindowQuiet reports whether the recurrence window is quiet at now.

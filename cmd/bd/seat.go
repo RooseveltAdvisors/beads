@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -155,9 +156,17 @@ func init() {
 		if statePath == "" {
 			statePath = strings.TrimSpace(os.Getenv(seats.StateEnv))
 		}
+		if statePath == "" && len(aliases) > 0 {
+			if home, err := os.UserHomeDir(); err == nil && home != "" {
+				statePath = filepath.Join(home, ".local", "state", "beads", aliases[0]+".state")
+			}
+		}
 		endpoint := seats.Endpoint{Session: session, PaneID: pane, AgentSessionID: agent}
 		now := time.Now().UTC()
 		if len(args) > 0 {
+			if seats.IsPaneID(args[0]) {
+				return fmt.Errorf("invalid seat id %q: raw pane IDs cannot be seat identities (use an agent name like 'beads' or 'firstmate')", args[0])
+			}
 			// Operator path: register or rebind an explicitly named seat.
 			// Token-protected (minted) seats refuse it.
 			if err := seats.Update(o.Dir(), func(current seats.Registry) error {
@@ -179,6 +188,30 @@ func init() {
 		case stateErr == nil:
 			if err := seats.Update(o.Dir(), func(current seats.Registry) error {
 				r = current
+				seat, ok := r[st.AgentUUID]
+				if !ok {
+					return fmt.Errorf("state file %s holds seat %s, but that seat is not in the registry: mint a new seat with a fresh state file", statePath, st.AgentUUID)
+				}
+				if len(aliases) > 0 {
+					matched := false
+					for _, req := range aliases {
+						for _, existing := range seat.Aliases {
+							if strings.EqualFold(strings.TrimSpace(req), strings.TrimSpace(existing)) {
+								matched = true
+								break
+							}
+						}
+						if strings.EqualFold(strings.TrimSpace(req), strings.TrimSpace(st.Alias)) {
+							matched = true
+						}
+						if matched {
+							break
+						}
+					}
+					if !matched {
+						return fmt.Errorf("state file %s holds seat %s with aliases %v, which does not match requested alias %q: to mint a new seat, specify a separate --state path; to change aliases, use bd seat rename", statePath, st.AgentUUID, seat.Aliases, aliases[0])
+					}
+				}
 				return r.RebindWithToken(st.AgentUUID, endpoint, st.RebindToken, now)
 			}); err != nil {
 				return err

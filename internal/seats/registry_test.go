@@ -233,3 +233,57 @@ func TestDeleteRefusesLiveAndFreesName(t *testing.T) {
 		t.Error("mint returned the legacy name as the id, want a uuid")
 	}
 }
+
+func TestIsUUIDAndIsPaneID(t *testing.T) {
+	validUUIDs := []string{
+		"b0b9d6a0-6269-4376-a702-28db0143c3da",
+		"487aaefb-cd73-494a-a4c9-dd3b70aa23aa",
+		"04D52B42-FE4F-43A6-BFA6-71C0F6FCC8DD",
+	}
+	for _, u := range validUUIDs {
+		if !IsUUID(u) {
+			t.Errorf("IsUUID(%q) = false, want true", u)
+		}
+	}
+	invalidUUIDs := []string{
+		"wiseman-pjy",
+		"w1:px5",
+		"not-a-uuid",
+		"b0b9d6a0-6269-4376-a702",
+		"",
+	}
+	for _, u := range invalidUUIDs {
+		if IsUUID(u) {
+			t.Errorf("IsUUID(%q) = true, want false", u)
+		}
+	}
+
+	paneIDs := []string{"w1:pX5", "w1:p132", "wYK:p1", "w16N:p2"}
+	for _, p := range paneIDs {
+		if !IsPaneID(p) {
+			t.Errorf("IsPaneID(%q) = false, want true", p)
+		}
+	}
+	nonPaneIDs := []string{"firstmate", "beads", "wiseman-pjy", "quota-axi"}
+	for _, p := range nonPaneIDs {
+		if IsPaneID(p) {
+			t.Errorf("IsPaneID(%q) = true, want false", p)
+		}
+	}
+}
+
+func TestPaneIDRefusedAsSeatIdentityOrAlias(t *testing.T) {
+	r := Registry{}
+	now := time.Now().UTC()
+	endpoint := Endpoint{Session: "wiseman", PaneID: "w1:pX5"}
+
+	// Raw pane ID as seat ID refused
+	if err := r.Register("w1:pX5", []string{"my-seat"}, endpoint, now); err == nil {
+		t.Error("registering raw pane ID as seat ID parsed, want refusal")
+	}
+
+	// Raw pane ID as alias refused
+	if _, _, err := r.Mint([]string{"w1:pX5"}, endpoint, now); err == nil {
+		t.Error("minting with raw pane ID alias parsed, want refusal")
+	}
+}

@@ -124,6 +124,11 @@ Specific Check Mode (--check):
     (stale JSONL, SQLite files, cruft .beads dirs). Use with --clean.
   - conventions: Check for convention drift (lint warnings, stale
     issues, orphaned issues). Advisory only - warns, never blocks.
+  - discipline: Report bead-discipline metrics (claimless in_progress,
+    unresolvable or dead-seat assignees, machine actors as owners,
+    overdue non-recurring, chronic misses, priority inflation,
+    duplicate live titles) with per-finding remediation. Advisory;
+    JSON via --output for THE-FM's monitoring loop.
   - pollution: Detect and optionally clean test issues from database
   - validate: Run focused data-integrity checks (duplicates, orphaned
     deps, test pollution, git conflicts). Use with --fix to auto-repair.
@@ -278,6 +283,8 @@ Examples:
 				return runArtifactsCheck(absPath, doctorClean, doctorYes)
 			case "conventions":
 				return runConventionsCheck(absPath)
+			case "discipline":
+				return runDisciplineCheck(absPath)
 			case "pollution":
 				return runPollutionCheck(absPath, doctorClean, doctorYes)
 			case "validate":
@@ -481,7 +488,7 @@ func printEmbeddedUnsupported(commandLabel string) {
 		"Reinitialize if needed:  bd init --reinit-local",
 		"Switch to server mode:   bd init --server",
 	}
-	supported := []string{"artifacts", "conventions", "pollution"}
+	supported := []string{"artifacts", "conventions", "discipline", "pollution"}
 	unsupported := []string{"validate"}
 
 	if jsonOutput || doctorAgent {

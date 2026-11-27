@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
+	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/beads/internal/metrics"
@@ -191,6 +193,17 @@ To list comments on an issue, use the plural form: bd comments <id>`,
 			IssueIDs: []string{result.ResolvedID},
 		}); err != nil {
 			return HandleErrorRespectJSON("failed to commit: %v", err)
+		}
+
+		// Decay-on-attention (captain order 2026-11-01): a comment is
+		// attention, so an escalated bead gives one priority rung back toward
+		// the P2 baseline. Interaction layer only, real actors only; the
+		// decay is its own journaled update and never fails the comment.
+		if next, decayed := storageissueops.DecayPriorityOnAttention(result.Issue.Priority); decayed && !storageissueops.MachineActorForDecay(author) {
+			decayUpdates := map[string]interface{}{"priority": next}
+			if err := issueStore.UpdateIssue(ctx, result.ResolvedID, decayUpdates, author); err != nil {
+				fmt.Fprintf(os.Stderr, "%s priority decay after comment: %v\n", ui.RenderWarn("!"), err)
+			}
 		}
 
 		pingCommentAssignee(result.Issue.Assignee, result.ResolvedID, result.Issue.Title, author, commentText)

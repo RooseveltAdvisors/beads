@@ -265,6 +265,9 @@ var proxyCapabilityRegistry = []capabilityRow{
 	// rather than waiting for a proxied dual.
 	refusedPath("notify ack", "proxy.notify.local-only", ProxyReasonDesign, ""),
 	refusedPath("notify drain", "proxy.notify.local-only", ProxyReasonDesign, ""),
+	refusedPath("notify holds", "proxy.notify.local-only", ProxyReasonDesign, ""),
+	refusedPath("notify holds list", "proxy.notify.local-only", ProxyReasonDesign, ""),
+	refusedPath("notify holds reap", "proxy.notify.local-only", ProxyReasonDesign, ""),
 	refusedPath("notify pending", "proxy.notify.local-only", ProxyReasonDesign, ""),
 	refusedPath("notify resolve", "proxy.notify.local-only", ProxyReasonDesign, ""),
 	refusedPath("notify seats", "proxy.notify.local-only", ProxyReasonDesign, ""),
@@ -272,6 +275,7 @@ var proxyCapabilityRegistry = []capabilityRow{
 	// who may hold an assignee_id in THIS clone, and the backfill re-keys local
 	// audit rows against it. All seven refuse over the proxy by design.
 	refusedPath("seat backfill", "proxy.seat.local-only", ProxyReasonDesign, ""),
+	refusedPath("misroute", "proxy.misroute.local-only", ProxyReasonDesign, ""),
 	refusedPath("seat import-pins", "proxy.seat.local-only", ProxyReasonDesign, ""),
 	refusedPath("seat list", "proxy.seat.local-only", ProxyReasonDesign, ""),
 	refusedPath("seat delete", "proxy.seat.local-only", ProxyReasonDesign, ""),

@@ -26,7 +26,23 @@ const (
 	Dead  = "dead"
 )
 
-var validID = regexp.MustCompile(`^[a-zA-Z0-9_:\-]+$`)
+var (
+	validID       = regexp.MustCompile(`^[a-zA-Z0-9_:\-]+$`)
+	uuidPattern   = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	paneIDPattern = regexp.MustCompile(`(?i)^w[a-z0-9]+:p[a-z0-9]+$`)
+)
+
+// IsUUID reports whether s matches the 36-character RFC 4122 UUID format.
+func IsUUID(s string) bool {
+	return uuidPattern.MatchString(strings.TrimSpace(s))
+}
+
+// IsPaneID reports whether s is a raw Herdr pane identifier (e.g. w1:pX5).
+// Raw pane IDs must never be used as seat identities or aliases.
+func IsPaneID(s string) bool {
+	s = strings.TrimSpace(s)
+	return paneIDPattern.MatchString(s) || (strings.HasPrefix(s, "w") && strings.Contains(s, ":p"))
+}
 
 // Endpoint is an opaque exact locator, never derived from an alias or ID.
 type Endpoint struct {
@@ -63,6 +79,10 @@ type BackfillRow struct {
 }
 
 func ValidateID(id string) error {
+	id = strings.TrimSpace(id)
+	if IsPaneID(id) {
+		return fmt.Errorf("invalid seat id %q: raw pane IDs cannot be seat identities (use an agent name like 'beads' or 'firstmate')", id)
+	}
 	if !validID.MatchString(id) || strings.EqualFold(id, "unassigned") {
 		return fmt.Errorf("invalid seat id %q: use letters, digits, _, :, or -", id)
 	}
@@ -79,6 +99,9 @@ func (r Registry) Validate() error {
 			key := strings.ToLower(strings.TrimSpace(name))
 			if key == "" || key == "unassigned" {
 				return fmt.Errorf("seat %s has an empty or reserved alias", id)
+			}
+			if IsPaneID(name) {
+				return fmt.Errorf("seat %s has invalid alias %q: raw pane IDs cannot be seat aliases", id, name)
 			}
 			if prev, ok := seen[key]; ok && prev != id {
 				return fmt.Errorf("ambiguous seat name %q belongs to %s and %s", name, prev, id)
@@ -193,12 +216,19 @@ func Save(dir string, r Registry) error {
 // A token-protected seat (one Mint created) refuses this path: rebinding it
 // requires the rebind token from the agent's durable state, so a foreign
 // shell that knows the uuid still cannot take the seat over.
+// endpointHasLocator reports whether the endpoint names at least one exact
+// locator: a session+pane pair, or an agent-session id. Agent-session is the
+// stable routing key; session+pane is a legacy/diagnostic cache.
+func endpointHasLocator(e Endpoint) bool {
+	return (e.Session != "" && e.PaneID != "") || e.AgentSessionID != ""
+}
+
 func (r Registry) Register(id string, aliases []string, endpoint Endpoint, now time.Time) error {
 	if err := ValidateID(id); err != nil {
 		return err
 	}
-	if endpoint.Session == "" || endpoint.PaneID == "" {
-		return fmt.Errorf("registration requires an exact endpoint session and pane id")
+	if !endpointHasLocator(endpoint) {
+		return fmt.Errorf("registration requires an endpoint: session+pane or agent-session id")
 	}
 	old, exists := r[id]
 	if exists && old.TokenSHA256 != "" {
@@ -249,8 +279,8 @@ func mintToken() (string, error) {
 // registry stores only the token hash; the caller persists the token in the
 // agent's durable state and presents it on every re-registration.
 func (r Registry) Mint(aliases []string, endpoint Endpoint, now time.Time) (id string, token string, err error) {
-	if endpoint.Session == "" || endpoint.PaneID == "" {
-		return "", "", fmt.Errorf("registration requires an exact endpoint session and pane id")
+	if !endpointHasLocator(endpoint) {
+		return "", "", fmt.Errorf("registration requires an endpoint: session+pane or agent-session id")
 	}
 	if len(aliases) == 0 {
 		return "", "", fmt.Errorf("mint requires at least one alias (first is the display name)")
@@ -285,8 +315,8 @@ func (r Registry) RebindWithToken(id string, endpoint Endpoint, token string, no
 	if err := ValidateID(id); err != nil {
 		return err
 	}
-	if endpoint.Session == "" || endpoint.PaneID == "" {
-		return fmt.Errorf("registration requires an exact endpoint session and pane id")
+	if !endpointHasLocator(endpoint) {
+		return fmt.Errorf("registration requires an endpoint: session+pane or agent-session id")
 	}
 	old, ok := r[id]
 	if !ok {

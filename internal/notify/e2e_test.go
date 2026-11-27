@@ -70,7 +70,7 @@ func TestE2E_Journey(t *testing.T) {
 			t.Fatalf("CommentPingTitle unexpected format: %q", title)
 		}
 
-		rec, err := outbox.Enqueue("arcs-fm", "wiseman-kr2", KindComment, title)
+		rec, err := outbox.Enqueue("arcs-fm", "wiseman-kr2", KindComment, title, nil)
 		if err != nil {
 			t.Fatalf("Enqueue failed: %v", err)
 		}

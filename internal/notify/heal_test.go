@@ -38,7 +38,7 @@ func TestRebindKeepsUUIDAndMovesPaneAfterRestart(t *testing.T) {
 
 	err = o.Rebind(&state, Instance{
 		Session: "firstmate", PaneID: "w1:pNEW", AgentSessionID: "session-new",
-	}, now.Add(time.Minute))
+	}, now.Add(time.Minute), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,8 +47,12 @@ func TestRebindKeepsUUIDAndMovesPaneAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := r[id]
-	if got.Endpoint.PaneID != "w1:pNEW" || got.Endpoint.AgentSessionID != "session-new" {
-		t.Fatalf("endpoint = %#v, want new pane and session", got.Endpoint)
+	// Endpoint carries agent-session only: pane is derived live, never stored.
+	if got.Endpoint.AgentSessionID != "session-new" {
+		t.Fatalf("endpoint = %#v, want agent-session new", got.Endpoint)
+	}
+	if got.Endpoint.PaneID != "" || got.Endpoint.Session != "" {
+		t.Fatalf("endpoint must not store session/pane: %#v", got.Endpoint)
 	}
 	if len(got.Aliases) != 1 || got.Aliases[0] != "THE-FM" {
 		t.Fatalf("aliases = %#v, want them unchanged", got.Aliases)
@@ -72,11 +76,11 @@ func TestRebindWithoutDurableStateGuessesNothing(t *testing.T) {
 
 	self := Instance{Session: "wiseman", PaneID: "w1:p3G", AgentSessionID: "session-stranger"}
 	// No state at all.
-	if err := o.Rebind(nil, self, now.Add(time.Minute)); err != nil {
+	if err := o.Rebind(nil, self, now.Add(time.Minute), nil); err != nil {
 		t.Fatal(err)
 	}
 	// A state-shaped value with no uuid and no token.
-	if err := o.Rebind(&seats.AgentState{Alias: "wiseman"}, self, now.Add(2*time.Minute)); err != nil {
+	if err := o.Rebind(&seats.AgentState{Alias: "wiseman"}, self, now.Add(2*time.Minute), nil); err != nil {
 		t.Fatal(err)
 	}
 	r, err := seats.Load(o.Dir())
@@ -105,7 +109,7 @@ func TestForeignShellCannotRebindAMintedUUID(t *testing.T) {
 
 	foreign := seats.AgentState{AgentUUID: id, Alias: "wiseman", RebindToken: "not-the-token"}
 	self := Instance{Session: "wiseman", PaneID: "w1:pEVIL", AgentSessionID: "session-evil"}
-	if err := o.Rebind(&foreign, self, now.Add(time.Minute)); err != nil {
+	if err := o.Rebind(&foreign, self, now.Add(time.Minute), nil); err != nil {
 		t.Fatal(err)
 	}
 	r, err := seats.Load(o.Dir())
@@ -163,7 +167,168 @@ func TestHealRewritesPaneWhenSessionFileSurvives(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r["portal-ops"].Endpoint.PaneID != "w1:pNEW" || r["portal-ops"].Liveness != seats.Live {
+	if r["portal-ops"].Endpoint.AgentSessionID == "" || r["portal-ops"].Liveness != seats.Live {
 		t.Fatalf("reconcile endpoint = %#v liveness=%s", r["portal-ops"].Endpoint, r["portal-ops"].Liveness)
+	}
+}
+
+// TestHealRefusesRebindFromDeadProcessEnv is the regression for the
+// 2026-11-06 clobber: a process carrying the wiseman durable state with a
+// dead session file in its env re-asserted a dead endpoint on every bd run,
+// overwriting a healthy rebind 8 minutes after it was written. A rebind whose
+// self does not resolve to a live instance must be skipped.
+func TestHealRefusesRebindFromDeadProcessEnv(t *testing.T) {
+	o, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	id, state := mintTestSeat(t, o, "wiseman", seats.Endpoint{
+		Session: "wiseman", PaneID: "w1:pHEALTHY", AgentSessionID: "live-session",
+	}, now)
+
+	// Live inventory has a different agent; the caller's env claims a dead session.
+	live := []Instance{{
+		Session: "wiseman", PaneID: "w9:p9", AgentSessionID: "other-session",
+	}}
+	self := Instance{
+		Session: "wiseman", PaneID: "w9:p9",
+		AgentSessionID: "dead-nov3-session",
+	}
+	if err := o.Heal(&state, self, live, now.Add(time.Minute), true); err != nil {
+		t.Fatal(err)
+	}
+	r, err := seats.Load(o.Dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := r[id]
+	if got.Endpoint.AgentSessionID != "live-session" {
+		t.Fatalf("dead-env rebind clobbered endpoint: %#v, want live-session preserved", got.Endpoint)
+	}
+	if got.Endpoint.PaneID != "w1:pHEALTHY" {
+		t.Fatalf("endpoint pane changed: %#v, want w1:pHEALTHY", got.Endpoint)
+	}
+}
+
+// The same self when it IS live rebinds normally.
+func TestHealRebindsWhenSelfIsLive(t *testing.T) {
+	o, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	id, state := mintTestSeat(t, o, "wiseman", seats.Endpoint{
+		Session: "wiseman", PaneID: "w1:pOLD", AgentSessionID: "old-session",
+	}, now)
+	live := []Instance{{
+		Session: "wiseman", PaneID: "w1:pNOW", AgentSessionID: "live-session",
+	}}
+	self := Instance{
+		Session: "wiseman", PaneID: "w1:pNOW", AgentSessionID: "live-session",
+	}
+	if err := o.Heal(&state, self, live, now.Add(time.Minute), true); err != nil {
+		t.Fatal(err)
+	}
+	r, err := seats.Load(o.Dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r[id].Endpoint.AgentSessionID != "live-session" {
+		t.Fatalf("live self did not rebind: %#v", r[id].Endpoint)
+	}
+}
+
+// TestHealRefusesToStealLiveEndpoint is the regression test for the 2026-11-08 incident:
+// an agent in another pane whose environment inherited the wiseman state file must not
+// steal the seat's binding while the legitimate registered instance is still live in herdr.
+func TestHealRefusesToStealLiveEndpoint(t *testing.T) {
+	o, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	id, state := mintTestSeat(t, o, "wiseman", seats.Endpoint{
+		Session: "wiseman", PaneID: "w1:pLEGIT", AgentSessionID: "legit-session",
+	}, now)
+
+	// Both the legit owner and a concurrent foreign agent are live in herdr.
+	live := []Instance{
+		{Session: "wiseman", PaneID: "w1:pLEGIT", AgentSessionID: "legit-session"},
+		{Session: "wiseman", PaneID: "w1:pOTHER", AgentSessionID: "other-session"},
+	}
+	// Foreign agent has the state file in its env and calls Heal.
+	self := Instance{Session: "wiseman", PaneID: "w1:pOTHER", AgentSessionID: "other-session"}
+	if err := o.Heal(&state, self, live, now.Add(time.Minute), true); err != nil {
+		t.Fatal(err)
+	}
+	r, err := seats.Load(o.Dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r[id].Endpoint.AgentSessionID != "legit-session" {
+		t.Fatalf("heal stole endpoint from live agent: %#v, want legit-session", r[id].Endpoint)
+	}
+}
+
+// TestHealRefusesToReviveDeadOrUnboundSeat verifies that an unbound or dead seat
+// is never automatically revived by background command healing.
+func TestHealRefusesToReviveDeadOrUnboundSeat(t *testing.T) {
+	o, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	id, state := mintTestSeat(t, o, "wiseman", seats.Endpoint{
+		Session: "wiseman", PaneID: "w1:pLEGIT", AgentSessionID: "legit-session",
+	}, now)
+
+	// Explicitly unbind the seat
+	if err := seats.Update(o.Dir(), func(r seats.Registry) error {
+		seat := r[id]
+		seat.Endpoint = seats.Endpoint{}
+		seat.Liveness = seats.Dead
+		r[id] = seat
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// An agent in another pane runs bd and triggers Heal
+	live := []Instance{{Session: "wiseman", PaneID: "w1:pNEW", AgentSessionID: "new-session"}}
+	self := Instance{Session: "wiseman", PaneID: "w1:pNEW", AgentSessionID: "new-session"}
+	if err := o.Heal(&state, self, live, now.Add(time.Minute), true); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := seats.Load(o.Dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r[id].Endpoint != (seats.Endpoint{}) {
+		t.Fatalf("heal revived dead/unbound endpoint: %#v", r[id].Endpoint)
+	}
+}
+
+// TestAliasMatchesTab verifies tab label normalization and matching against seat aliases.
+func TestAliasMatchesTab(t *testing.T) {
+	aliases := []string{"wiseman", "@wiseman", "dotfiles-keeper"}
+	if !aliasMatchesTab(aliases, "wiseman") {
+		t.Error("expected 'wiseman' to match")
+	}
+	if !aliasMatchesTab(aliases, "WISEMAN") {
+		t.Error("expected 'WISEMAN' to match")
+	}
+	if !aliasMatchesTab(aliases, "dotfiles keeper") {
+		t.Error("expected 'dotfiles keeper' to match 'dotfiles-keeper'")
+	}
+	if aliasMatchesTab(aliases, "portal-inventory") {
+		t.Error("expected 'portal-inventory' NOT to match 'wiseman'")
+	}
+	if aliasMatchesTab(aliases, "portal-qbo") {
+		t.Error("expected 'portal-qbo' NOT to match 'wiseman'")
+	}
+	if aliasMatchesTab(aliases, "beads") {
+		t.Error("expected 'beads' NOT to match 'wiseman'")
 	}
 }

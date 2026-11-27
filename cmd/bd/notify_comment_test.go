@@ -88,7 +88,7 @@ func TestTryDrainCommentPing_NoPinHoldsWithoutHerdr(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := o.Enqueue("wiseman", "fm-c", notify.KindComment, "hello"); err != nil {
+	if _, err := o.Enqueue("wiseman", "fm-c", notify.KindComment, "hello", nil); err != nil {
 		t.Fatal(err)
 	}
 	tryDrainCommentPing(o, "wiseman")
@@ -118,7 +118,7 @@ func TestNotifyDrain_PropagatesExecError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := o.Enqueue("wiseman", "fm-c", notify.KindComment, "hello"); err != nil {
+	if _, err := o.Enqueue("wiseman", "fm-c", notify.KindComment, "hello", nil); err != nil {
 		t.Fatal(err)
 	}
 
