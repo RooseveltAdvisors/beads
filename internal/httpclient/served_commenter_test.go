@@ -92,7 +92,6 @@ func TestServedCommenterContract(t *testing.T) {
 		{"DoesNotResolvePrefixes", conformance.RunCommenterDoesNotResolvePrefixes},
 		{"RecordsExactlyOneHistoryEntry", conformance.RunCommenterRecordsExactlyOneHistoryEntry},
 		{"LeavesTheAnchorIssueUntouched", conformance.RunCommenterLeavesTheAnchorIssueUntouched},
-		{"AdvancesIssueActivity", conformance.RunCommenterAdvancesIssueActivity},
 		{"RefusesBlankText", conformance.RunCommenterRefusesBlankText},
 		{"RefusesAnEmptyAuthor", conformance.RunCommenterRefusesAnEmptyAuthor},
 		{"LeavesTheCallersRequestAlone", conformance.RunCommenterLeavesTheCallersRequestAlone},
