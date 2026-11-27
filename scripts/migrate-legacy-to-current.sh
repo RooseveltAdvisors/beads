@@ -131,15 +131,19 @@ verify_binary_version() {
 
 normalize_export() {
     jq -S -s '
+        def offset_seconds:
+            if . == "Z" then 0
+            else ((.[1:3] | tonumber) * 3600 + (.[4:6] | tonumber) * 60)
+                 * (if startswith("-") then -1 else 1 end)
+            end;
+        # Compare instants at the precision of the destination DATETIME columns.
         def stamp:
-            if type != "string" or (test("\\.[0-9]+Z$") | not) then .
-            else
-                . as $raw
-                | (
-                    (sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601)
-                    + (if ($raw | test("\\.[5-9][0-9]*Z$")) then 1 else 0 end)
-                  )
-                | todateiso8601
+            if type != "string" then . else
+                (capture("^(?<clock>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?:\\.(?<fraction>[0-9]+))?(?<zone>Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])$")
+                 | (.clock + "Z" | fromdateiso8601) as $wall
+                 | $wall - (.zone | offset_seconds)
+                   + (if (.fraction // "" | test("^[5-9]")) then 1 else 0 end)
+                 | todateiso8601) // .
             end;
         def normalize_times:
             reduce ["created_at", "updated_at", "started_at", "closed_at",

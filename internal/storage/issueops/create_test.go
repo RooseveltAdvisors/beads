@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/steveyegge/beads/internal/storage"
@@ -118,6 +119,8 @@ func TestValidateCreateIssuesMixedBucketDependenciesRejectsCrossBucketEdges(t *t
 
 func TestPersistDependenciesHonorsImportedCreatedBy(t *testing.T) {
 	ctx := context.Background()
+	// DATETIME stores a wall clock. The value bound to SQL must already be UTC.
+	imported := time.Date(2025, 1, 1, 0, 15, 12, 123456789, time.FixedZone("UTC+05:30", 5*3600+30*60))
 	db, mock, tx := beginMockTx(t)
 	defer db.Close()
 
@@ -129,6 +132,7 @@ func TestPersistDependenciesHonorsImportedCreatedBy(t *testing.T) {
 			DependsOnID: "target",
 			Type:        types.DepRelated,
 			CreatedBy:   "someone.else",
+			CreatedAt:   imported,
 		}},
 	}
 
@@ -139,7 +143,7 @@ func TestPersistDependenciesHonorsImportedCreatedBy(t *testing.T) {
 		WithArgs("target").
 		WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1))
 	mock.ExpectExec("INSERT INTO dependencies").
-		WithArgs(depid.New("source", "target"), "source", "target", types.DepRelated, "someone.else", sqlmock.AnyArg(), "{}", "").
+		WithArgs(depid.New("source", "target"), "source", "target", types.DepRelated, "someone.else", imported.UTC(), "{}", "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	result, err := PersistDependenciesWithOptionsResult(ctx, tx, []*types.Issue{target, source}, "current.user", storage.BatchCreateOptions{})

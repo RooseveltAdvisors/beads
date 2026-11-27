@@ -42,7 +42,7 @@ printf '%s\n' \
   '    case "$source_db" in /*/sealed-source/.beads/beads.db) ;; *) exit 2 ;; esac' \
   '    test "$source_db" != "$PWD/.beads/beads.db"' \
   '    test -n "$output"' \
-  '    printf "%s\\n" "{\"id\":\"historical-1\",\"title\":\"Historical issue\",\"created_at\":\"2020-01-01T00:00:00.600000000Z\"}" > "$output"' \
+  '    printf "%s\\n" "{\"id\":\"historical-1\",\"title\":\"Historical issue\",\"created_at\":\"2020-01-01T00:00:00.600000000Z\",\"updated_at\":\"2020-01-01T18:29:59.500000000-05:30\",\"due_at\":\"2020-01-03T05:45:12+05:45\"}" > "$output"' \
   "    : > \"$new_legacy_sqlite_reader_marker\"" \
   '    ;;' \
   '  init)' \
@@ -54,7 +54,7 @@ printf '%s\n' \
   '    ;;' \
   '  export)' \
   '    [ "$2" = --all ] && [ "$3" = -o ] && [ -n "${4:-}" ] || exit 2' \
-  '    printf "%s\\n" "{\"id\":\"historical-1\",\"title\":\"Historical issue\",\"created_at\":\"2020-01-01T00:00:01Z\"}" > "$4"' \
+  '    printf "%s\\n" "{\"id\":\"historical-1\",\"title\":\"Historical issue\",\"created_at\":\"2020-01-01T00:00:01Z\",\"updated_at\":\"2020-01-02T00:00:00Z\",\"due_at\":\"2020-01-03T00:00:12Z\"}" > "$4"' \
   '    ;;' \
   '  *) exit 2 ;;' \
   'esac' >"$new"
@@ -162,6 +162,17 @@ test -e "$new_legacy_sqlite_reader_marker" || {
   printf 'direct bridge did not invoke the candidate legacy SQLite reader\n' >&2
   exit 1
 }
+
+# The same wall clock with a different offset is a different instant.
+wrong_time="$tmp/wrong-time-bd"
+sed 's/2020-01-02T00:00:00Z/2020-01-01T18:30:00Z/' "$new" > "$wrong_time"
+chmod +x "$wrong_time"
+if output=$("$BRIDGE" --source "$tmp/sqlite-source" --destination "$tmp/wrong-time-destination" \
+    --source-version v0.49.6 --old-bd "$old" --new-bd "$wrong_time" --prefix hist 2>&1); then
+  printf 'bridge accepted an offset-shifted timestamp\n' >&2
+  exit 1
+fi
+grep -Fq 'candidate data does not semantically match' <<< "$output"
 
 probe_mutator="$tmp/probe-mutator-bd"
 printf '%s\n' \

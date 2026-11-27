@@ -1355,7 +1355,8 @@ func PersistDependenciesWithOptionsResult(ctx context.Context, tx DBTX, issues [
 				return result, fmt.Errorf("invalid dependency %s -> %s: %w", dep.IssueID, dep.DependsOnID, err)
 			}
 
-			createdAt := dep.CreatedAt
+			// The DATETIME column stores a wall clock without an offset.
+			createdAt := dep.CreatedAt.UTC()
 			if createdAt.IsZero() {
 				createdAt = time.Now().UTC()
 			}
