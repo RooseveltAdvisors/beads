@@ -539,6 +539,7 @@ var roleContractCases = []roleContract{
 		RunLifecycleUpdateAppendsNotesWithoutReplacingThem,
 		RunLifecycleUpdateClearsTheNullableMembers,
 		RunLifecycleUpdateReplacesTheLabelSet,
+		RunLifecycleUpdateRemovesLabelsByPrefix,
 		RunLifecycleUpdateResolvesBothPlanesUnlessRestricted,
 		RunLifecycleUpdateRefusesUnknownIDsAndActorlessRequests,
 		RunLifecycleUpdateRefusalWritesNoMemberOfThePatch,
