@@ -55,6 +55,7 @@ var crossPackagePins = []crossPackagePin{
 	{Test: "TestSweepSendsTheS4MembersOnceTheServerAdvertisesThem", File: "internal/httpclient/bulk_roles_test.go"},
 	{Test: "TestCreateRefusesTheGateMembersAgainstAServerWithoutTheToken", File: "internal/httpclient/gate_fields_test.go"},
 	{Test: "TestUpdateRefusesTheGateMembersAgainstAServerWithoutTheToken", File: "internal/httpclient/gate_fields_test.go"},
+	{Test: "TestEveryWireExcludedWriteMemberCarriesALedgerRow", File: "internal/httpclient/write_ledger_test.go"},
 }
 
 // crossPackagePinDirs are the packages a ledger pin may live in. Adding one is

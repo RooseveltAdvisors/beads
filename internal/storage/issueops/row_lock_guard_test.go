@@ -201,6 +201,10 @@ var funcNameExemptions = map[string]string{
 	// token a second time within one transaction for no content change, the
 	// same reason recordVersionAtInTx above leaves it alone.
 	"carryParticipationInTx": "writes only participation_generation on a row the same plane move just inserted with a fresh row_lock in this transaction; reminting would double-bump the token for no content change",
+	// TouchIssueActivityInTx advances updated_at / last_activity so comments
+	// participate in list --sort updated ordering, without reminting row_lock:
+	// RowVersion stays lifecycle/ownership only (CommenterAdd holds the token).
+	"TouchIssueActivityInTx": "comment-driven activity timestamps only; row_lock / RowVersion must hold across a comment",
 }
 
 // TestAllIssueRowWritesStampRowLock is the load-bearing completeness guard for

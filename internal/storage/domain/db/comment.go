@@ -179,8 +179,9 @@ func (r *commentSQLRepositoryImpl) insertRecord(ctx context.Context, comment *ty
 		return nil, fmt.Errorf("db: CommentSQLRepository.InsertRecord: %w", err)
 	}
 	copy.CreatedAt = createdAt
-	// Do not TouchIssueActivityInTx: Commenter / RowVersion contracts require
-	// the anchor issue row to stay untouched across a comment write.
+	if err := issueops.TouchIssueActivityInTx(ctx, r.runner, copy.IssueID, copy.CreatedAt); err != nil {
+		return nil, err
+	}
 
 	if err := issueops.RecordCommentEventInTx(ctx, r.runner, copy.IssueID, &issueops.EventComment{
 		ID: copy.ID, Author: copy.Author, Text: copy.Text, CreatedAt: copy.CreatedAt, Source: issueops.CommentSourceStructured,

@@ -72,18 +72,20 @@ const CommentsKeysetPredicate = `created_at >= ? AND ((created_at > ?) OR (id > 
 // the same transaction as a comment mutation. The max expressions preserve a
 // newer timestamp when an imported or replicated comment is backdated.
 //
+// It deliberately leaves row_lock alone: comments participate in list ordering
+// via updated_at / last_activity (house PR #7), but RowVersion / CAS stays
+// lifecycle-and-ownership only (upstream CommenterAdd holds the token).
+//
 //nolint:gosec // G201: issueTable comes from WispTableRouting (hardcoded constants)
 func TouchIssueActivityInTx(ctx context.Context, tx DBTX, issueID string, at time.Time) error {
 	isWisp := IsActiveWispInTx(ctx, tx, issueID)
 	issueTable, _, _, _ := WispTableRouting(isWisp)
 	stamp := FormatAuxTime(at.UTC())
-	rowLockClause, rowLockArgs := RowLockClause()
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE %s
 		SET updated_at = CASE WHEN updated_at < ? THEN ? ELSE updated_at END,
-			last_activity = CASE WHEN last_activity IS NULL OR last_activity < ? THEN ? ELSE last_activity END,
-			%s
-		WHERE id = ?`, issueTable, rowLockClause), append([]any{stamp, stamp, stamp, stamp}, append(rowLockArgs, issueID)...)...); err != nil {
+			last_activity = CASE WHEN last_activity IS NULL OR last_activity < ? THEN ? ELSE last_activity END
+		WHERE id = ?`, issueTable), stamp, stamp, stamp, stamp, issueID); err != nil {
 		return fmt.Errorf("touch issue activity: %w", err)
 	}
 	return nil
@@ -310,10 +312,11 @@ func addIssueCommentInTx(ctx context.Context, tx DBTX, issueID, author, text str
 		Text:      text,
 		CreatedAt: stored,
 	}
-	// Do not TouchIssueActivityInTx here: the Commenter / RowVersion
-	// contracts require a comment write to leave the anchor issue row
-	// untouched (updated_at and row_lock hold). Activity stays on the
-	// comment and event rows only.
+	if live {
+		if err := TouchIssueActivityInTx(ctx, tx, issueID, stored); err != nil {
+			return nil, err
+		}
+	}
 	if err := RecordCommentEventInTx(ctx, tx, issueID, &EventComment{
 		ID: id, Author: author, Text: text, CreatedAt: stored, Source: CommentSourceStructured,
 	}); err != nil {

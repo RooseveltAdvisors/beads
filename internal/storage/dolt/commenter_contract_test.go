@@ -47,6 +47,9 @@ func TestCommenterContract(t *testing.T) {
 	t.Run("RecordsExactlyOneHistoryEntry", func(t *testing.T) {
 		conformance.RunCommenterRecordsExactlyOneHistoryEntry(t, ctx, fixture)
 	})
+	t.Run("AdvancesIssueActivity", func(t *testing.T) {
+		conformance.RunCommenterAdvancesIssueActivity(t, ctx, fixture)
+	})
 	t.Run("LeavesTheAnchorIssueUntouched", func(t *testing.T) {
 		conformance.RunCommenterLeavesTheAnchorIssueUntouched(t, ctx, fixture)
 	})

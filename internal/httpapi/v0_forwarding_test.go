@@ -48,6 +48,8 @@ type plainV0WriteCase struct {
 var plainV0DeliberatelyZero = map[string]string{
 	"issueops.CreateRequest.IDPrefix":       "a local front door's config.yaml prefix; a remote caller's would override the served workspace's rule (create.go)",
 	"issueops.UpdateRequest.IssuePlaneOnly": "updateIssue resolves across both planes (update.go)",
+	"issueops.UpdateRequest.DueClearReason": "plain /v0 cases clear due_at without the opt-in due.required reason member; dedicated update_test covers forwarding",
+	"issueops.CloseRequest.ForceNoComment":  "plain /v0 close wire publishes no force_no_comment member yet; the role field stays zero on this surface",
 }
 
 // plainV0WriteCases is the table: for each operation, the smallest body it

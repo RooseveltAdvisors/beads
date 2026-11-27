@@ -47,7 +47,7 @@ the behavior.
 
 ## Summary
 
-236 rows: 172 refuse, 34 degrade, 30 retired.
+244 rows: 180 refuse, 34 degrade, 30 retired.
 
 ## Whole-behavior divergences (D9 ledger)
 

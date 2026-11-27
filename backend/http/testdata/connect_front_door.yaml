@@ -374,6 +374,9 @@ commands:
         args: [comments, add, e2e-tcomments, hello there, '--json']
         ignore_fields: [id]
         verify: [[comments, e2e-tcomments, '--json']]
+  - command: bd comments delete
+    class: pending-ruling
+    reason: comment deletion over connect needs a native ruling against the http Commenter delete path
   - command: bd comments list
     cases:
       - id: comments-list
@@ -620,9 +623,6 @@ commands:
         class: works
         args: [dolt, commit, '--json']
         compare: text
-  - command: bd dolt drop-database
-    class: local-only
-    reason: drops a named database on a Dolt sql-server it connects to directly; never run by the matrix
   - command: bd dolt killall
     class: local-only
     reason: manages local dolt sql-server processes; never run by the matrix
@@ -714,6 +714,12 @@ commands:
         exit: 1
         words: 'not using Dolt backend \(configured backend "http"\)'
         embedded_exit: 1
+  - command: bd due backfill
+    class: pending-ruling
+    reason: house due-backfill writes due dates; matrix coverage deferred until the http due surface is ruled
+  - command: bd due sweep
+    class: pending-ruling
+    reason: house due-sweep fires recurrence and notify; matrix coverage deferred until the http due surface is ruled
   - command: bd duplicate
     cases:
       - id: duplicate
@@ -1372,6 +1378,9 @@ commands:
         args: [migrate-personal, '--json']
         exit: 1
         words: a raw SearchIssues call matching neither expressible shape refuses
+  - command: bd misroute
+    class: pending-ruling
+    reason: house misroute files work to the dispatch owner; matrix needs a live owner seat fixture
   - command: bd mol bond
     cases:
       - id: mol-bond
@@ -1483,6 +1492,30 @@ commands:
         args: [note, e2e-tnote, a note, '--json']
         exit: 1
         words: 'operation "UpdateIssue" not supported by the http backend'
+  - command: bd notify ack
+    class: pending-ruling
+    reason: house notify outbox ack; matrix needs herdr/outbox fixtures beyond connect seed
+  - command: bd notify drain
+    class: pending-ruling
+    reason: house notify drain; matrix needs herdr/outbox fixtures beyond connect seed
+  - command: bd notify holds
+    class: pending-ruling
+    reason: house notify holds parent; matrix needs herdr/outbox fixtures beyond connect seed
+  - command: bd notify holds list
+    class: pending-ruling
+    reason: house notify holds list; matrix needs herdr/outbox fixtures beyond connect seed
+  - command: bd notify holds reap
+    class: pending-ruling
+    reason: house notify holds reap; matrix needs herdr/outbox fixtures beyond connect seed
+  - command: bd notify pending
+    class: pending-ruling
+    reason: house notify pending; matrix needs herdr/outbox fixtures beyond connect seed
+  - command: bd notify resolve
+    class: pending-ruling
+    reason: house notify resolve; matrix needs herdr/outbox fixtures beyond connect seed
+  - command: bd notify seats
+    class: pending-ruling
+    reason: house notify seats; matrix needs herdr/outbox fixtures beyond connect seed
   - command: bd notion connect
     class: pending-ruling
     reason: 'tracker integration: it needs a configured Notion database and its network API, which no test lane has, so its behavior over bd connect is unexercised'
@@ -1535,6 +1568,12 @@ commands:
         args: [priority, e2e-tprio, '0', '--json']
         exit: 1
         words: 'operation "UpdateIssue" not supported by the http backend'
+  - command: bd progress check
+    class: pending-ruling
+    reason: house progress check; matrix coverage deferred
+  - command: bd progress stale
+    class: pending-ruling
+    reason: house progress stale; matrix coverage deferred
   - command: bd promote
     cases:
       - id: promote
@@ -1732,6 +1771,30 @@ commands:
       - id: search
         class: works
         args: [search, alpha, '--json']
+  - command: bd seat backfill
+    class: pending-ruling
+    reason: house seat backfill mutates identity columns; matrix coverage deferred
+  - command: bd seat delete
+    class: pending-ruling
+    reason: house seat delete; matrix coverage deferred
+  - command: bd seat import-pins
+    class: pending-ruling
+    reason: house seat import-pins; matrix coverage deferred
+  - command: bd seat list
+    class: pending-ruling
+    reason: house seat list; matrix coverage deferred
+  - command: bd seat reconcile
+    class: pending-ruling
+    reason: house seat reconcile; matrix coverage deferred
+  - command: bd seat register
+    class: pending-ruling
+    reason: house seat register; matrix coverage deferred
+  - command: bd seat rename
+    class: pending-ruling
+    reason: house seat rename; matrix coverage deferred
+  - command: bd seat unbind
+    class: pending-ruling
+    reason: house seat unbind; matrix coverage deferred
   - command: bd send-metrics
     class: local-only
     reason: 'internal: flushes queued telemetry; never run by the matrix'

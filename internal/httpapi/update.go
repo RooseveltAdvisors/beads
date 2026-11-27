@@ -39,7 +39,7 @@ const (
 var (
 	updateRequestMembers = []string{
 		"actor", updateClaimMember, "expected_assignee", "expected_status", "expected_version",
-		"due_clear_reason", "force_assignee_transfer", "force_claim_blocked", "force_close_policy", "force_notes_overwrite", "allow_closed_mutation", "allow_template",
+		"due_clear_reason", "force_assignee_transfer", "force_claim_blocked", "force_close_policy", "force_notes_overwrite", "allow_template",
 		updatePatchMember,
 	}
 	issuePatchMembers = []string{

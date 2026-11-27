@@ -484,7 +484,7 @@ var rowVersionKinds = []rowVersionKind{
 	{
 		name:  "CommenterAdd",
 		roles: []string{"Commenter"},
-		why:   "a comment writes the comment row and its event, never the anchor row (RunCommenterLeavesTheAnchorIssueUntouched)",
+		why:   "a comment may advance updated_at/last_activity for list ordering, but never remints row_lock (RunCommenterLeavesTheAnchorIssueUntouched)",
 		arrange: func(t *testing.T, ctx context.Context, f RowVersionFixture, base string) []rowVersionWatch {
 			rowVersionSeed(t, ctx, f, &types.Issue{ID: base})
 			return []rowVersionWatch{{"anchor", base, rowVersionHolds}}

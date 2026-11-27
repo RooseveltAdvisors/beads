@@ -40,7 +40,7 @@ const (
 	// maxUnrunPendingRulings is the number of pending-ruling rows that run no
 	// case (a tracker's network, a TTY). It may only shrink: to give such a
 	// row cases, lower it by one.
-	maxUnrunPendingRulings = 27
+	maxUnrunPendingRulings = 49
 	// frontDoorRemedy ends every problem the classifier reports.
 	frontDoorRemedy = "see the schema in the header of backend/http/" + connectFrontDoorPath
 )

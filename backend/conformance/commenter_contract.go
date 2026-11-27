@@ -599,6 +599,10 @@ func RunCommenterLeavesTheAnchorIssueUntouched(t *testing.T, ctx context.Context
 	seedCommenterIssue(t, ctx, fixture, anchor)
 
 	before := readCommenterAnchorRow(t, ctx, fixture, anchor)
+	var beforeLock int64
+	if err := fixture.QueryScalar(ctx, `SELECT COALESCE(row_lock, 0) FROM issues WHERE id = ?`, []any{anchor}, &beforeLock); err != nil {
+		t.Fatalf("read row_lock for %s: %v", anchor, err)
+	}
 	// A second comment on the same anchor, because "appends to the thread" is
 	// what the issue row must survive, and the second append is the one that
 	// would tempt a body into touching a comment count on the issue.
@@ -612,20 +616,25 @@ func RunCommenterLeavesTheAnchorIssueUntouched(t *testing.T, ctx context.Context
 		}
 	}
 	after := readCommenterAnchorRow(t, ctx, fixture, anchor)
-
-	if !after.UpdatedAt.Equal(before.UpdatedAt) {
-		t.Errorf("anchor %s updated_at moved %s -> %s across two comments: the column is ON UPDATE CURRENT_TIMESTAMP, so something wrote to the issue row",
-			anchor, before.UpdatedAt.UTC(), after.UpdatedAt.UTC())
+	var afterLock int64
+	if err := fixture.QueryScalar(ctx, `SELECT COALESCE(row_lock, 0) FROM issues WHERE id = ?`, []any{anchor}, &afterLock); err != nil {
+		t.Fatalf("read row_lock for %s after comments: %v", anchor, err)
 	}
+
+	// Activity timestamps may move (list --sort updated; RunCommenterAdvancesIssueActivity).
+	// Lifecycle identity and the RowVersion token must not.
 	if after.Status != before.Status {
 		t.Errorf("anchor %s status went %q -> %q across a comment", anchor, before.Status, after.Status)
 	}
 	if after.Assignee != before.Assignee {
 		t.Errorf("anchor %s assignee went %q -> %q across a comment", anchor, before.Assignee, after.Assignee)
 	}
-	if after.Fingerprint != before.Fingerprint {
-		t.Errorf("anchor %s changed across a comment:\nbefore %s\n after %s\na comment leaves every field of the issue untouched",
-			anchor, before.Fingerprint, after.Fingerprint)
+	if afterLock != beforeLock {
+		t.Errorf("anchor %s row_lock went %d -> %d across a comment; RowVersion must hold", anchor, beforeLock, afterLock)
+	}
+	if after.IdentityFingerprint != before.IdentityFingerprint {
+		t.Errorf("anchor %s identity changed across a comment:\nbefore %s\n after %s",
+			anchor, before.IdentityFingerprint, after.IdentityFingerprint)
 	}
 	// The append itself has to have happened, or every equality above is a
 	// statement about a call that did nothing.
@@ -852,14 +861,16 @@ func readCommenterThreadTexts(t *testing.T, ctx context.Context, fixture Comment
 	return texts
 }
 
-// commenterAnchorRow is the issues row a comment must not disturb: three
-// columns named so a failure reads as "the assignee moved" rather than as a
-// diff of two long strings, plus the wide fingerprint that catches the rest.
+// commenterAnchorRow is the issues row a comment may touch only for activity
+// timestamps: status/assignee stay named so a failure reads clearly, UpdatedAt
+// feeds AdvancesIssueActivity, and IdentityFingerprint excludes updated_at /
+// last_activity so LeavesTheAnchor can ignore the intentional activity bump.
 type commenterAnchorRow struct {
-	Status      string
-	Assignee    string
-	UpdatedAt   time.Time
-	Fingerprint string
+	Status              string
+	Assignee            string
+	UpdatedAt           time.Time
+	Fingerprint         string // legacy alias: same as IdentityFingerprint
+	IdentityFingerprint string
 }
 
 // readCommenterAnchorRow reads the anchor's row through the fixture's own SQL
@@ -871,22 +882,24 @@ type commenterAnchorRow struct {
 // column list can be wide without the case growing a scan destination per
 // column. CONCAT_WS skips NULL arguments, so a column going NULL -> ” still
 // moves the string (the separator count changes) — the one shape that would
-// otherwise slip past.
+// otherwise slip past. updated_at and last_activity are omitted: comments
+// advance those on purpose without changing identity or RowVersion.
 func readCommenterAnchorRow(t *testing.T, ctx context.Context, fixture CommenterFixture, issueID string) commenterAnchorRow {
 	t.Helper()
 	const query = `SELECT status, COALESCE(assignee, ''), updated_at,
 		CONCAT_WS('|', content_hash, title, description, design, acceptance_criteria, notes,
 			status, priority, issue_type, assignee, estimated_minutes,
-			created_at, created_by, owner, updated_at, closed_at, closed_by_session,
+			created_at, created_by, owner, closed_at, closed_by_session,
 			external_ref, spec_id, sender, ephemeral, wisp_type, pinned, is_template,
 			mol_type, work_type, source_system, source_repo, close_reason, is_blocked,
 			due_at, defer_until)
 		FROM issues WHERE id = ?`
 	var row commenterAnchorRow
 	if err := fixture.QueryScalar(ctx, query, []any{issueID},
-		&row.Status, &row.Assignee, &row.UpdatedAt, &row.Fingerprint); err != nil {
+		&row.Status, &row.Assignee, &row.UpdatedAt, &row.IdentityFingerprint); err != nil {
 		t.Fatalf("read the anchor row %s: %v", issueID, err)
 	}
+	row.Fingerprint = row.IdentityFingerprint
 	return row
 }
 
