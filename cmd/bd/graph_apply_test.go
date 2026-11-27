@@ -1682,6 +1682,8 @@ func TestGraphApplyNodeCarriesDueSource(t *testing.T) {
 	}
 	if bare.DueSource != "" {
 		t.Errorf("due_source = %q on a node that declared none, want empty", bare.DueSource)
+	}
+}
 
 // TestGraphApplyNodeIssueStampsCreatedAtWithStatusTimestamps pins GH#7519:
 // when graphApplyNodeIssue stamps a node's status timestamp from its one
