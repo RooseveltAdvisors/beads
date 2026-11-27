@@ -22,11 +22,13 @@ import (
 	publicops "github.com/steveyegge/beads/issueops"
 )
 
-// expectSerialDeleteCommentEnv is internal/storage/dolt's reproduction
-// switch, read here too: with it set to 1 the journal-off cases assert the
-// serial outcome and fail on the characterized server. See
+// expectFKDeleteCommentEnv pins the pre-activity-touch 1105 (HY000)
+// characterization on journal-off races. Comment activity now writes the
+// issues row (TouchIssueActivityInTx), so the default assertion is the
+// serial-after-retry outcome. Set this to 1 only when measuring a build
+// that no longer updates issues on comment. See
 // engdocs/design/dolt-concurrency.md, "Guarded delete racing a comment".
-const expectSerialDeleteCommentEnv = "BEADS_TEST_EXPECT_SERIAL_DELETE_COMMENT"
+const expectFKDeleteCommentEnv = "BEADS_TEST_EXPECT_FK_DELETE_COMMENT"
 
 // uowRaceSettingsProbe is what the gate reads on each racing session at its
 // commit point.
@@ -277,10 +279,19 @@ func TestUOWDeleteCommentRaceCharacterization(t *testing.T) {
 					t.Errorf("journal-on loser attempts = %d, want a retry", ev.Loser.Attempts)
 				}
 				assertUOWSerialDeleteCommentRace(t, rc.loser, ev)
-			case os.Getenv(expectSerialDeleteCommentEnv) == "1":
-				assertUOWSerialDeleteCommentRace(t, rc.loser, ev)
-			default:
+			case os.Getenv(expectFKDeleteCommentEnv) == "1":
+				// Pin the pre-activity-touch 1105 characterization when
+				// debugging a build that no longer updates the issues row
+				// on comment (see engdocs/design/dolt-concurrency.md).
 				assertUOWCurrentDeleteCommentRace(t, rc.loser, ev)
+			default:
+				// TouchIssueActivityInTx writes the issues row on comment,
+				// so both sides conflict there and the loser retries into
+				// the serial outcome (same shape as journal-on-control).
+				if ev.Loser.Attempts < 2 {
+					t.Errorf("activity-touch loser attempts = %d, want a retry", ev.Loser.Attempts)
+				}
+				assertUOWSerialDeleteCommentRace(t, rc.loser, ev)
 			}
 		})
 	}

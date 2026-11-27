@@ -1,5 +1,5 @@
 {
-  "recorded_from": "c49350cf5+fm-repair-beads-cadence",
+  "recorded_from": "23a6a546e+fm-repair-beads-cadence",
   "steps": [
     "create a",
     "create b blocked by a",
@@ -322,7 +322,7 @@
         "repeat_window"
       ],
       "rows": 12,
-      "sha256": "3162b2ce478156de3f71b1a815efc55a60da50d533d17688aa7ceaf83a17a2f6"
+      "sha256": "3278dca9355755c809093116a0a02cd365e3ad573116d56f3441190ac0b969b8"
     },
     "labels": {
       "columns": [
@@ -539,7 +539,7 @@
         "is_blocked"
       ],
       "rows": 7,
-      "sha256": "9abb67b29b56040f6ff185590757279dc56e1ec4397af5a93973d9bcc008dc6e"
+      "sha256": "6116338978c7f48ed1cb47006283e64033994da9856c8c240731d198300c5e33"
     }
   }
 }

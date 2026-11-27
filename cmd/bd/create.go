@@ -405,6 +405,9 @@ var createCmd = &cobra.Command{
 			// create it previews would and in its words, and one with no
 			// metadata.json the create would refuse to initialize
 			// (refuseUninitializableTarget). Neither check writes.
+			// Fall through afterward so the duplicate check and --repo
+			// lookup below still run: returning the preview here skipped
+			// both (create.dedup-check, DryRunUnopenableRepoWarns).
 			if err := checkRepoTargetForOpen(repoPath); err != nil {
 				return handleRepoTargetInitError(routing.ExpandPath(repoPath), err)
 			}
@@ -412,7 +415,6 @@ var createCmd = &cobra.Command{
 			if targetBeadsDir, err := checkRepoTargetInitializable(repoPath, allowCreate); err != nil {
 				return handleRepoTargetInitError(targetBeadsDir, err)
 			}
-			return renderDryRun()
 		}
 
 		var targetStore storage.DoltStorage

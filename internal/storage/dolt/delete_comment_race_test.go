@@ -19,12 +19,13 @@ import (
 	publicops "github.com/steveyegge/beads/issueops"
 )
 
-// expectSerialDeleteCommentEnv switches the delete/comment race tests from
-// asserting the characterized current outcome to asserting the outcome a
-// serial execution would give. It is a reproduction mode, never a gate: on
-// the server these tests were characterized against it FAILS, by design.
-// See engdocs/design/dolt-concurrency.md, "Guarded delete racing a comment".
-const expectSerialDeleteCommentEnv = "BEADS_TEST_EXPECT_SERIAL_DELETE_COMMENT"
+// expectFKDeleteCommentEnv pins the pre-activity-touch 1105 (HY000)
+// characterization on journal-off races. Comment activity now writes the
+// issues row (TouchIssueActivityInTx), so the default assertion is the
+// serial-after-retry outcome. Set this to 1 only when measuring a build
+// that no longer updates issues on comment. See
+// engdocs/design/dolt-concurrency.md, "Guarded delete racing a comment".
+const expectFKDeleteCommentEnv = "BEADS_TEST_EXPECT_FK_DELETE_COMMENT"
 
 // raceSettingsProbe is what the gate reads on each racing session at its
 // commit point: the settings the characterization depends on, read from the
@@ -274,12 +275,11 @@ func requireRaceIntegrity(t *testing.T, ev raceEvidence) {
 // DOLT_COMMIT" is not executable on this path: the case still runs, and its
 // evidence records the commit kind the commenter really used.
 //
-// Every case logs one evidence line. By default the journal-off cases then
-// assert the characterized current outcome (see
-// assertCurrentDeleteCommentRace); with
-// BEADS_TEST_EXPECT_SERIAL_DELETE_COMMENT=1 they assert the serial outcome
-// instead and fail on the characterized server. The journal-on and serial
-// control cases assert the serial outcome either way.
+// Every case logs one evidence line. By default the journal-off cases assert
+// the serial-after-retry outcome (comment activity touches the issues row);
+// BEADS_TEST_EXPECT_FK_DELETE_COMMENT=1 pins the older 1105 characterization
+// instead. The journal-on and serial control cases assert the serial outcome
+// either way.
 func TestGuardedDeleteCommentRaceCharacterization(t *testing.T) {
 	store, cleanup := setupConcurrentTestStore(t)
 	defer cleanup()
@@ -393,10 +393,19 @@ func TestGuardedDeleteCommentRaceCharacterization(t *testing.T) {
 					t.Errorf("journal-on loser attempts = %d, want a retry", ev.Loser.Attempts)
 				}
 				assertSerialDeleteCommentRace(t, rc.loser, ev)
-			case os.Getenv(expectSerialDeleteCommentEnv) == "1":
-				assertSerialDeleteCommentRace(t, rc.loser, ev)
-			default:
+			case os.Getenv(expectFKDeleteCommentEnv) == "1":
+				// Pin the pre-activity-touch 1105 characterization when
+				// debugging a build that no longer updates the issues row
+				// on comment (see engdocs/design/dolt-concurrency.md).
 				assertCurrentDeleteCommentRace(t, rc.loser, ev)
+			default:
+				// TouchIssueActivityInTx writes the issues row on comment,
+				// so both sides conflict there and the loser retries into
+				// the serial outcome (same shape as journal-on-control).
+				if ev.Loser.Attempts < 2 {
+					t.Errorf("activity-touch loser attempts = %d, want a retry", ev.Loser.Attempts)
+				}
+				assertSerialDeleteCommentRace(t, rc.loser, ev)
 			}
 		})
 	}

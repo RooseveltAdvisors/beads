@@ -78,14 +78,14 @@ var uncoveredRequestFields = map[string]string{
 	"issueops.UpdateItem.ForceAssigneeTransfer":   waiveBatchItem,
 	"issueops.UpdateItem.ForceNotesOverwrite":     waiveBatchItem,
 	"issueops.WaitsFor.Gate":                      waiveCreateEdge,
-	"issueops.CloseBatchRequest.ForceNoComment": "no RunBatchCloser* case stands the comment.progress_required gate down yet",
-	"issueops.CloseRequest.ForceNoComment":      "no RunLifecycleClose* case stands the comment.progress_required gate down yet",
-	"issueops.IssuePatch.RepeatEnd":             "no RunLifecycleUpdate* case sets recurrence bounds yet; cmd/bd recurrence tests cover them",
-	"issueops.IssuePatch.RepeatPattern":         "no RunLifecycleUpdate* case sets recurrence bounds yet; cmd/bd recurrence tests cover them",
-	"issueops.IssuePatch.RepeatStart":           "no RunLifecycleUpdate* case sets recurrence bounds yet; cmd/bd recurrence tests cover them",
-	"issueops.IssuePatch.RepeatWindow":          "no RunLifecycleUpdate* case sets recurrence bounds yet; cmd/bd recurrence tests cover them",
-	"issueops.UpdateItem.DueClearReason":        "no RunBatchApply* case clears due_at with a reason yet",
-	"issueops.UpdateRequest.DueClearReason":     "no RunLifecycleUpdate* case clears due_at with a reason yet; storage due_required tests cover it",
+	"issueops.CloseBatchRequest.ForceNoComment":   "no RunBatchCloser* case stands the comment.progress_required gate down yet",
+	"issueops.CloseRequest.ForceNoComment":        "no RunLifecycleClose* case stands the comment.progress_required gate down yet",
+	"issueops.IssuePatch.RepeatEnd":               "no RunLifecycleUpdate* case sets recurrence bounds yet; cmd/bd recurrence tests cover them",
+	"issueops.IssuePatch.RepeatPattern":           "no RunLifecycleUpdate* case sets recurrence bounds yet; cmd/bd recurrence tests cover them",
+	"issueops.IssuePatch.RepeatStart":             "no RunLifecycleUpdate* case sets recurrence bounds yet; cmd/bd recurrence tests cover them",
+	"issueops.IssuePatch.RepeatWindow":            "no RunLifecycleUpdate* case sets recurrence bounds yet; cmd/bd recurrence tests cover them",
+	"issueops.UpdateItem.DueClearReason":          "no RunBatchApply* case clears due_at with a reason yet",
+	"issueops.UpdateRequest.DueClearReason":       "no RunLifecycleUpdate* case clears due_at with a reason yet; storage due_required tests cover it",
 }
 
 // TestEveryRoleRequestFieldHasAContractCase is the field-level sibling of

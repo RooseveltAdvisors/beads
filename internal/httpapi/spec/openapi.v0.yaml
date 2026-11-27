@@ -9304,7 +9304,7 @@ components:
             `issues.update.dueClearReason`, which announces that
             `PATCH /v0/beads/issues/{id}` accepts `due_clear_reason` (see
             `UpdateIssueRequest`) rather than a `400` naming the member
-            unknown. One behavior token is and             `issues.list.search`, which announces that
+            unknown, and `issues.list.search`, which announces that
             `GET /v0/beads/issues` accepts `q`, `bd search`'s free text (see
             that parameter), rather than silently answering
             `unknown_parameter`, `issues.list.noAssignee`,
