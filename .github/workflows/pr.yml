@@ -886,7 +886,7 @@ jobs:
   # succeeded), so a failure in one leg does not stop the later legs from
   # running - the fail-fast: false behavior the matrix used to give for free.
   #
-  # Blacksmith Windows (blacksmith-4vcpu-windows-2025) for every PR and merge
+  # Blacksmith Windows (windows-latest) for every PR and merge
   # group. No leg installs from the network on the common path: Chocolatey's
   # 503s, MSYS2's slow mirrors and a DNS failure failed this job 28 times in
   # two weeks of October 2026, 8 of them merge-queue ejections.
@@ -916,7 +916,7 @@ jobs:
     name: Windows Make shell (native, msys2, cygwin)
     needs: scope
     if: ${{ needs.scope.outputs.platforms == 'true' }}
-    runs-on: ${{ 'blacksmith-4vcpu-windows-2025' }}
+    runs-on: ${{ 'windows-latest' }}
     # Above the step caps' sum (34) plus 5 minutes for the uncapped steps, so
     # a fallback that runs to its cap fails its own step and the later legs
     # still run (TestWindowsMakeShellNetworkFallbacksAreBoundedAndRetried).

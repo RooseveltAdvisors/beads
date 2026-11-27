@@ -1128,7 +1128,11 @@ esac
 							entries[f] = "x\n"
 						}
 					}
-					out, outputs, _, err := run(t, entries, map[string]string{name: "/etc/passwd"}, listed)
+					// Relative target: macOS unzip refuses absolute links
+					// like /etc/passwd (Permission denied) and leaves no
+					// entry, so the workflow would report found=false
+					// instead of "is not a regular file".
+					out, outputs, _, err := run(t, entries, map[string]string{name: "../escape"}, listed)
 					if err == nil || strings.Contains(outputs, "found=true") || !strings.Contains(out, "is not a regular file") {
 						t.Errorf("err=%v outputs=%q\n%s", err, outputs, out)
 					}

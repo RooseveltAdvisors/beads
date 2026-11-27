@@ -232,7 +232,7 @@ jobs:
   windows-make-shell-toolchains:
     name: Warm Windows Make shell toolchain caches
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'gastownhall/beads'
-    runs-on: ${{ 'blacksmith-4vcpu-windows-2025' }}
+    runs-on: ${{ 'windows-latest' }}
     # Above the step caps' sum (32) plus 5 minutes for the uncapped steps,
     # like pr.yml's windows-make-shell.
     timeout-minutes: 40
