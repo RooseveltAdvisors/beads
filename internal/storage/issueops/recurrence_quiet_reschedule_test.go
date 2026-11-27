@@ -58,7 +58,7 @@ func TestQuietSweepReschedulesToWindowEdge(t *testing.T) {
 		WithArgs(open, sqlmock.AnyArg(), sqlmock.AnyArg(), "fm-quiet", past, "open", "in_progress").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	if _, _, err := sweepDueBeadsInTable(context.Background(), tx, "issues", "events", []types.Status{types.StatusOpen, types.StatusInProgress}); err != nil {
+	if _, err := sweepDueBeadsInTable(context.Background(), tx, "issues", "events", []types.Status{types.StatusOpen, types.StatusInProgress}); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

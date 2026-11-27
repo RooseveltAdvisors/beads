@@ -125,23 +125,10 @@ func (s *DoltStore) runScheduledSweeps(ctx context.Context) {
 	if !deferWakeSweepEligible(s.readOnly, s.classifiedRead) {
 		return
 	}
-	err := s.withCircuitWrite(ctx, func(ctx context.Context) error {
-		return s.runIssueOperationTxWithMessage(ctx, func(tx *sql.Tx) (issueops.ChangedTables, string, error) {
-			woke, err := issueops.WakeExpiredDefersInTx(ctx, tx)
-			if err != nil {
-				return nil, "", err
-			}
-			if len(woke.Issues) == 0 {
-				// Wisp-only wakes persist with the SQL commit but mint no
-				// version commit: wisp tables are dolt_ignored.
-				return nil, "", nil
-			}
-			tables := issueops.ChangedTables{}
-			tables.Add("issues", "events")
-			return tables, issueops.WakeDefersCommitMessage(len(woke.Issues)), nil
-		})
-	})
-	if err != nil && !errors.Is(err, ErrCircuitOpen) && !errors.Is(err, ErrStoreClosed) {
+	// Same pass as RunScheduledSweeps (due_sweep.go): defer wake + due trigger.
+	// Result discarded — ready listings are advisory; bd due sweep reports.
+	if _, err := s.RunScheduledSweeps(ctx); err != nil &&
+		!errors.Is(err, ErrCircuitOpen) && !errors.Is(err, ErrStoreClosed) && !errors.Is(err, ErrReadOnly) {
 		warnDeferWakeSweepSkipped(err)
 	}
 }

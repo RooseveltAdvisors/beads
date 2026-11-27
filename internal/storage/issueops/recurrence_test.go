@@ -382,6 +382,62 @@ func TestAnchorRecurrenceUpdateRecordsTheSeriesStart(t *testing.T) {
 	}
 }
 
+func TestRealignCoupledRepeatStartMovesAlignedSeries(t *testing.T) {
+	start := at(2026, time.November, 16, 14)
+	old := &types.Issue{
+		RepeatPattern: "0 14 * * 1",
+		RepeatStart:   &start,
+		DueAt:         &start,
+	}
+	newDue := at(2026, time.November, 30, 14)
+	updates := map[string]interface{}{"due_at": newDue}
+	if err := RealignCoupledRepeatStart(old, updates); err != nil {
+		t.Fatalf("RealignCoupledRepeatStart: %v", err)
+	}
+	got, _ := updates["repeat_start"].(time.Time)
+	if !got.Equal(newDue.UTC()) {
+		t.Fatalf("repeat_start = %v, want coupled move to %v", got, newDue.UTC())
+	}
+}
+
+func TestRealignCoupledRepeatStartKeepsIndependentBounds(t *testing.T) {
+	start := at(2026, time.November, 16, 22)
+	due := at(2026, time.November, 16, 14)
+	old := &types.Issue{
+		RepeatPattern: "0 14 * * 1",
+		RepeatStart:   &start,
+		DueAt:         &due,
+	}
+	newDue := at(2026, time.November, 30, 14)
+	updates := map[string]interface{}{"due_at": newDue}
+	if err := RealignCoupledRepeatStart(old, updates); err != nil {
+		t.Fatalf("RealignCoupledRepeatStart: %v", err)
+	}
+	if _, set := updates["repeat_start"]; set {
+		t.Fatalf("independent start must stay; got %v", updates["repeat_start"])
+	}
+}
+
+func TestRealignCoupledRepeatStartRejectsDueBeforeStart(t *testing.T) {
+	start := at(2026, time.November, 30, 14)
+	due := at(2026, time.December, 7, 14)
+	old := &types.Issue{
+		RepeatPattern: "0 14 * * 1",
+		RepeatStart:   &start,
+		DueAt:         &due,
+	}
+	tooEarly := at(2026, time.November, 16, 14)
+	updates := map[string]interface{}{"due_at": tooEarly}
+	if err := RealignCoupledRepeatStart(old, updates); err == nil {
+		t.Fatal("want error for due before independent start")
+	}
+	// Explicit --repeat-start in the same update opts out of the refusal.
+	updates = map[string]interface{}{"due_at": tooEarly, "repeat_start": tooEarly}
+	if err := RealignCoupledRepeatStart(old, updates); err != nil {
+		t.Fatalf("explicit start correction must pass: %v", err)
+	}
+}
+
 // The update funnel validates the triple it would LAND, not the one field it
 // was handed, and stopping a series clears its bounds along with the pattern.
 func TestValidateRecurrenceUpdateChecksTheMergedTriple(t *testing.T) {

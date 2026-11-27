@@ -453,6 +453,9 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 		return nil, err
 	}
 	AnchorRecurrenceUpdate(oldIssue, updates)
+	if err := RealignCoupledRepeatStart(oldIssue, updates); err != nil {
+		return nil, err
+	}
 	if err := ValidateRecurrenceUpdate(oldIssue, updates); err != nil {
 		return nil, err
 	}
@@ -547,7 +550,7 @@ func updateIssueInTx(ctx context.Context, tx DBTX, id string, updates map[string
 		newData, _ := json.Marshal(updates)
 		eventType := DetermineEventType(oldIssue, updates)
 
-		if err := RecordFullEventWithCommentInTable(ctx, tx, eventTable, id, eventType, actor, string(oldData), string(newData), dueClearReason); err != nil {
+		if err := RecordFullEventWithCommentInTable(ctx, tx, eventTable, id, eventType, actor, oldData, string(newData), dueClearReason); err != nil {
 			return nil, fmt.Errorf("failed to record event: %w", err)
 		}
 	}

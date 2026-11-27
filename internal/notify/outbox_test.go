@@ -129,6 +129,40 @@ func TestOutboxEnqueueUniqueSkipsUnackedDuplicate(t *testing.T) {
 	}
 }
 
+func TestOutboxEnqueueUniqueOccurrenceNoReplay(t *testing.T) {
+	beads := filepath.Join(t.TempDir(), ".beads")
+	if err := os.MkdirAll(beads, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	o, err := openRegisteredTestOutbox(t, beads)
+	if err != nil {
+		t.Fatal(err)
+	}
+	occ := "2026-11-23T14:00:00Z"
+	_, added, err := o.EnqueueUniqueOccurrence("alice", "fm-1", KindDue, "wake", nil, occ)
+	if err != nil || !added {
+		t.Fatalf("first occurrence: added=%v err=%v", added, err)
+	}
+	pending, err := o.Pending("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.AckSeat("alice", pending[len(pending)-1].Seq); err != nil {
+		t.Fatal(err)
+	}
+	_, added, err = o.EnqueueUniqueOccurrence("alice", "fm-1", KindDue, "wake", nil, occ)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added {
+		t.Fatal("same occurrence must not re-enqueue after ack")
+	}
+	_, added, err = o.EnqueueUniqueOccurrence("alice", "fm-1", KindDue, "wake", nil, "2026-11-30T14:00:00Z")
+	if err != nil || !added {
+		t.Fatalf("next occurrence must enqueue: added=%v err=%v", added, err)
+	}
+}
+
 func TestOutboxPendingIsExactSeat(t *testing.T) {
 	beads := filepath.Join(t.TempDir(), ".beads")
 	if err := os.MkdirAll(beads, 0o755); err != nil {

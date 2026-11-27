@@ -58,6 +58,9 @@ type dueSweepReport struct {
 	// assignee becomes "unassigned". Publishers fan out per seat so the
 	// assignee field is the routing key, not a decoration.
 	ByAssignee []dueSweepSeat `json:"by_assignee,omitempty"`
+	// Fires carries occurrence timestamps for this sweep's due ids so the
+	// outbox can dedupe by occurrence across restart recovery.
+	Fires []issueops.DueFire `json:"-"`
 }
 
 // Summary is the one line an external clock publishes. It names both sweeps
@@ -138,6 +141,7 @@ Examples:
 			DefersWoken:    len(swept.Defers.Issues),
 			DeferIDs:       swept.Defers.Issues,
 			DeferWisps:     len(swept.Defers.Wisps),
+			Fires:          swept.Due.Fires,
 		}
 		// Seat routing is part of the sweep payload, not a publisher-side
 		// re-query. Assignees are looked up once here so every rail sees the
@@ -150,8 +154,11 @@ Examples:
 		report.Summary = report.summaryLine()
 		// Beads-owned delivery: enqueue seat-addressed outbox rows so drains
 		// do not depend on firstmate or herdr. Failure here is logged inside
-		// enqueueDueSweepNotifies and never fails the clock.
+		// enqueueDueSweepNotifies and never fails the clock. Recovery also
+		// publishes due events that a ready-path sweep already advanced
+		// without enqueueing (one occurrence, one notification).
 		enqueueDueSweepNotifies(report)
+		recoverDueNotifiesFromEvents()
 		// Same tick: quiet assigned in_progress without close → stale-claim wakes
 		// (educational bd close playbook). skip ids already due/escalated this pass.
 		skip := append(append([]string{}, report.DueIDs...), report.EscalatedIDs...)
