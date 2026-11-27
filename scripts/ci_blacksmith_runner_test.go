@@ -653,7 +653,7 @@ func TestBazelRBERunnerOutsideGastownhall(t *testing.T) {
 			if owner.upstream && e.blacksmith {
 				want = "blacksmith-2vcpu-ubuntu-2404"
 			}
-			if got := mustEvalGHRunsOn(t, runsOn, ctx); got != want {
+			if got := mustEvalGHRunsOn(t, runsOn.String(), ctx); got != want {
 				t.Errorf("%s in %s (owner id %s): rbe runs-on %q, want %q", e.name, owner.repo, owner.id, got, want)
 			}
 		}
