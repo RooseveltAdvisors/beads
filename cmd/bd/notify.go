@@ -1010,7 +1010,7 @@ func loadOrCreateDueRecoverCutover(path string) (time.Time, bool, error) {
 		return time.Time{}, false, err
 	}
 	now := time.Now().UTC().Truncate(time.Second)
-	if writeErr := os.WriteFile(path, []byte(now.Format(time.RFC3339)+"\n"), 0o644); writeErr != nil {
+	if writeErr := os.WriteFile(path, []byte(now.Format(time.RFC3339)+"\n"), 0o600); writeErr != nil {
 		return time.Time{}, false, writeErr
 	}
 	return now, true, nil
