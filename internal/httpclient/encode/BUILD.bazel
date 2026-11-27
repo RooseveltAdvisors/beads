@@ -44,6 +44,7 @@ go_test(
         "//internal/httpapi/spec:openapi.v0.yaml",
         "//internal/httpclient:bulk_roles_test.go",
         "//internal/httpclient:gate_fields_test.go",
+        "//internal/httpclient:write_ledger_test.go",
     ] + glob(["*.go"]),
     embed = [":encode"],
     deps = [

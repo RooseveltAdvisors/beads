@@ -392,6 +392,7 @@ exports_files(
     [
         "bulk_roles_test.go",
         "gate_fields_test.go",
+        "write_ledger_test.go",
     ],
     visibility = ["//internal/httpclient/encode:__pkg__"],
 )
