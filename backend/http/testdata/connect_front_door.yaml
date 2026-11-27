@@ -623,6 +623,14 @@ commands:
         class: works
         args: [dolt, commit, '--json']
         compare: text
+  - command: bd dolt drop-database
+    cases:
+      - id: dolt-drop-database
+        class: refuses
+        args: [dolt, drop-database, fd_unused_db, '--json']
+        exit: 1
+        words: 'not using Dolt backend \(configured backend "http"\)'
+        embedded_exit: 1
   - command: bd dolt killall
     class: local-only
     reason: manages local dolt sql-server processes; never run by the matrix
