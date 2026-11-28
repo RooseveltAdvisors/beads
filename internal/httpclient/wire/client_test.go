@@ -103,7 +103,8 @@ func TestRedirectsAreRefusedRatherThanFollowed(t *testing.T) {
 			t.Cleanup(elsewhere.Close)
 
 			creds := &staticToken{tokens: []string{"secret-token"}}
-			c, rec := newTestClient(t, Options{}, creds, func(w http.ResponseWriter, _ *http.Request) {
+			// Use loopback so the redirect target can observe a mistaken follow.
+			c, rec := newTestClient(t, Options{HTTPClient: elsewhere.Client()}, creds, func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Location", elsewhere.URL+"/login?token=leaked")
 				w.WriteHeader(status)
 			})

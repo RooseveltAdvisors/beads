@@ -68,18 +68,21 @@ func (r *recorder) at(t *testing.T, i int) recorded {
 func newTestClient(t *testing.T, opts Options, creds CredentialProvider, h http.HandlerFunc) (*Client, *recorder) {
 	t.Helper()
 	rec := &recorder{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec.add(r)
 		h(w, r)
 	}))
-	t.Cleanup(srv.Close)
+	if opts.HTTPClient == nil {
+		// The in-memory network keeps unrelated loopback requests out of rec.
+		opts.HTTPClient = srv.Client()
+	} else {
+		// A caller-supplied client needs a loopback address for its transport.
+		srv.Start()
+	}
 
 	base, err := url.Parse(srv.URL)
 	if err != nil {
 		t.Fatalf("parse test server URL: %v", err)
-	}
-	if opts.HTTPClient == nil {
-		opts.HTTPClient = srv.Client()
 	}
 	c, err := New(base, creds, opts)
 	if err != nil {
