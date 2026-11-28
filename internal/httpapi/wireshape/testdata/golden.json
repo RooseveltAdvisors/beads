@@ -4908,6 +4908,12 @@
     },
     {
       "schema": "ReclaimIssuesRequest",
+      "member": "dry_run",
+      "type": "boolean",
+      "required": false
+    },
+    {
+      "schema": "ReclaimIssuesRequest",
       "member": "exclude_labels",
       "type": "array",
       "required": false,
@@ -4940,6 +4946,12 @@
       "type": "number",
       "format": "double",
       "required": false
+    },
+    {
+      "schema": "ReclaimIssuesResult",
+      "member": "dry_run",
+      "type": "boolean",
+      "required": true
     },
     {
       "schema": "ReclaimIssuesResult",
