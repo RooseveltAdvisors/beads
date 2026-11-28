@@ -3,10 +3,12 @@ package issueops
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/steveyegge/beads/internal/config"
+	"github.com/steveyegge/beads/internal/remedy"
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/types"
 )
@@ -99,12 +101,20 @@ func ValidateCommentProgressForClose(ctx context.Context, tx DBTX, issueID, reas
 		return nil
 	}
 
+	// The id goes into the printed command as a shell word, so a stored id
+	// that is not a plain word cannot run when the refusal is pasted
+	// (remedy.CommandArg); the prose above the command keeps the id as the
+	// store holds it. The command carries no literal backticks: a pasted
+	// backtick is a command substitution of its own, which is the other half
+	// of the same rule (TestRemedyCensusBacktickedRemedies), and upstream
+	// prints its own bd-command hints the same way (validation/issue.go).
+	idArg, idNote := remedy.CommandArg(runtime.GOOS, issueID, "<issue-id>")
 	if anchor != nil {
-		return fmt.Errorf("%w: comment.progress_required: issue %s (assignee %q) has no progress comment since work started at %s — run `bd comment %s \"…\"` or pass --reason on close, or --force-no-comment --reason \"…\"",
-			storage.ErrValidation, issueID, issue.Assignee, anchor.Format(time.RFC3339), issueID)
+		return fmt.Errorf("%w: comment.progress_required: issue %s (assignee %q) has no progress comment since work started at %s — run bd comment "+idArg+" \"…\" or pass --reason on close, or --force-no-comment --reason \"…\"%s",
+			storage.ErrValidation, issueID, issue.Assignee, anchor.Format(time.RFC3339), idNote)
 	}
-	return fmt.Errorf("%w: comment.progress_required: issue %s (assignee %q) has no progress comments — run `bd comment %s \"…\"` or pass --reason on close, or --force-no-comment --reason \"…\"",
-		storage.ErrValidation, issueID, issue.Assignee, issueID)
+	return fmt.Errorf("%w: comment.progress_required: issue %s (assignee %q) has no progress comments — run bd comment "+idArg+" \"…\" or pass --reason on close, or --force-no-comment --reason \"…\"%s",
+		storage.ErrValidation, issueID, issue.Assignee, idNote)
 }
 
 func reasonCountsAsProgress(reason string) bool {

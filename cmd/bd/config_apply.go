@@ -171,6 +171,16 @@ func remoteURLMatchesConfig(currentURL, configuredURL string) bool {
 
 // applyHooks reinstalls git hooks if drift was detected.
 func applyHooks(drifted bool, dryRun bool) ApplyResult {
+	// Checked before the drift flag: a repository that manages its own hooks
+	// is reported as such, never as "up to date" and never repaired.
+	if !config.HooksManaged("") {
+		return ApplyResult{
+			Check:   "hooks",
+			Action:  "none",
+			Status:  applyStatusSkipped,
+			Message: hooksNotManagedDriftMessage,
+		}
+	}
 	if !drifted {
 		return ApplyResult{
 			Check:   "hooks",
@@ -279,6 +289,17 @@ func applyRemote(drifted bool, dryRun bool) ApplyResult {
 			Action:  "configure",
 			Status:  applyStatusSkipped,
 			Message: "federation.remote is not set in config",
+		}
+	}
+	// A committed config.yaml can set federation.remote, and the Dolt remote
+	// added from it is what every later push and pull dials.
+	if err := checkRemoteNotOption("federation.remote", federationRemote); err != nil {
+		return ApplyResult{
+			Check:   "remote",
+			Action:  "configure",
+			Status:  applyStatusError,
+			Message: "federation.remote is not a usable remote URL",
+			Error:   err.Error(),
 		}
 	}
 

@@ -63,8 +63,11 @@ type Record struct {
 	// Priority is the bead's P0-P4 rung at enqueue time, so a recipient
 	// can triage the wake without opening the thread (captain order
 	// 2026-11-02). Zero-value on legacy rows: rendered as absent.
-	Priority  *int   `json:"priority,omitempty"`
-	CreatedAt string `json:"created_at"`
+	Priority *int `json:"priority,omitempty"`
+	// Occurrence is the due_at that fired (RFC3339), the durable key for
+	// one-occurrence/one-notification. Empty on legacy and non-due rows.
+	Occurrence string `json:"occurrence,omitempty"`
+	CreatedAt  string `json:"created_at"`
 }
 
 // Outbox is the workspace-local notify ledger.
@@ -98,12 +101,20 @@ func (o *Outbox) Enqueue(seat, issueID string, kind Kind, title string, priority
 		return Record{}, lockErr
 	}
 	defer release()
-	return o.enqueueLocked(seat, issueID, kind, title, priority)
+	return o.enqueueLocked(seat, issueID, kind, title, priority, "")
 }
 
 // EnqueueUnique appends a row unless an unacked row already exists for the
 // same seat, issue, and kind. Returns false when the existing row is kept.
 func (o *Outbox) EnqueueUnique(seat, issueID string, kind Kind, title string, priority *int) (Record, bool, error) {
+	return o.EnqueueUniqueOccurrence(seat, issueID, kind, title, priority, "")
+}
+
+// EnqueueUniqueOccurrence is EnqueueUnique with a durable occurrence key.
+// When occurrence is non-empty, any historical row (acked or not) with the
+// same issue, kind, and occurrence suppresses a duplicate — one occurrence,
+// one notification, including across restart recovery.
+func (o *Outbox) EnqueueUniqueOccurrence(seat, issueID string, kind Kind, title string, priority *int, occurrence string) (Record, bool, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	release, lockErr := seats.LockFile(filepath.Join(o.dir, "outbox.lock"))
@@ -131,17 +142,25 @@ func (o *Outbox) EnqueueUnique(seat, issueID string, kind Kind, title string, pr
 	if kind == "" {
 		kind = KindDue
 	}
+	issueID = strings.TrimSpace(issueID)
+	occurrence = strings.TrimSpace(occurrence)
 	for _, rec := range all {
-		if strings.EqualFold(rec.Seat, key) && rec.IssueID == strings.TrimSpace(issueID) &&
-			rec.Kind == kind && rec.Seq > acks[strings.ToLower(rec.Seat)] {
+		if rec.IssueID != issueID || rec.Kind != kind {
+			continue
+		}
+		if occurrence != "" && rec.Occurrence == occurrence {
+			return rec, false, nil
+		}
+		if occurrence == "" && strings.EqualFold(rec.Seat, key) &&
+			rec.Seq > acks[strings.ToLower(rec.Seat)] {
 			return rec, false, nil
 		}
 	}
-	rec, err := o.enqueueLocked(seat, issueID, kind, title, priority)
+	rec, err := o.enqueueLocked(seat, issueID, kind, title, priority, occurrence)
 	return rec, err == nil, err
 }
 
-func (o *Outbox) enqueueLocked(seat, issueID string, kind Kind, title string, priority *int) (Record, error) {
+func (o *Outbox) enqueueLocked(seat, issueID string, kind Kind, title string, priority *int, occurrence string) (Record, error) {
 	var resolveErr error
 	if strings.TrimSpace(seat) == "" {
 		seat = UnassignedSeat
@@ -168,13 +187,14 @@ func (o *Outbox) enqueueLocked(seat, issueID string, kind Kind, title string, pr
 		return Record{}, err
 	}
 	rec := Record{
-		Seq:       seq,
-		Seat:      seat,
-		IssueID:   issueID,
-		Kind:      kind,
-		Title:     strings.TrimSpace(title),
-		Priority:  priority,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		Seq:        seq,
+		Seat:       seat,
+		IssueID:    issueID,
+		Kind:       kind,
+		Title:      strings.TrimSpace(title),
+		Priority:   priority,
+		Occurrence: strings.TrimSpace(occurrence),
+		CreatedAt:  time.Now().UTC().Format(time.RFC3339),
 	}
 	line, err := json.Marshal(rec)
 	if err != nil {

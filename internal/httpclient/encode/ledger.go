@@ -438,7 +438,7 @@ func designRows() []Row {
 			What: "issueops.Deleter.Delete over http refuses an absent id as issueops.ErrNotFound, not as *NotFoundError naming WHICH ids did not resolve",
 			Why: "the role's error is a typo report and names every missing id; the wire deliberately does not repeat them (internal/httpapi's NotFound() carries a FIXED detail, so a 404 body cannot echo caller input back). " +
 				"The refusal still FAILS the request and still deletes NOTHING — not even the ids beside the typo — so the all-or-nothing promise is intact and only the classification is coarser. " +
-				"It is stated at the ROLE rather than at a command because `bd delete` is not reachable against an http workspace at all (see httpUnconsumedCapabilities); the embedder holding the role is the audience. Upstream ask: an ids extension member on the not_found problem, which retires this row",
+				"It is stated at the ROLE rather than at a command because `bd delete` resolves every id in its front door before it calls the role, and names the missing ones itself (cmd/bd/delete.go); the embedder holding the role is the audience. Upstream ask: an ids extension member on the not_found problem, which retires this row",
 			SpecRow:  "D8 row 13",
 			PinnedBy: pinnedByS3Conformance,
 		},
@@ -453,7 +453,7 @@ func designRows() []Row {
 		{
 			ID: "L-delete-bound", Kind: KindRefuse,
 			What:    "issueops.Deleter.Delete refuses a request naming more than 1000 ids, citing the wire bound; it is never split across requests",
-			Why:     "maxDeleteIDs = 1000 (internal/httpapi/delete.go). Splitting is the one path that silently breaks the request's one-transaction, one-history-entry contract — and it would ask the dependents guard about half a request at a time, so a pair the caller deliberately listed together would be refused as an outside dependent. Naive forwarding at least fails loudly. Stated at the ROLE: `bd delete` cannot reach an http workspace, so the embedder is the audience",
+			Why:     "maxDeleteIDs = 1000 (internal/httpapi/delete.go). Splitting is the one path that silently breaks the request's one-transaction, one-history-entry contract — and it would ask the dependents guard about half a request at a time, so a pair the caller deliberately listed together would be refused as an outside dependent. Naive forwarding at least fails loudly. Stated at the ROLE, which `bd delete` reaches over an http workspace too: a CLI delete of more than 1000 ids refuses the same way",
 			SpecRow: "D8 row 13, D9 L16 (the same argument, on the other bulk write)",
 			// The boundary itself, both sides: exactly maxDeleteIDs serves, one
 			// more refuses, and the refusal never dials.
@@ -680,6 +680,15 @@ func writeSideRows() []Row {
 				"The multi-id refusal the wire attaches to it is deliberately NOT anticipated client-side: distinctness is measured after trimming and collapsing duplicates, which is the normalization this role sends its ids verbatim to avoid re-implementing",
 			SpecRow:  updateSpec,
 			PinnedBy: pinnedByS3Conformance,
+		},
+		{
+			ID: "W-DeleteRequest.Cascade", Kind: KindRefuse, Capability: "issues.delete.containmentCascade",
+			What: "a cascade delete, its dry-run preview included, refuses against a server that does not advertise issues.delete.containmentCascade",
+			Why: "deleteIssues publishes `cascade` on every server, but what it deletes changed (GH#6301): a server that advertises issues.delete.containmentCascade deletes the named rows' parent-child descendants and orphans every other dependent, while an older one deletes every transitive dependent, whatever the edge type, and previews that same wider set. " +
+				"The member is the same on both, so a request cannot say which cascade it means. The client reads the handshake and refuses a cascade BEFORE the dial with the typed capability error naming the token, rather than send one that would delete, or preview, rows the caller was told survive. A delete without cascade means the same thing on both servers and is sent unchanged. " +
+				"It is a LATE refusal, not a wire gap: the member is carried (W-CreateRequest.Gates is the precedent), so the row is not field-shaped",
+			SpecRow:  "D8 row 13 refuse-not-drop",
+			PinnedBy: "TestDeleteCascadeRefusesAServerWithoutContainmentCascade",
 		},
 		{
 			ID: "W-ReopenRequest.Provenance", Kind: KindRefuse,
@@ -974,42 +983,41 @@ func writeSideRows() []Row {
 		{
 			ID: "W-IssuePatch.Labels", Kind: KindRetired,
 			Type: tyIssuePatch, Field: "Labels",
-			What: "RETIRED — the whole ordered label edit crosses: `labels` replaces, `add_labels` adds, `remove_labels` removes",
+			What: "RETIRED — the whole ordered label edit crosses: `labels` replaces, `remove_label_prefixes` drops by literal prefix (behind issues.update.labelPrefixes, refused before the dial against a server without it), `add_labels` adds, `remove_labels` removes",
 			Why: "upstream #5510 published add_labels and remove_labels on IssuePatchBody and client wave ga-jpywb emits both, which is the retirement path this row named. " +
-				"The three travel as FLAT siblings where applyBatch nests them under one object, and the server assembles all three into ONE issueops.LabelPatch — so the algebra the role states (replace, then add, then remove; removal wins) is applied server-side and is never this client's to arrange. " +
+				"The three travel as FLAT siblings where applyBatch nests them under one object, and the server assembles all three into ONE issueops.LabelPatch — so the algebra the role states (replace, then the prefix drop, then add, then remove; removal wins) is applied server-side and is never this client's to arrange. " +
 				"WHAT THE REFUSAL WAS PROTECTING is worth keeping after the refusal is gone: degrading an incremental edit onto the replace-only member would have meant reading the set, adding to it and writing it back, which silently drops any label another writer added in between. `bd label add` and every agent that tags work concurrently are exactly that caller, so the refusal was right for as long as the members did not exist — and it is the members that retire it, not a change of mind about the read-modify-write",
 			SpecRow:  "D8 refuse-not-drop, open questions (tracked-refusal roadmap)",
 			PinnedBy: pinnedByS3Conformance,
 		},
 		{
-			// The CONFIG-WRITE population, from client wave ga-jpywb, and it has
+			// The CONFIG-WRITE population, from client wave ga-jpywb, and it had
 			// exactly one row. Both verbs map member for member — a key in the
 			// path, a value in the body, nothing else — so nothing refuses on
-			// shape; what diverges is a pair of EDGE BOUNDS the wire applies
-			// and no local leg does.
-			ID: "L-config-bounds", Kind: KindDegrade,
-			What: "a setting VALUE past types.MaxTextBytes bytes, and a setting KEY past types.MaxFieldLen characters on the WRITE, are refused with issueops.ErrValidation naming the member; on a local leg the same request reaches the column and fails with the engine's own `too large for column` error, which is no sentinel at all",
-			Why: "the bound belongs to the OPERATION rather than to the role: internal/httpapi's settingWriteKey and settingValue check both before the role is called, because a request the caller could have fixed should be a 400 naming the member rather than the 500 a column overflow would otherwise produce. workapi.ValidateSettingWrite — the rule every leg shares — applies no length bound at all, so below the wire the column is the only check there is. " +
-				"MEASURED, not inferred: a 65536-byte value answers `400 invalid_argument: \\`value\\` is 65536 bytes; storage holds at most 65535` over http and `Error 1105: string ... is too large for column 'value'` on the embedded leg, and a 306-character key splits the same way. Exactly 65535 bytes is accepted on both. " +
-				"THIS CLIENT RESTATES NEITHER BOUND, and that is the decision this row records. They are the SERVER's policy on a value whose shape the role accepted, one release away from moving, so a second copy here would either drift or refuse a request a newer server would take — the same argument L-comment-author makes about the author rule, and the same posture. What travels back is the operation's own 400, which the problem mapper turns into ErrValidation. " +
-				"IT IS A DEGRADE RATHER THAN A REFUSE because the ordinary path PROCEEDS and because the divergence runs in the CALLER'S FAVOR: over http an oversized write is a typed, member-named refusal that wrote nothing, where a local leg hands back a driver error no caller can classify. What a caller loses is nothing; what a caller must not assume is that a value a local workspace stored will store here. " +
-				"THE TWO BOUNDS ARE NOT SYMMETRIC ACROSS THE VERBS, and the asymmetry is the operation's: DELETE checks only that the key names something, so removing a 306-character key succeeds over http exactly as it does locally. Upstream ask: the length rules moving onto the shared validator, which retires this row by making the two legs one",
-			SpecRow:  "D8 row 11, D9",
+			// shape. What diverged was a pair of EDGE BOUNDS the wire applied and
+			// no local leg did, until the bounds moved onto the role.
+			ID: "L-config-bounds", Kind: KindRetired,
+			What: "RETIRED — a setting VALUE past types.MaxTextBytes bytes, and a setting KEY past types.MaxFieldLen characters on the WRITE, used to be refused with issueops.ErrValidation over http and to reach the column on a local leg",
+			Why: "retired by the upstream ask the row itself filed: \"the length rules moving onto the shared validator, which retires this row by making the two legs one\". Both bounds moved onto workapi.ValidateSettingWrite, the rule every leg's WorkspaceConfig body calls, so a local leg now refuses the same write with the same issueops.ErrValidation (carrying types.ErrFieldTooLong beside it) instead of the engine's `too large for column` driver error. " +
+				"WHAT IT BUYS beyond the classification is that the bound no longer depends on the column: a backend whose config.key and config.value are unbounded text would otherwise have had the operation's edge check as its ONLY bound, and every non-HTTP write through the role would have stored an arbitrarily large value. " +
+				"THE CLIENT NOW RESTATES BOTH, for the reason it restates every other role rule: they are the role's and no longer one server release away from moving, and a request the role calls invalid must not spend a round trip to be told so. internal/httpapi's settingWriteKey and settingValue still check both at the edge first, so an older client still gets the member-named 400. " +
+				"THE ASYMMETRY ACROSS THE VERBS STANDS and is now the role's on every leg: the bound is on the WRITE, and a removal of an over-long key compares and stores nothing, so it succeeds everywhere",
+			SpecRow:  "D8 row 11, D9 (RETIRED)",
 			PinnedBy: pinnedByS3Conformance,
 		},
 		{
-			// The UPDATE-BOUNDS row, and L-config-bounds' sibling one operation
-			// over. It is not the same row because the two are not the same
-			// situation: there the role applies no length rule at all and the
-			// column is the only check below the wire, HERE THE ROLE APPLIES THE
-			// SAME RULE with the same constant — so what is lost is a sentinel
+			// The UPDATE-BOUNDS row, and the retired L-config-bounds' sibling one
+			// operation over. It is not the same row because the two were not the
+			// same situation: there the role applied no length rule at all and
+			// the column was the only check below the wire, HERE THE ROLE APPLIES
+			// THE SAME RULE with the same constant — so what is lost is a sentinel
 			// rather than a bound.
 			ID: "L-update-fieldlen", Kind: KindDegrade,
 			What: "an updateIssue patch member past types.MaxFieldLen characters — a label on any of the three label members, `title`, `external_ref` — is refused with issueops.ErrValidation naming the member; on a local leg the same request answers types.ErrFieldTooLong",
 			Why: "the bound is applied TWICE and identically: internal/httpapi/update.go checks types.CheckFieldLen at the edge before the role is called, and internal/storage/issueops applies the same function below it. So this is a classification divergence and not a policy one — a value one leg stores the other stores, and a value one leg refuses the other refuses. " +
 				"WHAT COARSENS IT is the spelling: the operation refuses with `invalid_argument` and reason `invalid_value` (internal/httpapi's refuse on the patch member), which is the SAME pair a malformed status, an unparseable timestamp or any other bad value on the same member earns. Nothing on the wire tells them apart, so reconstructing ErrFieldTooLong from the pair would misclassify every other refusal of that member — the argument L-create-prefix makes about the id, on the patch. " +
 				"MEASURED, not inferred: a 256-character label answers `400 invalid_argument: \\`add_labels[0]\\` is 256 characters; storage holds at most 255` over http and ErrFieldTooLong through the reference store's own Lifecycle role, and exactly 255 characters is accepted on both. " +
-				"THIS CLIENT RESTATES THE BOUND NOWHERE, and the reason differs from L-config-bounds': not that the rule is the server's to move, but that a second copy of a rule two layers already apply is a third place for it to drift. What travels back is the operation's own 400. " +
+				"THIS CLIENT RESTATES THE BOUND NOWHERE, and the reason differs from the retired L-config-bounds': not that the rule is the server's to move, but that a second copy of a rule two layers already apply is a third place for it to drift. What travels back is the operation's own 400. " +
 				"IT IS A DEGRADE RATHER THAN A REFUSE because the path PROCEEDS and the outcome is identical on both legs — the request fails, the row is untouched, and no truncated value is stored — while the detail names the offending member and its length, which is the recovery a caller needs. What is lost is the errors.Is arm a caller writes to tell 'too long' from 'malformed'. Upstream ask: a `too_long` reason, or a code of its own, which retires this row",
 			SpecRow:  "D8 row 16, D9",
 			PinnedBy: pinnedByS3Conformance,
@@ -1045,6 +1053,15 @@ func writeSideRows() []Row {
 			Why:      "batchCloseIssues publishes actor, force, items and session only — no claim_next member exists for this client to encode a ReadyRequest into, and none exists on the response for a claimed issue to decode back out of. Dropping the field silently would answer a caller's claim-after-close with a close that quietly never claimed anything; see W-CreateBatchRequest.Provenance for the same refuse-not-drop reasoning applied to an absent wire member. Deferred: S13 schedules ReadyLister (and with it, the ready-side plumbing a composed claim would need); no slice currently schedules claim_next itself",
 			SpecRow:  "D8 refuse-not-drop",
 			PinnedBy: pinnedByS3Conformance,
+		},
+		{
+			ID: "W-SweepRequest.RetainIDs", Kind: KindRetired,
+			Type: tySweepRequest, Field: "RetainIDs",
+			What: "retiring the ids a sweep deletes used to refuse",
+			Why: "RETIRED by the wire extension that sends it. The local Sweeper role writes a permanent tombstone for every id it deletes, and apigen.SweepRequest had no retain_ids member, so a dropped RetainIDs would have run the sweep and left every swept id reusable. " +
+				"The spec now publishes `retain_ids` on the request and its echo on the response behind issues.sweep.retainIds, a token that also promises every create on that server refuses a retired id with 410 idempotency_expired. The client sends it only once the handshake advertises the token and refuses locally, before the dial, when it does not (refuseUnservedSweep)",
+			SpecRow:  "D8 refuse-not-drop",
+			PinnedBy: "TestSweepRefusesTheS4MembersWhenTheServerLacksTheCapability",
 		},
 		{
 			ID: "W-SweepRequest.ProtectLiveDependents", Kind: KindRetired,
@@ -1132,6 +1149,20 @@ func commandRows() []Row {
 		}
 		return Row{ID: id, Kind: KindRefuse, Command: command, Flag: flag, What: what, Why: why, SpecRow: "D7", PinnedBy: pinned}
 	}
+	// The three --ttl rows are one refusal on three commands, pinned where it
+	// is raised: the test drives the real cobra commands against a remote
+	// store and requires the refusal before any role is reached. operation is
+	// the wire operation that would have carried the length.
+	leaseTTLRow := func(id, command, what, operation string) Row {
+		return Row{
+			ID: id, Kind: KindRefuse, Command: command, Flag: "--ttl",
+			What: what,
+			Why: "the lease is granted in the server process and " + operation + " has no member for its length: locally the length rides a context value (internal/storage/issueops WithLeaseTTL), which does not cross the wire. " +
+				"Sending the request without it would grant the server's default lease to a worker that asked for a longer one, and `bd reclaim` would take the claim away while that worker still holds it",
+			SpecRow:  "D7",
+			PinnedBy: "TestLeaseTTLIsRefusedOnTheRemoteBackendRoute",
+		}
+	}
 	return []Row{
 		row("F-ready-explain", "ready", "--explain", "`bd ready --explain` refuses",
 			"it dispatches onto raw GetBlockedIssues/GetIssuesByIDs/GetDependencyCounts/DetectCycles, three of which are on the unsupported allowlist"),
@@ -1147,6 +1178,9 @@ func commandRows() []Row {
 			"showIssueChildren's --json marshals the full GetDependentsWithMetadata rows, the same collectDependents shallow projection as --refs, so created_at/assignee/description come back zeroed over http. `bd children` is NOT this flag: it is a `bd list --parent` listing, served through the reader role (S6c)"),
 		row("F-mol-ready", "mol ready", "", "`bd mol ready` refuses",
 			"it is the same runMolReadyGatedCore body as `bd ready --gated`"),
+		leaseTTLRow("F-update-ttl", "update", "`bd update --claim --ttl` refuses", "claimIssue"),
+		leaseTTLRow("F-ready-ttl", "ready", "`bd ready --claim --ttl` refuses", "claimNextIssue"),
+		leaseTTLRow("F-heartbeat-ttl", "heartbeat", "`bd heartbeat --ttl` refuses", "heartbeatIssue"),
 		{
 			ID: "F-blocked", Kind: KindRetired, Command: "blocked",
 			What:    "RETIRED — `bd blocked` is SERVED whole",

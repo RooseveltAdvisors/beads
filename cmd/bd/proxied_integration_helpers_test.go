@@ -49,14 +49,12 @@ func requireSocat(t *testing.T) {
 	}
 }
 
+// bdProxiedEnv is bdEnv's proxied twin and filters the same way
+// (filterAmbientEnv): an inherited BD_* var must not reshape the output these
+// tests assert on, while a BD_* the suite itself set stays. The two fixed
+// BD_/BEADS_ values below are re-added below.
 func bdProxiedEnv(dir string) []string {
-	var env []string
-	for _, e := range os.Environ() {
-		if strings.HasPrefix(e, "BEADS_") {
-			continue
-		}
-		env = append(env, e)
-	}
+	env := filterAmbientEnv(os.Environ())
 	return append(env,
 		"HOME="+dir,
 		"BEADS_DOLT_PROXIED_SERVER=1",
@@ -499,8 +497,9 @@ func openProxiedDB(t *testing.T, p proxiedProject) *sql.DB {
 		t.Fatalf("read proxy pidfile %s: %v (pf=%v)", p.proxyRoot, err, pf)
 	}
 
-	dsn := fmt.Sprintf("root:@tcp(127.0.0.1:%d)/%s?multiStatements=true&parseTime=true",
-		pf.Port, p.database)
+	proxy.RegisterDataAddress(p.proxyRoot, proxy.Endpoint{Host: "127.0.0.1", Port: pf.Port})
+	dsn := fmt.Sprintf("root:@%s(127.0.0.1:%d)/%s?multiStatements=true&parseTime=true",
+		proxy.DataNetwork, pf.Port, p.database)
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		t.Fatalf("sql.Open mysql %s: %v", dsn, err)

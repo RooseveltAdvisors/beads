@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/steveyegge/beads/internal/audit"
 	"github.com/steveyegge/beads/internal/debug"
 	"github.com/steveyegge/beads/internal/metrics"
+	"github.com/steveyegge/beads/internal/remedy"
 	"github.com/steveyegge/beads/internal/storage"
 	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
 	"github.com/steveyegge/beads/internal/timeparsing"
@@ -49,19 +49,24 @@ type commandUpdateMutation struct {
 	// backend's default, which is what the direct route wants; the proxied
 	// route spells the message it has always written.
 	provenance string
+	// leaseTTL is --ttl: the length of the lease a claim arms, or 0 for the
+	// store's default. It rides the context (withLeaseTTL), which reaches the
+	// lease code on every route this function serves.
+	leaseTTL time.Duration
 }
 
 // runCommandUpdateMutation maps a command update into its lifecycle request and
 // returns the lifecycle result unchanged. It is the ONE place the command's
 // flag semantics become a request — in particular the one --force that means
-// three overrides, whose assignee half only applies to an assignee edit and
-// whose notes half only applies to a notes edit. The assignee half is never
+// four overrides, whose assignee half only applies to an assignee edit, whose
+// notes half only applies to a notes edit, and whose blocked-claim half only
+// applies to a claim. The assignee half is never
 // set alongside --if-assignee (ExpectedAssignee): the contract rejects that
 // combination outright. The notes half carries no such restriction — it is
 // deliberately independent of ExpectedAssignee — so --force paired with
 // --if-assignee still drives the notes and close-policy halves.
 func runCommandUpdateMutation(ctx context.Context, updater commandIssueUpdater, mutation commandUpdateMutation) (issueops.UpdateResult, error) {
-	return updater.Update(ctx, issueops.UpdateRequest{
+	return updater.Update(withLeaseTTL(ctx, mutation.leaseTTL), issueops.UpdateRequest{
 		Actor:                 mutation.actor,
 		IssueID:               mutation.issueID,
 		Patch:                 mutation.patch,
@@ -70,6 +75,7 @@ func runCommandUpdateMutation(ctx context.Context, updater commandIssueUpdater, 
 		ForceClosePolicy:      mutation.force,
 		ForceNotesOverwrite:   mutation.force && mutation.patch.Notes.Set,
 		DueClearReason:        mutation.dueClearReason,
+		ForceClaimBlocked:     mutation.force && mutation.claim,
 		ExpectedAssignee:      mutation.expectedAssignee,
 		ExpectedStatus:        mutation.expectedStatus,
 		ExpectedVersion:       mutation.expectedVersion,
@@ -128,6 +134,15 @@ pointless).`,
 			return HandleErrorRespectJSON("%s", err)
 		}
 
+		// --ttl is decided above the route dispatch, so both routes refuse
+		// the same misuse before anything is read or written. The proxied
+		// route reads the validated value back in gatherUpdateInput.
+		claimForTTL, _ := cmd.Flags().GetBool("claim")
+		leaseTTL, err := leaseTTLFromFlags(cmd, "--claim", claimForTTL)
+		if err != nil {
+			return err
+		}
+
 		if usesProxiedServer() {
 			return runUpdateProxiedServer(cmd, rootCtx, args)
 		}
@@ -148,9 +163,11 @@ pointless).`,
 		// to open (matches the help text's "show in bd ready immediately").
 		var clearDeferStatus bool
 		// explicitSession: --session was typed (rather than inherited from
-		// CLAUDE_SESSION_ID), so omitting it on a store that cannot carry it
-		// is said out loud (remote_backend.go).
+		// the environment), so omitting it on a store that cannot carry it
+		// is said out loud (remote_backend.go). sessionEnvVar names the
+		// variable an inherited session came from, for that same notice.
 		var explicitSession bool
+		var sessionEnvVar string
 
 		if cmd.Flags().Changed("status") {
 			status, _ := cmd.Flags().GetString("status")
@@ -178,7 +195,7 @@ pointless).`,
 				session, _ := cmd.Flags().GetString("session")
 				explicitSession = session != ""
 				if session == "" {
-					session = os.Getenv("CLAUDE_SESSION_ID")
+					session, sessionEnvVar = ambientSession()
 				}
 				if session != "" {
 					updates["closed_by_session"] = session
@@ -211,7 +228,7 @@ pointless).`,
 			if strings.TrimSpace(reason) == "" {
 				return HandleErrorRespectJSON("reassigning an assignee requires --reason: say why the owner changed")
 			}
-			updates["assignee"] = assignee
+			updates["assignee"] = normalizeAssigneeInput(assignee)
 		}
 		description, descChanged, err := getDescriptionFlag(cmd)
 		if err != nil {
@@ -518,7 +535,7 @@ pointless).`,
 				if reported, ok := reportIfRevisionTargetGone("updating", id, err, ifRevision); ok {
 					return reported
 				}
-				fmt.Fprintf(os.Stderr, "Error resolving %s: %v\n", id, err)
+				fmt.Fprintf(os.Stderr, "Error resolving %s: %s\n", id, remedy.PrintedMessage(err))
 				recordFailure(id, fmt.Sprintf("resolving issue: %v", err))
 				continue
 			}
@@ -532,6 +549,15 @@ pointless).`,
 			}
 			issue := result.Issue
 			issueStore := result.Store
+
+			// Checked per id against the store that owns the issue, because a
+			// routed id can live behind a different backend than the local one.
+			if err := leaseTTLRemoteRefusal(issueStore, leaseTTL, "claim"); err != nil {
+				fmt.Fprintf(os.Stderr, "Error updating %s: %v\n", id, err)
+				recordFailure(id, err.Error())
+				closeIfUnmutated(result)
+				continue
+			}
 
 			// The template guard is the role's (issueops.Lifecycle.Update),
 			// enforced inside the mutation on every route; its refusal is
@@ -588,7 +614,7 @@ pointless).`,
 					if explicitSession {
 						fmt.Fprintf(os.Stderr, "%s --session is not recorded: this backend's update cannot carry closed_by_session (bd close --session records it)\n", ui.RenderWarn("!"))
 					} else {
-						fmt.Fprintf(os.Stderr, "%s CLAUDE_SESSION_ID is not recorded as closed_by_session: this backend's update cannot carry it (bd close records it)\n", ui.RenderWarn("!"))
+						fmt.Fprintf(os.Stderr, "%s %s is not recorded as closed_by_session: this backend's update cannot carry it (bd close records it)\n", ui.RenderWarn("!"), sessionEnvVar)
 					}
 				}
 			}
@@ -600,7 +626,7 @@ pointless).`,
 			}
 			ops, err := writeOps(issueStore)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error updating %s: %v\n", id, err)
+				fmt.Fprintf(os.Stderr, "Error updating %s: %s\n", id, remedy.PrintedMessage(err))
 				recordFailure(id, fmt.Sprintf("updating issue: %v", err))
 				closeIfUnmutated(result)
 				continue
@@ -608,7 +634,7 @@ pointless).`,
 			// Guards ride the operation itself: a stale assignee/status refuses
 			// atomically with a typed mismatch error and MUST surface as a
 			// non-zero exit — never collapse it to success (finding #10).
-			// One --force, two overrides. The assignee half only applies to an
+			// One --force, several overrides. The assignee half only applies to an
 			// assignee edit — asserting it without one is an invalid request,
 			// which is why it is conditioned here rather than passed straight
 			// through: `--force -s closed` is now a legitimate way to ask for
@@ -623,6 +649,7 @@ pointless).`,
 				expectedAssignee: ifAssignee,
 				expectedStatus:   expectedStatus,
 				expectedVersion:  ifRevision,
+				leaseTTL:         leaseTTL,
 			})
 			if updateErr != nil {
 				// A8 (beads#4682): an active --if-revision guard reports
@@ -643,6 +670,9 @@ pointless).`,
 				if refusal, ok := templateReadOnlyRefusal(id, updateErr); ok {
 					failureText = refusal.Error()
 					fmt.Fprintf(os.Stderr, "%s\n", refusal)
+				} else if refusal, ok := claimBlockedRefusal(updateErr); ok {
+					failureText = refusal.Error()
+					fmt.Fprintf(os.Stderr, "%s\n", refusal)
 				} else if errors.Is(updateErr, issueops.ErrNotesOverwrite) {
 					// The contract's AuthorizeNotesOverwrite fence refused
 					// inside the mutation transaction. Print the advice, not
@@ -651,7 +681,7 @@ pointless).`,
 					failureText = refusal.Error()
 					fmt.Fprintf(os.Stderr, "%s\n", refusal)
 				} else {
-					fmt.Fprintf(os.Stderr, "Error updating %s: %v\n", id, updateErr)
+					fmt.Fprintf(os.Stderr, "Error updating %s: %s\n", id, remedy.PrintedMessage(updateErr))
 				}
 				failures = append(failures, updateIDFailure{
 					ID:            id,
@@ -663,19 +693,16 @@ pointless).`,
 			}
 			updatedIssue := updateResult.Issue
 			trackMutation(result)
+			if claimFlag {
+				warnLeaseTTLNotApplied(result.ResolvedID, issue, currentActor(), leaseTTL)
+			}
 			if notesOverwritten {
 				notesOverwriteWarnings[issueStore] = append(notesOverwriteWarnings[issueStore], id)
 			}
-			// Audit log key field changes (survives Dolt GC flatten)
-			if patch.Status.Set {
-				audit.LogFieldChange(result.ResolvedID, "status", string(issue.Status), string(patch.Status.Value), currentActor(), "")
-			}
-			if patch.Assignee.Set {
-				audit.LogFieldChange(result.ResolvedID, "assignee", issue.Assignee, patch.Assignee.Value, currentActor(), "")
-			}
-			if patch.Priority.Set {
-				audit.LogFieldChange(result.ResolvedID, "priority", fmt.Sprintf("%d", issue.Priority), fmt.Sprintf("%d", patch.Priority.Value), currentActor(), "")
-			}
+			// Audit log key field changes (survives Dolt GC flatten), a
+			// --claim's implied status and assignee included (GH#6146).
+			logUpdateAuditChanges(result.ResolvedID, currentActor(),
+				updateAuditChanges(patch, claimFlag, updateResult.Changed, issue, updatedIssue))
 
 			// The operation's own post-state snapshot replaces the re-read.
 			// Dependency records are dropped from it because `bd update` has
@@ -937,6 +964,25 @@ func errNotesOverwriteRefusal(id string) error {
 	return fmt.Errorf("%s: --notes would replace existing notes; use --force to overwrite (or --append-notes to preserve history)", id)
 }
 
+// claimBlockedRefusal is the user-facing refusal both `bd update` routes print
+// when the lifecycle refuses a claim because the issue still has a live local
+// blocker (issueops.ErrClaimBlocked): the engine's own "<sentinel>: <id> is
+// blocked by [<blockers>]" plus the --force hint, which that refusal honors.
+// The external-dependency guard's claim refusal wraps ErrCloseBlocked instead
+// and is not matched here: --force cannot waive it, so it gets no hint.
+func claimBlockedRefusal(err error) (error, bool) {
+	if !errors.Is(err, issueops.ErrClaimBlocked) {
+		return nil, false
+	}
+	// Print the typed refusal itself when it is there, so a route that wrapped
+	// it with context still reads the same as one that did not.
+	var blocked *issueops.BlockedError
+	if errors.As(err, &blocked) {
+		err = blocked
+	}
+	return fmt.Errorf("%w (use --force to override)", err), true
+}
+
 // warnNotesReplacement fires only after a successful overwrite, which since
 // the fence means the caller passed --force: it is the audit trail for a
 // habitual --force that never saw the refusal, worded as a statement of what
@@ -1026,7 +1072,7 @@ func reportUpdateFailures(failures []updateIDFailure, total int) error {
 	} else {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", msg)
 		for _, f := range failures {
-			fmt.Fprintf(os.Stderr, "  %s: %s\n", f.ID, f.Error)
+			fmt.Fprintf(os.Stderr, "  %s: %s\n", f.ID, remedy.PrintedText(f.Error))
 		}
 	}
 	allGuard := len(failures) > 0
@@ -1123,6 +1169,7 @@ func init() {
 	updateCmd.Flags().String("title", "", "New title")
 	updateCmd.Flags().StringP("type", "t", "", "New type (bug|feature|task|epic|chore|decision|spike|story|milestone); custom types require types.custom config; aliases: enhancement/feat→feature, dec/adr→decision")
 	registerCommonIssueFlags(updateCmd)
+	updateCmd.Flags().Lookup("assignee").Usage = "Assignee ('', '-' or whitespace-only text unassigns)"
 	updateCmd.Flags().Lookup("notes").Usage = "Replace the notes field (requires --force over existing non-empty notes; --clear-notes clears; --append-notes appends instead)"
 	updateCmd.Flags().Bool("allow-empty-description", false, "Allow empty description replacement when reading from stdin or file")
 	updateCmd.Flags().Bool("clear-notes", false, "Clear the notes field (--notes \"\" is refused: an empty value is usually a dead command substitution)")
@@ -1154,9 +1201,11 @@ func init() {
 	updateCmd.Flags().StringSlice("remove-label", nil, "Remove labels (repeatable)")
 	updateCmd.Flags().StringSlice("set-labels", nil, "Set labels, replacing all existing (repeatable)")
 	updateCmd.Flags().String("parent", "", "New parent issue ID (reparents the issue, use empty string to remove parent)")
-	updateCmd.Flags().Bool("claim", false, "Atomically claim the issue (sets assignee to you, status to in_progress; idempotent if already claimed by you; issues assigned to a pool alias listed in the claim.pools config are claimable too)")
-	// Overrides the live-claim reassign fence (bd-98s5c) and close policy.
-	updateCmd.Flags().Bool("force", false, "Override refusals: let -a/--assignee overwrite another actor's live in_progress claim (use only for abandoned claims — crashed agent, expired lease; prefer bd reclaim), let -s/--status move the issue into closed (or a configured done status) despite open children or a live blocker (same as bd close --force), and let --notes overwrite existing non-empty notes (use --append-notes to preserve history instead)")
+	updateCmd.Flags().Bool("claim", false, "Atomically claim the issue (sets assignee to you, status to in_progress; idempotent if already claimed by you; issues assigned to a pool alias listed in the claim.pools config are claimable too; refused while the issue has an open local blocker unless --force)")
+	addLeaseTTLFlag(updateCmd, claimLeaseTTLUsage)
+	// Overrides the live-claim reassign fence (bd-98s5c), close policy and the
+	// blocked-claim refusal.
+	updateCmd.Flags().Bool("force", false, "Override refusals: let -a/--assignee overwrite another actor's live in_progress claim (use only for abandoned claims — crashed agent, expired lease; prefer bd reclaim), let -s/--status move the issue into closed (or a configured done status) despite open children or a live blocker (same as bd close --force), let --notes overwrite existing non-empty notes (use --append-notes to preserve history instead), and let --claim take an issue that still has an open local blocker (an unresolved external dependency still refuses the claim)")
 	// Conditional (compare-and-set) update guards (bd-wsqvw)
 	updateCmd.Flags().String("if-assignee", "", "Apply the update only if the current assignee equals this value (--if-assignee '' requires unassigned); a mismatch writes nothing and exits 13 (vs 1 for other failures). Requires a field update; cannot combine with --claim")
 	updateCmd.Flags().String("if-status", "", "Apply the update only if the current status equals this value; a mismatch writes nothing and exits 13 (vs 1 for other failures). Requires a field update; cannot combine with --claim")
@@ -1170,7 +1219,7 @@ func init() {
 	// combining --notes with --if-assignee could not previously opt into
 	// overwriting existing notes at all — cobra made --force unpassable
 	// alongside --if-assignee — which is the footgun this lifts.
-	updateCmd.Flags().String("session", "", "Claude Code session ID for status=closed (or set CLAUDE_SESSION_ID env var)")
+	updateCmd.Flags().String("session", "", "Claude Code session ID for status=closed (or set CLAUDE_SESSION_ID or CLAUDE_CODE_SESSION_ID env var)")
 	// Time-based scheduling flags (GH#820)
 	// Examples:
 	//   --due=+6h           Due in 6 hours

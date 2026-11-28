@@ -6,10 +6,12 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/steveyegge/beads/internal/config"
+	"github.com/steveyegge/beads/internal/endpointtrust"
 	"github.com/steveyegge/beads/internal/tracker"
 	"github.com/steveyegge/beads/internal/types"
 )
@@ -32,6 +34,13 @@ type Tracker struct {
 	client *Client
 	config *MappingConfig
 	store  tracker.Store
+	// currentName and htmlURL are the repository's owner/repo and html_url
+	// as GitHub reported them at Init, and formerNames are the other names
+	// local refs use that GitHub resolved to the same repository (see
+	// resolveRepositoryNames). All are empty when unknown.
+	currentName string
+	htmlURL     string
+	formerNames []string
 }
 
 // LinkResolver returns a relationship resolver bound to this tracker's
@@ -42,7 +51,9 @@ func (t *Tracker) LinkResolver() *LinkResolver {
 	if t.client == nil {
 		return nil
 	}
-	return NewLinkResolver(t.client)
+	r := NewLinkResolver(t.client)
+	r.scope = t.RefScope()
+	return r
 }
 
 func (t *Tracker) Name() string         { return "github" }
@@ -51,6 +62,11 @@ func (t *Tracker) ConfigPrefix() string { return "github" }
 
 func (t *Tracker) Init(ctx context.Context, store tracker.Store) error {
 	t.store = store
+
+	baseURL := t.getConfig(ctx, "github.url", "GITHUB_API_URL")
+	if err := endpointtrust.Check(endpointtrust.WorkspaceKey(), "github", baseURL, endpointtrust.PrivateMatch("github.url", "GITHUB_API_URL", baseURL)); err != nil {
+		return err
+	}
 
 	token := t.getConfig(ctx, "github.token", "GITHUB_TOKEN")
 	if token == "" {
@@ -82,13 +98,130 @@ func (t *Tracker) Init(ctx context.Context, store tracker.Store) error {
 	t.client = NewClient(token, owner, repo)
 
 	// Allow custom base URL for GitHub Enterprise
-	baseURL := t.getConfig(ctx, "github.url", "GITHUB_API_URL")
 	if baseURL != "" {
 		t.client = t.client.WithBaseURL(baseURL)
 	}
 
 	t.config = DefaultMappingConfig()
+	return t.resolveRepositoryNames(ctx)
+}
+
+// resolveRepositoryNames records the names other than the configured one
+// under which the repository's issues may be linked, as GitHub resolves them.
+// GitHub serves a renamed or transferred repository under each former name by
+// redirect, but every issue it returns names the repository as it is called
+// now, and so does every ref BuildExternalRef stores; refs stored before the
+// rename keep the name it had then. So a config naming the old name meets
+// refs under the current one, and a config moved to the new name (or a
+// GITHUB_REPOSITORY that follows the repository) meets refs under the old
+// one. Without those names in RefScope the tracker would refuse those refs:
+// push and conflict detection would skip their beads without a warning, and a
+// pull would import their issues again as new beads.
+//
+// The current name is the configured repository's full_name, and the host of
+// its html_url counts as the configured host too, so an API proxy in front of
+// github.com addresses the github.com issue URLs it returns. A former name
+// can only be recognized by asking GitHub, so each other repository that a
+// local ref names on the configured host is read once, and its name counts
+// when GitHub answers with the configured repository's ID; another
+// repository answers with its own ID, and a deleted or inaccessible one with
+// a 404. A 404 for the configured name leaves that name the only one.
+//
+// Any other failure (a 5xx, a dropped connection, a rate limit, a refused
+// token) says nothing about a name, and going on as if it had would narrow
+// the scope: beads linked under the repository's other names would count as
+// another repository's, so push and conflict detection would skip them while
+// github.last_sync moved past their local edits and past the remote edits a
+// pull gave to duplicate beads. Once the name resolved again, a later run
+// could pull a remote edit over an unpushed one, or push a stale bead over a
+// remote edit, with no conflict. A warning would not stop that, since the
+// cursor moves either way. So such a failure fails Init, for the configured
+// name and for every other name, as does a failed scan of the local beads.
+func (t *Tracker) resolveRepositoryNames(ctx context.Context) error {
+	repo, err := t.client.FetchRepository(ctx)
+	if err != nil {
+		if IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("looking up repository %s/%s on GitHub: %w", t.client.Owner, t.client.Repo, err)
+	}
+	t.currentName = repo.FullName
+	t.htmlURL = repo.HTMLURL
+	if repo.ID == 0 || t.store == nil {
+		return nil
+	}
+	names, err := t.otherRepositoryNames(ctx)
+	if err != nil {
+		return fmt.Errorf("listing local beads to find other names of repository %s/%s: %w", t.client.Owner, t.client.Repo, err)
+	}
+	for _, name := range names {
+		if err := t.resolveOtherName(ctx, name, repo.ID); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// resolveOtherName asks GitHub which repository name, a lowercase
+// "owner/repo" that local refs use, belongs to now. The name counts as the
+// repository's when GitHub answers with its ID, id; another repository's ID
+// or a 404 rules it out. Any other failure is returned, with what to do about
+// it: the name may be a former name of the repository, or another repository
+// that refuses the token, and only the user can tell which.
+func (t *Tracker) resolveOtherName(ctx context.Context, name string, id int) error {
+	owner, repo, _ := strings.Cut(name, "/")
+	other, err := t.client.fetchRepositoryNamed(ctx, owner, repo)
+	switch {
+	case err == nil:
+		if other != nil && other.ID == id {
+			t.formerNames = append(t.formerNames, name)
+		}
+		return nil
+	case IsNotFound(err):
+		return nil
+	}
+	configured := t.client.Owner + "/" + t.client.Repo
+	return fmt.Errorf("looking up repository %s on GitHub, which local beads link to: %w; until GitHub says "+
+		"which repository %s is, this sync cannot tell whether those beads belong to %s, and syncing without "+
+		"them could lose their edits. If the failure is temporary, run the command again. If %s is another "+
+		"repository and GitHub refuses this token for it (a 403), give the token read access to it. If it is a "+
+		"former name of %s, relinking those beads to their issues' current URLs "+
+		"(bd update <id> --external-ref <url>) also ends this lookup",
+		name, err, name, configured, name, configured)
+}
+
+// repositoryNamePattern matches a lowercase "owner/repo" made of the
+// characters GitHub allows in owner and repository names.
+var repositoryNamePattern = regexp.MustCompile(`^[a-z0-9_.-]+/[a-z0-9_.-]+$`)
+
+// otherRepositoryNames returns, sorted, the lowercase "owner/repo" of each
+// repository other than this one that a local issue's external_ref names on
+// the configured host.
+func (t *Tracker) otherRepositoryNames(ctx context.Context) ([]string, error) {
+	issues, err := t.store.SearchIssues(ctx, "", types.IssueFilter{})
+	if err != nil {
+		return nil, err
+	}
+	scope := t.RefScope()
+	seen := make(map[string]bool)
+	var names []string
+	for _, issue := range issues {
+		if issue == nil || issue.ExternalRef == nil {
+			continue
+		}
+		name, ok := scope.otherRepository(*issue.ExternalRef)
+		if !ok || seen[name] {
+			continue
+		}
+		seen[name] = true
+		owner, repo, _ := strings.Cut(name, "/")
+		if !repositoryNamePattern.MatchString(name) || owner == "." || owner == ".." || repo == "." || repo == ".." {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 func (t *Tracker) Validate() error {
@@ -152,7 +285,26 @@ func (t *Tracker) CreateIssue(ctx context.Context, issue *types.Issue) (*tracker
 		return nil, err
 	}
 
+	// GitHub's POST /issues cannot set state, so a closed bead is created
+	// open. Close it with a follow-up update so the state carries
+	// (gastownhall/beads#5486). On failure we keep the created issue and its
+	// external_ref (returning an error here would strand the issue and
+	// re-create a duplicate on the next push) and report the failed close as
+	// a warning instead; the engine then leaves the push hash uncached, so the
+	// next push fetches the issue and retries the close.
+	var warnings []string
+	if issue.Status == types.StatusClosed {
+		if closed, err := t.client.UpdateIssue(ctx, created.Number, map[string]interface{}{
+			"state": "closed",
+		}); err == nil {
+			created = closed
+		} else {
+			warnings = append(warnings, fmt.Sprintf("created GitHub issue #%d but failed to close it (left open): %v", created.Number, err))
+		}
+	}
+
 	ti := githubToTrackerIssue(created)
+	ti.Warnings = warnings
 	return &ti, nil
 }
 
@@ -218,18 +370,40 @@ func canonicalGitHubBaseURL(raw string) string {
 
 // IsExternalRef checks if a ref belongs to this GitHub tracker.
 // It recognizes both full GitHub URLs and the "github:{id}" shorthand format
-// produced by BuildExternalRef when a URL is unavailable.
+// produced by BuildExternalRef when a URL is unavailable. An issue URL is
+// GitHub's when it contains github.com, in any letter case, or, once the
+// tracker is initialized, sits on a host of the configured repository (see
+// RefScope), so a GitHub Enterprise host whose name lacks "github.com" counts
+// too. Recognition covers any repository's issue URL; whether the configured
+// repository can address the ref is ExtractIdentifier's call.
 func (t *Tracker) IsExternalRef(ref string) bool {
 	if ghShorthandPattern.MatchString(ref) {
 		return true
 	}
-	return strings.Contains(ref, "github.com") && issueNumberPattern.MatchString(ref)
+	if !issueNumberPattern.MatchString(ref) {
+		return false
+	}
+	return strings.Contains(strings.ToLower(ref), "github.com") || t.RefScope().onHost(ref)
 }
 
 // ExtractIdentifier extracts the issue number from a GitHub URL or shorthand ref.
+// Once the tracker is initialized, a URL yields a number only when it points
+// at the configured repository, by its configured name or another name GitHub
+// resolves to it (see RefScope): issue numbers are repository-scoped,
+// so another repository's URL must not address, match or overwrite the
+// configured repository's issue with the same number
+// (gastownhall/beads#7781). The repo-less shorthand is read as the configured
+// repository, as before.
 func (t *Tracker) ExtractIdentifier(ref string) string {
 	if m := ghShorthandPattern.FindStringSubmatch(ref); len(m) >= 2 {
 		return m[1]
+	}
+	if t.client != nil {
+		number, ok := t.RefScope().IssueNumberFromRef(ref)
+		if !ok {
+			return ""
+		}
+		return strconv.Itoa(number)
 	}
 	matches := issueNumberPattern.FindStringSubmatch(ref)
 	if len(matches) < 2 {
@@ -239,13 +413,33 @@ func (t *Tracker) ExtractIdentifier(ref string) string {
 }
 
 // RefScope returns the repository scope used to resolve external refs to issue
-// numbers for relationship sync. Refs are deliberately not resolved by issue
-// number alone: see RefScope.
+// numbers for ExtractIdentifier and relationship sync. Refs are deliberately
+// not resolved by issue number alone: see RefScope.
 func (t *Tracker) RefScope() RefScope {
 	if t.client == nil {
 		return RefScope{}
 	}
-	return NewRefScope(t.client.BaseURL, t.client.Owner, t.client.Repo)
+	return NewRefScope(t.client.BaseURL, t.client.Owner, t.client.Repo).
+		withNames(append([]string{t.currentName}, t.formerNames...)...).
+		withIssueHost(t.htmlURL)
+}
+
+// DescribeTarget implements tracker.TargetDescriber: it names the repository
+// ExtractIdentifier addresses.
+func (t *Tracker) DescribeTarget() string {
+	if t.client == nil {
+		return ""
+	}
+	return "repository " + t.client.Owner + "/" + t.client.Repo
+}
+
+// TargetNamesKnown implements tracker.TargetNamesReporter: it reports whether
+// Init read the repository's current name, which every issue GitHub returns
+// carries (see resolveRepositoryNames). Without it an issue of a renamed
+// repository, served under the new name, looks like one transferred to
+// another repository.
+func (t *Tracker) TargetNamesKnown() bool {
+	return t.currentName != ""
 }
 
 func (t *Tracker) BuildExternalRef(issue *tracker.TrackerIssue) string {

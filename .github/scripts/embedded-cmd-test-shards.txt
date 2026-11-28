@@ -24,40 +24,70 @@
 # This file is generated: notes added here are erased by the next
 # regeneration. Add them to the generator or the durations file instead.
 
+100 1 TestEmbeddedAssigneeHiddenEmptyClears
+100 1 TestEmbeddedConfigGetIsReadOnly
+100 1 TestEmbeddedTelemetryExportCarriesNoIssueContent
 100 1 TestEmbeddedUpdateConcurrent
 
+100 2 TestEmbeddedAutoExportFirstCreateAfterOptIn
+100 2 TestEmbeddedConfigGetYamlKeyWithServerDown
 100 2 TestEmbeddedShowConcurrent
+100 2 TestEmbeddedTemplateGuardAcrossWriteVerbs
 
+100 3 TestEmbeddedAutoExportUncommittedWriteReachesJSONL
 100 3 TestEmbeddedCloseConcurrent
+100 3 TestEmbeddedConfigSetNoDBRefused
+100 3 TestEmbeddedUpdateClaimPassesStaleBlockedFlag
 
+100 4 TestEmbeddedClaimPathsJournalSidecar
+100 4 TestEmbeddedDeleteCascadeFollowsOnlyParentChild
 100 4 TestEmbeddedEpicConcurrent
+100 4 TestEmbeddedUpdateClaimRefusesBlockedIssue
 
+100 5 TestEmbeddedCompactAbortsDivergentReplay
 100 5 TestEmbeddedConfigConcurrent
+100 5 TestEmbeddedDoctorExportCheckLeavesTheWorkspaceUntouched
 
+100 6 TestEmbeddedCompactKeepsCommitDates
+100 6 TestEmbeddedDoctorExportCheckMissingFileWarns
 100 6 TestEmbeddedListFilteringBasicAndLabels
 
+100 7 TestEmbeddedCompactKeepsPendingWrite
 100 7 TestEmbeddedDepConcurrent
+100 7 TestEmbeddedDoctorExportCheckRefreshedFileIsClean
 
+100 8 TestEmbeddedCompactKeepsReplayedCommitDates
+100 8 TestEmbeddedDoctorExportCheckScopes
 100 8 TestEmbeddedMaxRowsListLimitInteraction
 
 100 9 TestEmbeddedChildrenConcurrent
+100 9 TestEmbeddedCompactMisdatedOldWindow
+100 9 TestEmbeddedDoctorExportCheckStaleFileWarns
 
+100 10 TestEmbeddedCompactRecentAncestorOfBoundary
 100 10 TestEmbeddedCreateScalarAndRelationships
+100 10 TestEmbeddedForkAutoContributorRoutedWrites
 
+100 11 TestEmbeddedCompactRefusedDryRun
+100 11 TestEmbeddedImportCommentIDMatch
 100 11 TestEmbeddedKVConcurrent
 
+100 12 TestEmbeddedAutoImportFallback_ConflictSkip_SkipsRetiredRows
 100 12 TestEmbeddedGatedRendering
 100 12 TestEmbeddedNotifyShowsOnlyOwnLiveWork
 
+100 13 TestEmbeddedInitGitOriginAdoptionRequiresConsent
 100 13 TestEmbeddedListFilteringStatusAndHierarchy
 100 13 TestEmbeddedMigratePersonal_refusesSharedRootFromARig
 
+100 14 TestEmbeddedInitGitOriginAdoptionWithConsent
 100 14 TestEmbeddedMigratePersonal_batchLeavesTheMoveUncommitted
 100 14 TestEmbeddedReopenConcurrent
 
-100 15 TestEmbeddedMigratePersonal_unsupportedPlanningFormatExit16
+100 15 TestEmbeddedMemoryBareKeyMissesNeverWrite
 100 15 TestEmbeddedPurgeWispsPlaneRetention
 
+100 16 TestEmbeddedMemoryBareKeyRecallsKeysDeriveKeyChanges
 100 16 TestEmbeddedMemoryConcurrent
 100 16 TestEmbeddedMigratePersonal_refusesIssueAlreadyInPlanningRepo
 
@@ -66,14 +96,21 @@
 100 17 TestEmbeddedReopen
 
 100 18 TestEmbeddedLabelPropagateRename
+100 18 TestEmbeddedMetadatalessWorkspaceAdoptsSoleDatabase
 100 18 TestEmbeddedPrune_protectsBeadCitedByCustomStatusBead
 
+100 19 TestEmbeddedInitGitignoreManageFalseCommitsOnlyBdFiles
 100 19 TestEmbeddedLabelConcurrent
+100 19 TestEmbeddedMetadatalessWorkspaceEnvVarSelectsDatabase
 100 19 TestEmbeddedNewDoltStore_StrictReadOnlyRefusesWritesOnFreshDatabase
+100 19 TestEmbeddedReclaimDryRunChangesNothing
+100 19 TestEmbeddedShowHead
 
 100 20 TestEmbeddedInitRoleRoutingRetainedFork
+100 20 TestEmbeddedMetadatalessWorkspaceLegacyDatabaseName
 100 20 TestEmbeddedMigrateSchema_IdentityMismatchRefusesBeforeApplying
 
+100 21 TestEmbeddedArrivalSeqOnEveryJSONRead
 100 21 TestEmbeddedCreateDueSource
 100 21 TestEmbeddedMaxRowsReady
 100 21 TestEmbeddedMigratePersonal_movesIssues
@@ -99,18 +136,23 @@
 100 26 TestEmbeddedPersistentPreRunLogsAndSkipsIdentityCheckForFreshEmbeddedWorkspace
 
 100 27 TestEmbeddedDoltRemoteAdd_GitOriginCollision_RefusalMessageCopy
+100 27 TestEmbeddedLeaseTTLFlagArmsTheLease
 100 27 TestEmbeddedNewDoltStoreFromConfig_DottedDBName
 100 27 TestEmbeddedShipConcurrent
 
 100 28 TestEmbeddedDoltLocalOnly_RemoteAdd_RefusesExitOne
 100 28 TestEmbeddedDueSweepFiresAndEscalates
+100 28 TestEmbeddedForeignPreDoltCloneLeftUnchanged
 100 28 TestEmbeddedHistoryConcurrent
 100 28 TestEmbeddedImportChunkedRealStoreResumeConverges
+100 28 TestEmbeddedRemedyPrinting_init
 
+100 29 TestEmbeddedCreateRepoRefusesRemovedBackendAsTheOpenDoes
 100 29 TestEmbeddedDoltLocalOnly_RemoteAdd_ErrorOnStderr
 100 29 TestEmbeddedEpicCloseEligibleReasonFlag
 100 29 TestEmbeddedImportChunkedNoReadyWindowWithReadinessEdgeIntoCycle
 100 29 TestEmbeddedRecurrenceCloseGuard
+100 29 TestEmbeddedRemedyPrinting_bootstrap
 
 100 30 TestEmbeddedCloseGuardsAndEpics
 100 30 TestEmbeddedCreateRepoMetadataLessTarget
@@ -167,9 +209,11 @@
 100 40 TestEmbeddedUpdateLifecycleClaimParentCommit
 
 100 41 TestEmbeddedDuplicateConcurrent
+100 41 TestEmbeddedMetadatalessWorkspaceRefusesSeveralDatabases
 100 41 TestEmbeddedVersionedHistoryFollowsTheStoreItWritesInto
 
 100 42 TestEmbeddedInitAForkAutoContributor
+100 42 TestEmbeddedMigratePersonal_refusesDependentsLeftInTheProject
 100 42 TestEmbeddedUpdateIfGuardsFlagValidation
 
 100 43 TestEmbeddedIfRevisionMultiIDRejected
@@ -181,49 +225,61 @@
 100 44 TestEmbeddedStaleConcurrent
 
 100 45 TestEmbeddedGraph
+100 45 TestEmbeddedNoDBTrueIgnoredWithWarning
 100 45 TestEmbeddedUpdateIfGuardsCLI
 
 100 46 TestEmbeddedCloseAlreadyClosedClaimNextAndMolecule
 100 46 TestEmbeddedIfRevisionMatchAndMismatch
+100 46 TestEmbeddedReadyEmptyStateMessage
 
 100 47 TestEmbeddedListSearchAndOutputSearchAndSort
+100 47 TestEmbeddedReadyEmptyStateRealBlocker
 100 47 TestEmbeddedRevisionRemintMatrix
 
 100 48 TestEmbeddedDeferConcurrent
+100 48 TestEmbeddedReadyStaleBlockedFlagOnEdgelessIssue
 100 48 TestEmbeddedReassignFenceCLI
 
 100 49 TestEmbeddedBackupRestoreStrictReadonly
 100 49 TestEmbeddedDueClearReason
 100 49 TestEmbeddedInitAPushConsentAndRemoteBootstrap
 100 49 TestEmbeddedMigratePersonal_abortOnNoConfirm
+100 49 TestEmbeddedRemedyPrinting_closeContinue
 
 100 50 TestEmbeddedDiffConcurrent
 100 50 TestEmbeddedDoltRemoteAdd_AllowGitOrigin_WarningOnStderr
 100 50 TestEmbeddedDueBackfill
 100 50 TestEmbeddedImportChunkedWaitsForChildImportedLaterStaysBlocked
+100 50 TestEmbeddedRemedyPrinting_unclaim
 100 50 TestEmbeddedVersionOutputShape
 
+100 51 TestEmbeddedCreateTargetRefusesLegacyConfigItWouldHide
 100 51 TestEmbeddedDoltRemoteAdd_AllowGitOrigin_Exits0
 100 51 TestEmbeddedDueTrigger
 100 51 TestEmbeddedHistoryAndShowAsOfReadDoltCommits
 100 51 TestEmbeddedImportChunkedStaleRejectedRowKeepsDeferredDepsOut
 100 51 TestEmbeddedInitGitBootstrapRoutingFreshQuiet
+100 51 TestEmbeddedRemedyPrinting_autoRouted
 
 100 52 TestEmbeddedConfigSetOtherKeysSkipTheVersionedHistoryScan
 100 52 TestEmbeddedDoltLocalOnly_Push_LocalStoreCopy
 100 52 TestEmbeddedImportChunkedNoReadyWindowAtAnyFreezePoint
 100 52 TestEmbeddedRecurrenceSpawnOnClose
+100 52 TestEmbeddedRemedyPrinting_createTarget
+100 52 TestEmbeddedRoutedTargetRefusesLegacyDoltWorkspace
 100 52 TestEmbeddedSwarmConcurrent
 
+100 53 TestEmbeddedDoctorArtifactsCleanKeepsWorkspaceAtRedirectOnlyPath
 100 53 TestEmbeddedDoltLocalOnly_Push_JSON_DisabledStatus
+100 53 TestEmbeddedForeignHistoricalSQLiteWorkspaceLeftUnchanged
 100 53 TestEmbeddedIfRevisionOrdinaryCAS
 100 53 TestEmbeddedImportChunkedMixedRegularWispCrossBucketEdgesWired
 100 53 TestEmbeddedInitSelectedExcludeRoutingStealthDecoyQuiet
 100 53 TestEmbeddedRecurrenceCreate
+100 53 TestEmbeddedRemedyPrinting_migratePersonal
 
 100 54 TestEmbeddedDiscoveryPinsEnvFileReadonly
 100 54 TestEmbeddedFormatJSONAliasMatchesJSON
-100 54 TestEmbeddedGraphModeDependencyWorkspaceUnaffected
 100 54 TestEmbeddedInitAgentArtifactsGolden
 100 54 TestEmbeddedSearchConcurrent
 100 54 TestEmbeddedShowAsOfFailureExitCodes
@@ -256,6 +312,7 @@
 100 59 TestEmbeddedDoctorSupportedChecks
 100 59 TestEmbeddedIdentityGateRendersSchemaSkewFromForwardDriftedWorkspace
 100 59 TestEmbeddedMigratePersonal_refusesPlanningRepoThatIsTheProject
+100 59 TestEmbeddedRetainIDs
 100 59 TestEmbeddedVersionedHistorySetManyRefusesUnversionableMetadata
 
 100 60 TestEmbeddedCommentsCLI
@@ -292,6 +349,7 @@
 100 65 TestEmbeddedSupersede
 
 100 66 TestEmbeddedCloseBasicIsolatedStores
+100 66 TestEmbeddedRetainedTypes
 100 66 TestEmbeddedShowCommentsTail
 
 100 67 TestEmbeddedAdminCompactReadOnlyAllowed
@@ -468,6 +526,7 @@
 100 84 TestEmbeddedInitGitBootstrapRoutingDecoyInvalid
 100 84 TestEmbeddedInitSelectedExcludeRoutingStealthInvalid
 100 84 TestEmbeddedMigratePersonal_preservesComments
+100 84 TestEmbeddedSetStateHealsADuplicatedDimension
 
 100 85 TestEmbeddedBootstrapExistingDryRunInit
 100 85 TestEmbeddedChildrenBasicAndEmpty
@@ -479,6 +538,7 @@
 100 86 TestEmbeddedDoltRemoteAdd_DifferentURL_ProceedsNormally
 100 86 TestEmbeddedExplicitHierarchicalParentEdges
 100 86 TestEmbeddedInitHooksRouting
+100 86 TestEmbeddedListCommentAdvancesUpdatedSort
 100 86 TestEmbeddedMigratePersonal_noopWhenEmpty
 
 100 87 TestEmbeddedCreateRepoProxiedTargetError

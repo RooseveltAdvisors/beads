@@ -79,6 +79,12 @@ var sqlWriteKeywordRe = regexp.MustCompile(`(?i)\b(?:SET|VALUES|SELECT)\b`)
 //   - "SET id = ?": rename (updateIssueIDInTx/updateWispIDInTx) is the only
 //     writer of the primary key, exempted by name in the freshRowLock
 //     invariant.
+//   - "SET arrival_seq = ?": the journal's create seam stamping a wisps row
+//     with its create record's seq (stampArrivalSeqInTx). arrival_seq is a
+//     store-assigned cell orthogonal to the status/assignee races, and it MUST
+//     NOT remint row_lock: the revision a caller reads right after its create
+//     has to keep passing that caller's compare-and-set ("Touches nothing
+//     else" in docs/reference/events-journal.md).
 //   - "SELECT %s FROM": the persistence move's fully-templated aux-table copy
 //     (INSERT INTO %s (%s) SELECT %s FROM %s ...) — it copies snapshot/event
 //     side tables verbatim; the issues/wisps row itself is re-inserted through
@@ -104,6 +110,7 @@ var auxOrExemptMarkers = []string{
 	"is_blocked",          // is_blocked recompute (exempt by design)
 	"compaction_level = ", // compaction bookkeeping/restore (exempt by design)
 	"SET id = ?",          // rename: primary-key rewrite (exempt by design)
+	"SET arrival_seq = ?", // journal create seam's stamp (exempt by design)
 	"SELECT %s FROM",      // persistence move's verbatim aux-table copy
 	"issue_id",            // events / dependencies / comments / snapshots FK
 	"depends_on",          // dependency edge + retarget writes
@@ -194,6 +201,10 @@ var funcNameExemptions = map[string]string{
 	// token a second time within one transaction for no content change, the
 	// same reason recordVersionAtInTx above leaves it alone.
 	"carryParticipationInTx": "writes only participation_generation on a row the same plane move just inserted with a fresh row_lock in this transaction; reminting would double-bump the token for no content change",
+	// TouchIssueActivityInTx advances updated_at / last_activity so comments
+	// participate in list --sort updated ordering, without reminting row_lock:
+	// RowVersion stays lifecycle/ownership only (CommenterAdd holds the token).
+	"TouchIssueActivityInTx": "comment-driven activity timestamps only; row_lock / RowVersion must hold across a comment",
 }
 
 // TestAllIssueRowWritesStampRowLock is the load-bearing completeness guard for

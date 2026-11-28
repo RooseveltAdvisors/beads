@@ -38,10 +38,16 @@ if [ -x "$CACHED_BD" ]; then
 fi
 
 # Make sure the pinned tag exists locally; shallow CI checkouts may not have
-# fetched tags.
+# fetched tags. Prefer origin; if the fork never published that release, fall
+# back to gastownhall/beads so a house sync pin can validate against the real
+# upstream baseline without inventing a fork tag.
+UPSTREAM_DOCS_URL="${BD_DOCS_UPSTREAM_URL:-https://github.com/gastownhall/beads.git}"
 if ! git -C "$PROJECT_ROOT" rev-parse --verify --quiet "refs/tags/$PIN^{commit}" >/dev/null; then
     echo "docs pin: fetching tag $PIN from origin..." >&2
-    git -C "$PROJECT_ROOT" fetch --depth=1 origin "refs/tags/$PIN:refs/tags/$PIN" >&2
+    if ! git -C "$PROJECT_ROOT" fetch --depth=1 origin "refs/tags/$PIN:refs/tags/$PIN" >&2; then
+        echo "docs pin: origin lacks $PIN; fetching verified upstream tag from $UPSTREAM_DOCS_URL..." >&2
+        git -C "$PROJECT_ROOT" fetch --depth=1 "$UPSTREAM_DOCS_URL" "refs/tags/$PIN:refs/tags/$PIN" >&2
+    fi
 fi
 
 echo "docs pin: building bd from tag $PIN (CGO_ENABLED=0 -tags gms_pure_go)..." >&2

@@ -2,8 +2,10 @@ package issueops
 
 import (
 	"fmt"
+	"runtime"
 
 	"github.com/steveyegge/beads/internal/config"
+	"github.com/steveyegge/beads/internal/remedy"
 	"github.com/steveyegge/beads/internal/types"
 )
 
@@ -46,12 +48,16 @@ func ValidateRecurrenceSpawn(issue *types.Issue) error {
 	if !RecurrenceCloseGuardEnabled() || issue == nil || !issue.IsRecurring() {
 		return nil
 	}
+	// The id goes into the printed command as a shell word: a stored id that
+	// is not a plain word becomes a placeholder, named escaped after the
+	// command, so pasting the message runs no part of it (remedy.CommandArg).
+	idArg, idNote := remedy.CommandArg(runtime.GOOS, issue.ID, "<issue-id>")
 	return fmt.Errorf(
 		"recurrence.close_guard: %s is a recurring bead, and closing it files a NEW row for its successor. "+
 			"Work on the SAME bead: comment your result and leave it open - the due sweep re-dates it and re-fires it. "+
-			"To end the series: bd update "+issue.ID+" --repeat \"\", then close. "+
+			"To end the series: bd update "+idArg+" --repeat \"\", then close.%s "+
 			"bd close --force does not bypass this gate; a workspace can opt out with: bd config set %s false",
-		issue.ID, RecurrenceCloseGuardKey)
+		issue.ID, idNote, RecurrenceCloseGuardKey)
 }
 
 // RecurrenceCloseHint is the generated prompt footer for a recurring bead.
@@ -62,9 +68,10 @@ func RecurrenceCloseHint(issue *types.Issue) string {
 	if !RecurrenceCloseGuardEnabled() || issue == nil || !issue.IsRecurring() {
 		return ""
 	}
+	idArg, idNote := remedy.CommandArg(runtime.GOOS, issue.ID, "<issue-id>")
 	return fmt.Sprintf(
 		"Recurrence note (%s): work on THIS bead - comment your result and leave it open. "+
 			"bd refuses to close it (recurrence.close_guard) because closing would file a new row; "+
-			"the due sweep re-dates it and re-fires it. To end the series: bd update "+issue.ID+" --repeat \"\", then close.",
-		issue.ID)
+			"the due sweep re-dates it and re-fires it. To end the series: bd update "+idArg+" --repeat \"\", then close.%s",
+		issue.ID, idNote)
 }

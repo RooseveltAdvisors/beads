@@ -369,6 +369,18 @@ func (p *notifyingProvider) SetEventsJournalEnabled(enabled bool) {
 	}
 }
 
+// EventsJournalActivationError forwards the inner provider's shape-probe
+// result (storage.EventsJournalShapeChecker, PR A1), for the same reason
+// SetEventsJournalEnabled forwards activation itself: the wrapper holds no
+// journal state of its own, and eventsjournal.Apply must see the inner
+// provider's real probe result through whichever wrapper sits on top of it.
+func (p *notifyingProvider) EventsJournalActivationError() error {
+	if checker, ok := p.inner.(storage.EventsJournalShapeChecker); ok {
+		return checker.EventsJournalActivationError()
+	}
+	return nil
+}
+
 // SetVersionedHistoryEnabled forwards dual-write issue-version history
 // activation to the provider that actually binds it to a transaction
 // (doltSQLProvider.BeginTx), for the same reason and in the same shape as
@@ -1055,7 +1067,8 @@ func (u *recordingIssueUC) RenewLease(ctx context.Context, request publicops.Hea
 	return result, nil
 }
 
-// Reclaim records an update for every lease the sweep reverted.
+// Reclaim records an update for every lease the sweep reverted. A dry run
+// reverted nothing and so records nothing.
 //
 // It is DECLARED for the same reason ReleaseIssue above is: an inherited
 // accessor would compile and record nothing, silently dropping the hook the
@@ -1065,7 +1078,7 @@ func (u *recordingIssueUC) RenewLease(ctx context.Context, request publicops.Hea
 // plane snap.issue rather than anyPlane.
 func (u *recordingIssueUC) Reclaim(ctx context.Context, request publicops.ReclaimRequest) (publicops.ReclaimResult, error) {
 	result, err := u.IssueUseCase.Reclaim(ctx, request)
-	if err != nil {
+	if err != nil || result.DryRun {
 		return result, err
 	}
 	for _, r := range result.Reclaimed {
@@ -1302,6 +1315,17 @@ func (u *recordingDepUC) RemoveWispDependency(ctx context.Context, wispID, depen
 // an edge was actually removed, so nothing is recorded when nothing changed.
 func (u *recordingDepUC) RemoveDependencyBySource(ctx context.Context, sourceID, dependsOnID, actor string) (bool, error) {
 	removed, err := u.DependencyUseCase.RemoveDependencyBySource(ctx, sourceID, dependsOnID, actor)
+	if err != nil || !removed {
+		return removed, err
+	}
+	u.rec.record(opDepRemove, u.snap.anyPlaneWithEdges(ctx, sourceID))
+	return removed, nil
+}
+
+// RemoveDependencyBySourceWithOptions records exactly as RemoveDependencyBySource
+// does; the options only gate the events-table row.
+func (u *recordingDepUC) RemoveDependencyBySourceWithOptions(ctx context.Context, sourceID, dependsOnID, actor string, opts domain.RemoveDepBySourceOpts) (bool, error) {
+	removed, err := u.DependencyUseCase.RemoveDependencyBySourceWithOptions(ctx, sourceID, dependsOnID, actor, opts)
 	if err != nil || !removed {
 		return removed, err
 	}

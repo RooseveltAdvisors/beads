@@ -43,6 +43,13 @@ var beforeTestsHook func() func()
 // fall back to os.TempDir().
 var testTempRoot string
 
+// testBDBuildDir is the temp dir cli_fast_test.go's init() builds the bd
+// binary into when no prebuilt one is supplied. init() runs before TestMain
+// pins testTempRoot, so the dir lands in the system temp dir and the
+// testMainInner defer does not reach it; TestMain removes it explicitly.
+// Each build is ~200MB, so leaking it on every run fills shared hosts.
+var testBDBuildDir string
+
 // testTempDir returns os.MkdirTemp under testTempRoot when it is set,
 // otherwise it falls back to the system temp dir (os.MkdirTemp's
 // default). Use this in package-level sync.Once builders so leaked
@@ -81,7 +88,54 @@ const suiteRootPrefix = "beads-bd-tests-"
 
 // Guardrail: ensure the cmd/bd test suite does not touch the real repo .beads state.
 // Disable with BEADS_TEST_GUARD_DISABLE=1 (useful when running tests while actively using beads).
+// inheritedBDEnv names the BD_ variables this test process STARTED with: a
+// developer's shell, a parent bd (a git hook or `bd` driving `go test`), or
+// CI. bdEnv drops those, because one of them (BD_JSON_ENVELOPE=1, say, which
+// nests the payload under `data`) reshapes the output a test then asserts on,
+// so a leak could turn a green suite red — or, worse, green for the wrong
+// reason. A BD_ var set AFTER this snapshot is the suite's own control:
+// TestMain's package-wide dedup opt-out and freeze pin below, or a test's
+// t.Setenv ceiling, and bdEnv forwards it.
+//
+// Declared in this file rather than beside bdEnv because bdEnv is cgo-only
+// and TestMain is not: the symbol must exist in both builds.
+var inheritedBDEnv = map[string]bool{}
+
+// snapshotInheritedBDEnv records the inherited BD_ names. It must be the
+// first thing TestMain does, before this suite sets any of its own.
+func snapshotInheritedBDEnv() {
+	for _, e := range os.Environ() {
+		name, _, ok := strings.Cut(e, "=")
+		if ok && strings.HasPrefix(name, "BD_") {
+			inheritedBDEnv[name] = true
+		}
+	}
+}
+
+// filterAmbientEnv returns es with the ambient beads configuration a bd
+// subprocess must not inherit: BEADS_* and BD_ROUTING_MODE always (a shell
+// pointing at a shared Dolt server or a real workspace would override the
+// per-test one), and any BD_* this process INHERITED. A BD_ var set after the
+// snapshot is the suite's own control and stays, so TestMain's package-wide
+// dedup opt-out and freeze pin, and a test's t.Setenv ceiling, still reach the
+// child. Every env builder in this package routes through here so the three
+// cannot drift apart again.
+func filterAmbientEnv(es []string) []string {
+	out := make([]string, 0, len(es))
+	for _, e := range es {
+		if strings.HasPrefix(e, "BEADS_") || strings.HasPrefix(e, "BD_ROUTING_MODE=") {
+			continue
+		}
+		if name, _, ok := strings.Cut(e, "="); ok && strings.HasPrefix(name, "BD_") && inheritedBDEnv[name] {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
 func TestMain(m *testing.M) {
+	snapshotInheritedBDEnv()
 	// main() is not run here, so hand back the Ps initprocs held during init,
 	// and the -test.parallel default testing derived from the capped count.
 	// An explicit -test.parallel is parsed later, by m.Run, and still wins.
@@ -94,6 +148,9 @@ func TestMain(m *testing.M) {
 	}
 	// Delegate to testMainInner so defers run before os.Exit.
 	code := testMainInner(m)
+	if testBDBuildDir != "" {
+		_ = os.RemoveAll(testBDBuildDir)
+	}
 	if err := credentialcmd.Cleanup(); err != nil {
 		fmt.Fprintf(os.Stderr, "credential command fixture cleanup: %v\n", err)
 		code = 1
@@ -105,6 +162,14 @@ func testMainInner(m *testing.M) int {
 	// A bd parent (say, a git hook or `bd` driving `go test`) must not make
 	// this binary's bd subprocesses skip the workspace gate's writer queue.
 	_ = os.Unsetenv(workspacegate.InheritedHoldEnv)
+	// `go test` run from inside Claude Code inherits its session variable, and
+	// the closing verbs read it (ambientSession): without this every in-process
+	// close here, and every bd subprocess handed os.Environ(), would record
+	// that session, and the tests that pin a sessionless close would fail. A
+	// test that wants a session sets one with t.Setenv.
+	for _, name := range sessionEnvVars {
+		_ = os.Unsetenv(name)
+	}
 	origWD, _ := os.Getwd()
 	// Computed once and reused below for the pin, the ceiling-var boundary,
 	// and the guard's own watch setup, so all three agree on exactly which

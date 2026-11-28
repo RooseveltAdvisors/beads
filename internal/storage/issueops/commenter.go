@@ -54,10 +54,11 @@ func ExecuteAddComment(ctx context.Context, tx *sql.Tx, request publicops.AddCom
 		return publicops.AddCommentResult{}, nil, err
 	}
 	tables := ChangedTables{}
-	tables.Add(commentTable)
-	if commentTable == "comments" {
-		tables.Add("issues")
-	}
+	// TouchIssueActivityInTx updates the anchor's updated_at / last_activity
+	// in the same transaction; declare it so commit/history paths see the write.
+	isWisp := commentTable == "wisp_comments"
+	issueTable, _, eventTable, _ := WispTableRouting(isWisp)
+	tables.Add(commentTable, issueTable, eventTable)
 	return publicops.AddCommentResult{Comment: comment}, tables, nil
 }
 
@@ -92,7 +93,8 @@ func ExecuteDeleteComment(ctx context.Context, tx *sql.Tx, request publicops.Del
 		commentTable = "wisp_comments"
 	}
 	tables := ChangedTables{}
-	tables.Add(commentTable, eventTable, issueTable)
+	// DeleteIssueCommentInTx also touches issue activity timestamps.
+	tables.Add(commentTable, issueTable, eventTable)
 	return publicops.DeleteCommentResult{Comment: comment}, tables, nil
 }
 

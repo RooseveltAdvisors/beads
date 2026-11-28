@@ -3,7 +3,9 @@ package github
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +29,13 @@ type RefScope struct {
 	webHost string // canonical host[:port] used by issue HTML URLs
 	owner   string
 	repo    string
+	// aliases holds the repository's other names (see withNames), each a
+	// lowercase "owner/repo"; empty when unknown.
+	aliases []string
+	// issueHost is the canonical host of the repository's own html_url, which
+	// its issue URLs use, when the scope knows it (see withIssueHost); an API
+	// proxy in front of github.com serves the API on another host.
+	issueHost string
 }
 
 // SubIssueLinkFromParentChild is retained for existing callers. Relationship
@@ -59,6 +68,37 @@ func NewRefScope(baseURL, owner, repo string) RefScope {
 	}
 }
 
+// withNames returns a copy of s that also accepts refs naming the scope's
+// repository by any of fullNames ("owner/repo"): the name GitHub reports for
+// it, and former names GitHub still resolves to it. After a rename or
+// transfer GitHub serves the repository under each former name by redirect,
+// but the issues it returns, and so the refs BuildExternalRef stores from
+// them, carry the name the repository had when they were fetched. A fullName
+// that is not exactly owner/repo, or that s already accepts, adds nothing.
+func (s RefScope) withNames(fullNames ...string) RefScope {
+	for _, fullName := range fullNames {
+		owner, repo, ok := strings.Cut(strings.TrimSpace(fullName), "/")
+		if !ok || owner == "" || repo == "" || strings.Contains(repo, "/") || s.namesRepository(owner, repo) {
+			continue
+		}
+		// Clip so the copy never appends into the receiver's backing array.
+		s.aliases = append(slices.Clip(s.aliases), strings.ToLower(owner+"/"+repo))
+	}
+	return s
+}
+
+// withIssueHost returns a copy of s that also serves the host of htmlURL, the
+// repository's own html_url as GitHub reports it, which its issue URLs use. An
+// API proxy in front of github.com answers on its own host, but the issues it
+// returns, and so the refs BuildExternalRef stores from them, name
+// github.com. An htmlURL with no host adds nothing.
+func (s RefScope) withIssueHost(htmlURL string) RefScope {
+	if host := hostFromURL(htmlURL); host != "" {
+		s.issueHost = host
+	}
+	return s
+}
+
 func hostFromURL(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -68,15 +108,32 @@ func hostFromURL(raw string) string {
 	if err != nil || u.Host == "" {
 		return ""
 	}
-	return strings.ToLower(u.Host)
+	return canonicalHost(u)
+}
+
+// canonicalHost returns u's host[:port] lower-cased, without a trailing dot
+// or the scheme's default port, so respellings of one host compare equal.
+func canonicalHost(u *url.URL) string {
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	switch port := u.Port(); {
+	case port == "", port == "443" && u.Scheme == "https", port == "80" && u.Scheme == "http":
+		return host
+	default:
+		return net.JoinHostPort(host, port)
+	}
 }
 
 // IssueNumberFromRef extracts a repository-scoped GitHub issue number from a
 // beads external ref, but only when the ref points at this scope's repository.
-// A full issue URL must match the configured host and owner/repo; the
+// A full issue URL must match the configured host and owner/repo, or one of
+// the repository's other names when the scope knows them (see withNames); the
 // repo-less "github:{digits}" shorthand that BuildExternalRef emits when no
 // URL is available is read as the configured repository. Everything else —
 // another repository, another host, a non-GitHub tracker URL — is rejected.
+// Host respellings still match: any letter case, a trailing dot, an explicit
+// default port, the web host's www. alias and a ref with no scheme, on the
+// configured hosts or the host of the repository's html_url when the scope
+// knows it (see withIssueHost).
 func (s RefScope) IssueNumberFromRef(ref string) (int, bool) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" || s.owner == "" || s.repo == "" {
@@ -88,22 +145,72 @@ func (s RefScope) IssueNumberFromRef(ref string) (int, bool) {
 		return n, err == nil && n > 0
 	}
 
-	u, err := url.Parse(ref)
-	if err != nil || u.Host == "" {
-		return 0, false
-	}
-	if host := strings.ToLower(u.Host); host != s.apiHost && host != s.webHost {
-		return 0, false
-	}
-
-	owner, repo, number, ok := splitIssueURLPath(u.Path)
-	if !ok {
-		return 0, false
-	}
-	if !strings.EqualFold(owner, s.owner) || !strings.EqualFold(repo, s.repo) {
+	owner, repo, number, ok := s.issueURL(ref)
+	if !ok || !s.namesRepository(owner, repo) {
 		return 0, false
 	}
 	return number, true
+}
+
+// otherRepository returns the lowercase "owner/repo" that ref names when ref
+// is an issue URL on the scope's host whose repository is not one the scope
+// accepts. It is false for the scope's own refs, the shorthand, other hosts
+// and anything that is not an issue URL.
+func (s RefScope) otherRepository(ref string) (string, bool) {
+	if s.owner == "" || s.repo == "" {
+		return "", false
+	}
+	owner, repo, _, ok := s.issueURL(ref)
+	if !ok || s.namesRepository(owner, repo) {
+		return "", false
+	}
+	return strings.ToLower(owner + "/" + repo), true
+}
+
+// issueURL parses ref as an issue URL on the scope's host and returns the
+// owner and repository its path names, whichever repository that is, and the
+// issue number.
+func (s RefScope) issueURL(ref string) (owner, repo string, number int, ok bool) {
+	u, ok := parseRefURL(ref)
+	if !ok || !s.servesHost(u) {
+		return "", "", 0, false
+	}
+	return splitIssueURLPath(u.Path)
+}
+
+// onHost reports whether ref is a URL on a host the scope serves, spelled any
+// way IssueNumberFromRef accepts, whichever repository it names.
+func (s RefScope) onHost(ref string) bool {
+	u, ok := parseRefURL(ref)
+	return ok && s.servesHost(u)
+}
+
+// servesHost reports whether u is on the scope's API host, its web host or
+// the host of the repository's html_url, or on either web host's www. alias.
+func (s RefScope) servesHost(u *url.URL) bool {
+	host := canonicalHost(u)
+	return host != "" && (host == s.apiHost || host == s.webHost || host == "www."+s.webHost ||
+		(s.issueHost != "" && (host == s.issueHost || host == "www."+s.issueHost)))
+}
+
+// parseRefURL parses ref as a URL with a host, reading a ref with no scheme
+// (github.com/{owner}/{repo}/issues/42) as https.
+func parseRefURL(ref string) (*url.URL, bool) {
+	ref = strings.TrimSpace(ref)
+	u, err := url.Parse(ref)
+	if err == nil && u.Scheme == "" && u.Host == "" {
+		u, err = url.Parse("https://" + ref)
+	}
+	return u, err == nil && u.Host != ""
+}
+
+// namesRepository reports whether owner/repo is the scope's repository, by
+// its configured name or by one of its other names.
+func (s RefScope) namesRepository(owner, repo string) bool {
+	if strings.EqualFold(owner, s.owner) && strings.EqualFold(repo, s.repo) {
+		return true
+	}
+	return len(s.aliases) > 0 && slices.Contains(s.aliases, strings.ToLower(owner+"/"+repo))
 }
 
 // splitIssueURLPath pulls owner, repo, and issue number out of a GitHub issue

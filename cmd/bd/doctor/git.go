@@ -7,12 +7,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/steveyegge/beads/cmd/bd/doctor/fix"
+	"github.com/steveyegge/beads/internal/config"
 	"github.com/steveyegge/beads/internal/configfile"
 	"github.com/steveyegge/beads/internal/git"
+	"github.com/steveyegge/beads/internal/remedy"
 	"github.com/steveyegge/beads/internal/types"
 )
 
@@ -21,8 +24,8 @@ import (
 const gitCmdTimeout = 30 * time.Second
 
 const (
-	hooksExamplesURL = "https://github.com/steveyegge/beads/tree/main/examples/git-hooks"
-	hooksUpgradeURL  = "https://github.com/steveyegge/beads/issues/615"
+	hooksDocsURL    = "https://beads.gascity.com/cli-reference/hooks"
+	hooksUpgradeURL = "https://github.com/gastownhall/beads/issues/615"
 )
 
 // bdShimMarker identifies bd shim hooks (GH#946)
@@ -38,6 +41,27 @@ const bdSectionMarkerPrefix = "# --- BEGIN BEADS INTEGRATION"
 
 // bdHooksRunPattern matches hooks that call bd hooks run
 var bdHooksRunPattern = regexp.MustCompile(`\bbd\s+hooks\s+run\b`)
+
+// notManagedCheck is the OK result a check reports, in place of a warning, for
+// a repository that sets key (hooks.manage or gitignore.manage) to false: the
+// warning would only ask for a write bd refuses there, so neither the warning
+// nor its --fix appears, and no doctor.suppress.* key is needed.
+func notManagedCheck(name, key string) DoctorCheck {
+	return DoctorCheck{
+		Name:    name,
+		Status:  StatusOK,
+		Message: fmt.Sprintf("Not managed by bd (%s=false)", key),
+	}
+}
+
+// CheckGitHooksForRepo is CheckGitHooks for the workspace at repoPath. A
+// repository that sets hooks.manage: false gets an OK "not managed" result.
+func CheckGitHooksForRepo(repoPath, cliVersion string) DoctorCheck {
+	if !config.HooksManaged(ResolveBeadsDirForRepo(repoPath)) {
+		return notManagedCheck("Git Hooks", config.HooksManageKey)
+	}
+	return CheckGitHooks(cliVersion)
+}
 
 // CheckGitHooks verifies that recommended git hooks are installed.
 func CheckGitHooks(cliVersion string) DoctorCheck {
@@ -169,7 +193,7 @@ func CheckGitHooks(cliVersion string) DoctorCheck {
 		}
 	}
 
-	hookInstallMsg := "Install hooks with 'bd hooks install'. See " + hooksExamplesURL
+	hookInstallMsg := "Install hooks with 'bd hooks install'. See " + hooksDocsURL
 
 	if len(installedHooks) > 0 {
 		return DoctorCheck{
@@ -448,11 +472,13 @@ func CheckGitUpstream(path string) DoctorCheck {
 	cmd.Dir = path
 	upOut, err := cmd.Output()
 	if err != nil {
+		// The branch goes into the git push command as one shell word.
+		branchArg, note := remedy.CommandArg(runtime.GOOS, branch, "<branch>")
 		return DoctorCheck{
 			Name:    "Git Upstream",
 			Status:  StatusWarning,
-			Message: fmt.Sprintf("No upstream configured for %s", branch),
-			Fix:     fmt.Sprintf("Set upstream then push: git push -u origin %s", branch),
+			Message: fmt.Sprintf("No upstream configured for %s", remedy.PrintedValue(branch)),
+			Fix:     "Set upstream then push: git push -u origin " + branchArg + note,
 		}
 	}
 	upstream := strings.TrimSpace(string(upOut))
@@ -586,9 +612,29 @@ func CheckStaleLegacyHooks() DoctorCheck {
 		Name:    "Stale Legacy Hooks",
 		Status:  StatusWarning,
 		Message: fmt.Sprintf("%d stale .legacy hook(s) calling removed 'bd hook' command", len(staleFiles)),
-		Detail:  fmt.Sprintf("Files: %s", strings.Join(staleFiles, ", ")),
-		Fix:     "Remove or update these files: rm " + strings.Join(staleFilePaths(hooksDir, staleFiles), " "),
+		Detail:  fmt.Sprintf("Files: %s", remedy.PrintedList(staleFiles, ", ")),
+		Fix:     "Remove or update these files: " + staleFilesRemoveCommand(runtime.GOOS, staleFilePaths(hooksDir, staleFiles)),
 	}
+}
+
+// staleFilesRemoveCommand is the rm command for paths, each path one shell
+// word or a numbered placeholder named after the command. The hooks
+// directory can be one the repository commits (core.hooksPath), so both the
+// checkout path and the file names reach the command: bare, a space in
+// either would make rm act on other paths.
+func staleFilesRemoveCommand(goos string, paths []string) string {
+	args := make([]string, len(paths))
+	var notes strings.Builder
+	for i, path := range paths {
+		placeholder := "<file>"
+		if len(paths) > 1 {
+			placeholder = fmt.Sprintf("<file%d>", i+1)
+		}
+		arg, note := remedy.CommandArg(goos, path, placeholder)
+		args[i] = arg
+		notes.WriteString(note)
+	}
+	return "rm " + strings.Join(args, " ") + notes.String()
 }
 
 func staleFilePaths(hooksDir string, names []string) []string {
@@ -783,6 +829,11 @@ func resolveExistingPrefix(path string) string {
 func CheckGitHooksDoltCompatibility(path string) DoctorCheck {
 	backend, beadsDir := getBackendAndBeadsDir(path)
 
+	// Its fix reinstalls hooks, which bd refuses under hooks.manage: false.
+	if !config.HooksManaged(beadsDir) {
+		return notManagedCheck("Git Hooks Dolt Compatibility", config.HooksManageKey)
+	}
+
 	// Only relevant for Dolt backend
 	if backend != configfile.BackendDolt {
 		return DoctorCheck{
@@ -853,7 +904,6 @@ func CheckGitHooksDoltCompatibility(path string) DoctorCheck {
 	}
 
 	// Hook exists but lacks Dolt check - this will cause errors
-	_ = beadsDir // silence unused warning
 	return DoctorCheck{
 		Name:    "Git Hooks Dolt Compatibility",
 		Status:  StatusError,

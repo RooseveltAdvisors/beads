@@ -856,6 +856,12 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 		fmt.Fprintf(os.Stderr, "notify: open outbox: %v\n", err)
 		return
 	}
+	occurrenceByID := map[string]string{}
+	for _, f := range report.Fires {
+		if !f.Occurrence.IsZero() {
+			occurrenceByID[f.ID] = f.Occurrence.UTC().Format(time.RFC3339)
+		}
+	}
 	seats := report.ByAssignee
 	escalated := map[string]bool{}
 	for _, id := range report.EscalatedIDs {
@@ -893,7 +899,7 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 					}
 				}
 			}
-			_, added, err := o.EnqueueUnique(seat.Assignee, id, kind, title, issuePriorityPtr(id))
+			_, added, err := o.EnqueueUniqueOccurrence(seat.Assignee, id, kind, title, issuePriorityPtr(id), occurrenceByID[id])
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "notify: enqueue %s: %v\n", id, err)
 				continue
@@ -906,6 +912,108 @@ func enqueueDueSweepNotifies(report dueSweepReport) {
 	if n > 0 && !jsonOutput {
 		fmt.Printf("  notify enqueued %d\n", n)
 	}
+}
+
+const dueRecoverCutoverFile = "due-recover-after"
+
+// recoverDueNotifiesFromEvents publishes due audit events that have no outbox
+// row yet. Covers the ready-then-sweep gap and a crash between the DB commit
+// and the outbox append. Cutover file under .beads/notify/ refuses historical
+// replay: first create stamps now (with a one-minute grace for same-tick races).
+func recoverDueNotifiesFromEvents() {
+	if store == nil {
+		return
+	}
+	dir := beads.FindBeadsDir()
+	if dir == "" {
+		return
+	}
+	o, err := notify.Open(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "notify: open outbox (recover): %v\n", err)
+		return
+	}
+	cutoverPath := filepath.Join(o.Dir(), dueRecoverCutoverFile)
+	cutover, justCreated, err := loadOrCreateDueRecoverCutover(cutoverPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "notify: due recover cutover: %v\n", err)
+		return
+	}
+	floor := cutover
+	if justCreated {
+		floor = cutover.Add(-time.Minute)
+	}
+	events, err := store.GetAllEventsSince(rootCtx, floor.Add(-time.Nanosecond))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "notify: due recover events: %v\n", err)
+		return
+	}
+	var n int
+	for _, ev := range events {
+		if ev == nil || ev.EventType != types.EventDue {
+			continue
+		}
+		if ev.CreatedAt.Before(floor) {
+			continue
+		}
+		occurrence := ""
+		if ev.OldValue != nil {
+			occurrence = strings.TrimSpace(*ev.OldValue)
+		}
+		if occurrence == "" {
+			continue
+		}
+		issue, err := store.GetIssue(rootCtx, ev.IssueID)
+		if err != nil || issue == nil {
+			continue
+		}
+		seat := strings.TrimSpace(issue.Assignee)
+		if isUnassignedNotifySeat(seat) {
+			continue
+		}
+		labels, _ := store.GetLabels(rootCtx, ev.IssueID)
+		if shouldSuppressNotifyIssue(issue, labels) {
+			continue
+		}
+		if issueops.RepeatWindowQuiet(issue, time.Now().UTC()) {
+			continue
+		}
+		kind := notify.KindDue
+		if ev.Comment != nil && strings.Contains(*ev.Comment, "priority raised") {
+			kind = notify.KindEscalate
+		}
+		prio := issue.Priority
+		_, added, err := o.EnqueueUniqueOccurrence(seat, ev.IssueID, kind, issue.Title, &prio, occurrence)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "notify: recover %s: %v\n", ev.IssueID, err)
+			continue
+		}
+		if added {
+			n++
+		}
+	}
+	if n > 0 && !jsonOutput {
+		fmt.Printf("  notify recovered %d\n", n)
+	}
+}
+
+func loadOrCreateDueRecoverCutover(path string) (time.Time, bool, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is under the notify dir we opened
+	if err == nil {
+		t, parseErr := time.Parse(time.RFC3339, strings.TrimSpace(string(data)))
+		if parseErr != nil {
+			return time.Time{}, false, parseErr
+		}
+		return t.UTC(), false, nil
+	}
+	if !os.IsNotExist(err) {
+		return time.Time{}, false, err
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if writeErr := os.WriteFile(path, []byte(now.Format(time.RFC3339)+"\n"), 0o600); writeErr != nil {
+		return time.Time{}, false, writeErr
+	}
+	return now, true, nil
 }
 
 // heldNotifyLabel marks a bead as held. Beads has no captain-kind hold

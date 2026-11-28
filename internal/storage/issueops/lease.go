@@ -63,9 +63,13 @@ func leaseTTL(ctx context.Context) time.Duration {
 // INVARIANT: any path that mutates status, assignee, or started_at on an
 // in_progress issue MUST rewrite row_lock — that is the set the reclaim/close
 // races care about (claim, close, updateIssueInTx, reclaim, unclaim all do).
-// Paths that touch only orthogonal cells (is_blocked, compaction_level,
-// dependency metadata, rename, or reopen — which acts on closed rows) are safe
-// to merge with a reclaim and intentionally do NOT rewrite it. A heartbeat
+// Reopen rewrites it too (reopen.go): it acts on a closed row, so no reclaim
+// races it, but it is a status change, and a caller holding the closed row's
+// RowVersion must see its guard go stale. Paths that touch only orthogonal
+// cells (is_blocked, compaction_level, dependency metadata, labels, rename)
+// are safe to merge with a reclaim and intentionally do NOT rewrite it;
+// backend/conformance/row_version_contract.go pins each kind's answer on every
+// backend. A heartbeat
 // REFRESH does not touch the issues row (bd-lrgn1): the lease lives in the
 // ephemeral leases table, where a racing heartbeat and reclaim contend on the
 // SAME lease row and conflict without any help. A heartbeat RE-ARM (a lease
@@ -946,6 +950,23 @@ func reclaimReplicaSQL(filter types.ReclaimFilter, localNode string) (string, []
 // label removed mid-reclaim cannot smuggle an out-of-scope issue into the
 // revert.
 func ReclaimExpiredLeasesInTx(ctx context.Context, tx DBTX, cutoff time.Time, filter types.ReclaimFilter, actor string) ([]types.ReclaimedLease, error) {
+	return reclaimExpiredLeasesInTx(ctx, tx, cutoff, filter, actor, false)
+}
+
+// previewExpiredLeasesInTx answers what ReclaimExpiredLeasesInTx would revert
+// for the same cutoff and filter, and changes nothing. It is the dry-run
+// sibling ExecuteReclaimInTx calls for a request with DryRun set: the same
+// scoped snapshot SELECT, the same replica guard and the same foreign-replica
+// skip summary, then it stops. No lease row is deleted, no issue is updated,
+// and no event, journal row or version row is recorded, so the rows it returns
+// carry no Revision.
+func previewExpiredLeasesInTx(ctx context.Context, tx DBTX, cutoff time.Time, filter types.ReclaimFilter) ([]types.ReclaimedLease, error) {
+	return reclaimExpiredLeasesInTx(ctx, tx, cutoff, filter, "", true)
+}
+
+// reclaimExpiredLeasesInTx is the one body behind both. dryRun stops it after
+// the snapshot and the skip summary, which are the only reads it makes.
+func reclaimExpiredLeasesInTx(ctx context.Context, tx DBTX, cutoff time.Time, filter types.ReclaimFilter, actor string, dryRun bool) ([]types.ReclaimedLease, error) {
 	// Snapshot the stale set first so we can report exactly which issues we
 	// reverted and record per-issue recovery events. The DELETE below repeats
 	// the expiry predicate, so an issue that a concurrent heartbeat rescued
@@ -999,6 +1020,11 @@ func ReclaimExpiredLeasesInTx(ctx context.Context, tx DBTX, cutoff time.Time, fi
 
 	if len(stale) == 0 {
 		return nil, nil
+	}
+	if dryRun {
+		// The snapshot is the preview: every write below is what a real sweep
+		// adds to it, and none of them may run here.
+		return stale, nil
 	}
 
 	var reclaimed []types.ReclaimedLease

@@ -292,7 +292,11 @@ func writeShapes() []writeShape {
 				// body.
 				"ForceAssigneeTransfer": member("force_assignee_transfer"),
 				"ForceClosePolicy":      member("force_close_policy"),
-				"Claim":                 member("claim"),
+				// The claim's own bypass, the local-blocker refusal's force
+				// member (GH#7049): claim-only, gated on
+				// issues.update.forceClaimBlocked before the dial.
+				"ForceClaimBlocked": member("force_claim_blocked"),
+				"Claim":             member("claim"),
 				// The template guard's stand-down (bd label, bd set-state).
 				"AllowTemplate": member("allow_template"),
 			},
@@ -327,7 +331,9 @@ func writeShapes() []writeShape {
 				// and `remove_labels` removes, applied in that order so removal
 				// wins — the role's own algebra, and the same three the batchApply
 				// shape has carried since client wave ga-mijra.
-				"Labels": spread("labels", "add_labels", "remove_labels"),
+				// remove_label_prefixes rides the same field (GH#5657): the
+				// prefix drop applies after the replace and before the add.
+				"Labels": spread("labels", "remove_label_prefixes", "add_labels", "remove_labels"),
 				// The patch half of upstream #5484, carried by client wave
 				// ga-7i6by. They left the pending set below with their W- rows.
 				"Status":   member("status"),
@@ -439,6 +445,8 @@ func writeShapes() []writeShape {
 				"DryRun":                member("dry_run"),
 				"ProtectLiveDependents": member("protect_live_dependents"),
 				"Limit":                 member("limit"),
+				// Behind CapSweepRetainIDs, refused locally without it.
+				"RetainIDs": member("retain_ids"),
 			},
 		},
 		{
@@ -645,9 +653,10 @@ func writeShapes() []writeShape {
 			source: reflect.TypeOf(issueops.LabelPatch{}),
 			body:   reflect.TypeOf(apigen.ApplyLabelPatch{}),
 			carried: map[string]carriage{
-				"Replace": member("replace"),
-				"Add":     member("add"),
-				"Remove":  member("remove"),
+				"Replace":        member("replace"),
+				"RemovePrefixes": member("remove_prefixes"),
+				"Add":            member("add"),
+				"Remove":         member("remove"),
 			},
 		},
 		{
@@ -1053,6 +1062,7 @@ func setPatchField(t *testing.T, v reflect.Value) {
 		replace.FieldByName("Value").Set(reflect.ValueOf([]string{"gate-sentinel"}))
 		v.FieldByName("Add").Set(reflect.ValueOf([]string{"gate-added"}))
 		v.FieldByName("Remove").Set(reflect.ValueOf([]string{"gate-removed"}))
+		v.FieldByName("RemovePrefixes").Set(reflect.ValueOf([]string{"gate-prefix:"}))
 		return
 	case reflect.TypeOf(issueops.MetadataPatch{}):
 		// The CLEAR, for the reason the comment below gives about a zero

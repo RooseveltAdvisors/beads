@@ -714,6 +714,21 @@ func TestProxiedServerClose2(t *testing.T) {
 		}
 	})
 
+	// Claude Code exports CLAUDE_CODE_SESSION_ID, not CLAUDE_SESSION_ID
+	// (beads#5450); the close reads it when bd's own variable is absent.
+	t.Run("close_session_from_claude_code_env", func(t *testing.T) {
+		t.Parallel()
+		p := newSharedProxiedProject(t, bd, "csc")
+		issue := bdProxiedCreate(t, bd, p.dir, "Session harness env")
+		if _, stderr, err := bdProxiedRunEnv(t, bd, p.dir, []string{"CLAUDE_CODE_SESSION_ID=sess-harness"}, "close", issue.ID); err != nil {
+			t.Fatalf("close failed: %v\n%s", err, stderr)
+		}
+		db := openProxiedDB(t, p)
+		if got := readClosedBySession(t, db, issue.ID); got != "sess-harness" {
+			t.Errorf("closed_by_session: got %q, want %q (from CLAUDE_CODE_SESSION_ID)", got, "sess-harness")
+		}
+	})
+
 	t.Run("close_json_output", func(t *testing.T) {
 		t.Parallel()
 		p := newSharedProxiedProject(t, bd, "cjo")
@@ -896,6 +911,44 @@ func TestProxiedServerClose2B(t *testing.T) {
 		}
 		if readAssignee(t, db, step2.ID) != "" {
 			t.Error("step2 assignee should NOT be set with --no-auto")
+		}
+	})
+
+	// TestEmbeddedRemedyPrinting_closeContinue's proxied twin: the lines bd
+	// close prints above the bd mol squash hint name each ID escaped.
+	t.Run("continue_names_ids_escaped", func(t *testing.T) {
+		t.Parallel()
+		p := newSharedProxiedProject(t, bd, "rpc")
+		for _, root := range closeContinueRoots {
+			bdProxiedCreate(t, bd, p.dir, "Mol", "-t", "epic", "--labels", "template", "--id", root.id)
+			step := bdProxiedCreate(t, bd, p.dir, "Step", "--parent", root.id)
+			bdProxiedCreate(t, bd, p.dir, "Dependent", "--id", root.id+"-dep", "--deps", "depends-on:"+step.ID)
+			got := bdProxiedClose(t, bd, p.dir, step.ID, "--continue", "--suggest-next")
+			if want := closeContinueOutput(root.id, root.shown, root.quoted, true); got != want {
+				t.Errorf("bd close --continue --suggest-next of %q prints\n%q\nwant\n%q", root.id, got, want)
+			}
+			requireNoTerminalControl(t, "bd close --continue", got)
+		}
+	})
+
+	// The same molecules with each root assigned to alice: bob's close of the
+	// last step completes the molecule but its root refuses the auto-close,
+	// and the warning bd close prints above the hint cannot redraw it.
+	t.Run("continue_refused_auto_close_warns_escaped", func(t *testing.T) {
+		t.Parallel()
+		p := newSharedProxiedProject(t, bd, "rpc")
+		for _, root := range closeContinueRoots {
+			bdProxiedCreate(t, bd, p.dir, "Mol", "-t", "epic", "--labels", "template", "--id", root.id, "--assignee", "alice")
+			step := bdProxiedCreate(t, bd, p.dir, "Step", "--parent", root.id)
+			stdout, stderr, err := bdProxiedRunBuffers(t, bd, p.dir, "close", step.ID, "--continue", "--actor", "bob")
+			if err != nil {
+				t.Fatalf("bd close %s --continue failed: %v\nstdout:\n%s\nstderr:\n%s", step.ID, err, stdout, stderr)
+			}
+			wantStdout, wantStderr := closeContinueRefusal(root.id, root.shown, root.quoted)
+			if stdout != wantStdout || stderr != wantStderr {
+				t.Errorf("bd close --continue of %q with a refused auto-close prints\n%q\non stdout and\n%q\non stderr, want\n%q\nand\n%q", root.id, stdout, stderr, wantStdout, wantStderr)
+			}
+			requireNoTerminalControl(t, "bd close --continue with a refused auto-close", stderr+stdout)
 		}
 	})
 

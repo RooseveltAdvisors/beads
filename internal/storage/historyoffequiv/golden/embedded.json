@@ -1,5 +1,5 @@
 {
-  "recorded_from": "fm/upstream-sync-2026-10-23",
+  "recorded_from": "f35aef51b + gastownhall/beads#8024",
   "steps": [
     "create a",
     "create b blocked by a",
@@ -177,7 +177,7 @@
         "id"
       ],
       "rows": 51,
-      "sha256": "898f31694ce12dcd693f374634aea358b68239f6954fdcaae3b6342c1242f2bd"
+      "sha256": "fb855f675720e630a8077e11a22c8650e63d3afec69344afb1cd55551fc0c677"
     },
     "federation_peers": {
       "columns": [
@@ -199,8 +199,8 @@
         "applied_at",
         "content_hash"
       ],
-      "rows": 30,
-      "sha256": "eea213ee540b7bd3ba888959ddda24a179338d730e3638df1738fdd74cc1e5dd"
+      "rows": 27,
+      "sha256": "7164db2c129cbaafbd9c426d27e809d043cafc77e8aef1f68d1760905a685acb"
     },
     "interactions": {
       "columns": [
@@ -320,16 +320,10 @@
         "is_blocked",
         "row_lock",
         "storage_class",
-        "repeat_pattern",
-        "repeat_start",
-        "repeat_end",
-        "due_source",
-        "due_missed",
-        "current_revision",
-        "assignee_id"
+        "current_revision"
       ],
       "rows": 15,
-      "sha256": "1ced0d1672fd20da02ff8e702ca1e7739d14600abfe53dec1dcb2e081262f74d"
+      "sha256": "1f81df40f4c4d458f20cfb6535ca13468fa03fbd10276c44752977813a4b7e20"
     },
     "labels": {
       "columns": [
@@ -356,8 +350,8 @@
         "key",
         "value"
       ],
-      "rows": 31,
-      "sha256": "c1d1cbc41ca9968c5c7dd380609c28126c4024868dbade26575ce105b8931fb3"
+      "rows": 37,
+      "sha256": "11ab6875bdbc3b120b41dd722b1d9bb7e7889b851f85926a72c1a86d9a52b012"
     },
     "metadata": {
       "columns": [
@@ -408,8 +402,8 @@
         "version",
         "content_hash"
       ],
-      "rows": 72,
-      "sha256": "8f497acf2831086d3d8f187ed76ab6ca8e92716c5458d90abc2a95e5f099ff9c"
+      "rows": 69,
+      "sha256": "1d7a6ae809f330f8b4c3516af50ce7604c1db3cd4c1177af3e5c2f1991d74e14"
     },
     "store_epoch": {
       "columns": [
@@ -468,7 +462,7 @@
         "created_at"
       ],
       "rows": 25,
-      "sha256": "1ee25446153c51b39c4de60d7f03bb56172a84e72d28df2dd44ff79aa5fc3b23"
+      "sha256": "e4f35a0d4dab665ae53cc8205a0b08490894fe41f77d44174fee51c08697e2f0"
     },
     "wisp_labels": {
       "columns": [
@@ -535,17 +529,11 @@
         "started_at",
         "row_lock",
         "storage_class",
-        "repeat_pattern",
-        "repeat_start",
-        "repeat_end",
-        "due_source",
-        "due_missed",
         "current_revision",
-        "assignee_id",
         "is_blocked"
       ],
       "rows": 6,
-      "sha256": "90cce8119ad099e96a03bcc6f88055668ee2581b4420d5986fa76d6290de3f1c"
+      "sha256": "f28b157579dedd4373778dc6050b2d1995e1fe30e545e5c70c6b6ccf08ed75bf"
     }
   }
 }

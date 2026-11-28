@@ -16,7 +16,10 @@ go_library(
     ],
     importpath = "github.com/steveyegge/beads/internal/notify",
     visibility = ["//:__subpackages__"],
-    deps = ["//internal/seats"],
+    deps = [
+        "//internal/remedy",
+        "//internal/seats",
+    ],
 )
 
 go_test(

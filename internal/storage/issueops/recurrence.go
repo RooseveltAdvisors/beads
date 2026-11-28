@@ -58,6 +58,15 @@ const DueMissGrace = 24 * time.Hour
 // the work being stuck, and either wants a person.
 const DueMissEscalateAt = 3
 
+// DueFire is one bead the due sweep advanced, with the occurrence that fired
+// (old due_at). Occurrence is the durable key a notify outbox uses so a later
+// clock can publish the event without replaying or duplicating it.
+type DueFire struct {
+	ID         string
+	Occurrence time.Time // the due_at that arrived
+	Escalated  bool
+}
+
 // DueSweepResult reports what one sweep fired, per table. Issues are
 // permanent-table ids and are the only ones that decide whether the caller
 // mints a Dolt commit; wisp tables are dolt_ignored.
@@ -71,6 +80,9 @@ type DueSweepResult struct {
 	// says where to look, where "fired 9" alone does not.
 	Escalated      []string
 	EscalatedWisps []string
+	// Fires carries occurrence timestamps for Issues (and Escalated as a
+	// subset). Empty on older call sites that only need ids.
+	Fires []DueFire
 }
 
 // DueSweepCommitMessage names a sweep's dolt commit. n is the number of
@@ -100,21 +112,30 @@ func SweepDueBeadsInTx(ctx context.Context, tx DBTX) (DueSweepResult, error) {
 	if err != nil {
 		return result, err
 	}
-	issues, escalated, err := sweepDueBeadsInTable(ctx, tx, "issues", "events", live)
+	fires, err := sweepDueBeadsInTable(ctx, tx, "issues", "events", live)
 	if err != nil {
 		return result, err
 	}
-	result.Issues = issues
-	result.Escalated = escalated
-	wisps, escalatedWisps, err := sweepDueBeadsInTable(ctx, tx, "wisps", "wisp_events", live)
+	for _, f := range fires {
+		result.Issues = append(result.Issues, f.ID)
+		result.Fires = append(result.Fires, f)
+		if f.Escalated {
+			result.Escalated = append(result.Escalated, f.ID)
+		}
+	}
+	wispFires, err := sweepDueBeadsInTable(ctx, tx, "wisps", "wisp_events", live)
 	if err != nil {
 		if dberrors.IsTableNotExist(err) {
 			return result, nil
 		}
 		return result, err
 	}
-	result.Wisps = wisps
-	result.EscalatedWisps = escalatedWisps
+	for _, f := range wispFires {
+		result.Wisps = append(result.Wisps, f.ID)
+		if f.Escalated {
+			result.EscalatedWisps = append(result.EscalatedWisps, f.ID)
+		}
+	}
 	return result, nil
 }
 
@@ -170,9 +191,9 @@ type dueCandidate struct {
 // the status placeholders are generated, never interpolated values.
 //
 //nolint:gosec // G201: table and eventsTable are hardcoded constants from the caller;
-func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable string, live []types.Status) (fired, escalated []string, err error) {
+func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable string, live []types.Status) (fires []DueFire, err error) {
 	if len(live) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 	statusList, statusArgs := statusPlaceholders(live)
 	// repeat_window exists on both planes (0076 covers issues and wisps;
@@ -185,7 +206,7 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 		  AND status IN (%s)
 	`, table, statusList), statusArgs...)
 	if err != nil {
-		return nil, nil, fmt.Errorf("due sweep: scan %s: %w", table, err)
+		return nil, fmt.Errorf("due sweep: scan %s: %w", table, err)
 	}
 	var candidates []dueCandidate
 	for rows.Next() {
@@ -194,7 +215,7 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 		var start, end sql.NullTime
 		if err := rows.Scan(&c.id, &c.dueAt, &pattern, &start, &end, &window, &c.dueMissed, &c.priority); err != nil {
 			_ = rows.Close()
-			return nil, nil, fmt.Errorf("due sweep: scan %s row: %w", table, err)
+			return nil, fmt.Errorf("due sweep: scan %s row: %w", table, err)
 		}
 		c.repeatWindow = window.String
 		c.repeatPattern = pattern.String
@@ -208,13 +229,13 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
-		return nil, nil, fmt.Errorf("due sweep: iterate %s: %w", table, err)
+		return nil, fmt.Errorf("due sweep: iterate %s: %w", table, err)
 	}
 	if err := rows.Close(); err != nil {
-		return nil, nil, fmt.Errorf("due sweep: close %s rows: %w", table, err)
+		return nil, fmt.Errorf("due sweep: close %s rows: %w", table, err)
 	}
 	if len(candidates) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 
 	now := time.Now().UTC()
@@ -235,7 +256,7 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 					SET due_at = ?, updated_at = ?, row_lock = ?
 					WHERE id = ? AND due_at = ? AND status IN (%s)
 				`, table, statusList), args...); err != nil {
-					return nil, nil, fmt.Errorf("due sweep: quiet reschedule %s: %w", c.id, err)
+					return nil, fmt.Errorf("due sweep: quiet reschedule %s: %w", c.id, err)
 				}
 			}
 			continue
@@ -281,11 +302,11 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 			WHERE id = ? AND due_at = ? AND status IN (%s)
 		`, table, sourceClause, priorityClause, statusList), args...)
 		if err != nil {
-			return fired, escalated, fmt.Errorf("due sweep reschedule %s: %w", c.id, err)
+			return fires, fmt.Errorf("due sweep reschedule %s: %w", c.id, err)
 		}
 		n, err := res.RowsAffected()
 		if err != nil {
-			return fired, escalated, fmt.Errorf("due sweep reschedule %s rows affected: %w", c.id, err)
+			return fires, fmt.Errorf("due sweep reschedule %s rows affected: %w", c.id, err)
 		}
 		if n == 0 {
 			continue // rescued concurrently — leave it be
@@ -294,7 +315,7 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 		// priority), so it versions like every other mutator - the same call
 		// WakeExpiredDefersInTx makes for the rows it wakes.
 		if err := RecordVersionInTx(ctx, tx, c.id, DueTriggerActor); err != nil {
-			return fired, escalated, fmt.Errorf("version due reschedule %s: %w", c.id, err)
+			return fires, fmt.Errorf("version due reschedule %s: %w", c.id, err)
 		}
 		// The event carries the miss count, so a consumer reading the rail
 		// sees a first miss and a third one as different facts without
@@ -305,20 +326,17 @@ func sweepDueBeadsInTable(ctx context.Context, tx DBTX, table, eventsTable strin
 		}
 		if err := RecordFullEventWithCommentInTable(ctx, tx, eventsTable, c.id, types.EventDue,
 			DueTriggerActor, c.dueAt.UTC().Format(time.RFC3339), next.Format(time.RFC3339), comment); err != nil {
-			return fired, escalated, fmt.Errorf("record due event for %s: %w", c.id, err)
+			return fires, fmt.Errorf("record due event for %s: %w", c.id, err)
 		}
 		// A reschedule is a field change, so it journals as an update — past
 		// the rows-affected recheck, so a concurrently-rescued bead records
 		// nothing.
 		if err := RecordEventInTx(ctx, tx, EventUpdate, c.id, DueTriggerActor); err != nil {
-			return fired, escalated, err
+			return fires, err
 		}
-		fired = append(fired, c.id)
-		if raised {
-			escalated = append(escalated, c.id)
-		}
+		fires = append(fires, DueFire{ID: c.id, Occurrence: c.dueAt.UTC(), Escalated: raised})
 	}
-	return fired, escalated, nil
+	return fires, nil
 }
 
 // statusPlaceholders renders a status set as a bound-parameter list, so the
@@ -575,7 +593,7 @@ func SpawnRecurrenceInTx(ctx context.Context, tx DBTX, id, actor string) (SpawnR
 	if err != nil {
 		return result, fmt.Errorf("spawn recurrence for %s: read prefix: %w", id, err)
 	}
-	newID, err := GenerateIssueIDInTable(ctx, tx, "issues", prefix, successor, actor)
+	newID, err := GenerateIssueIDInTable(ctx, tx, "issues", prefix, successor, actor, nil)
 	if err != nil {
 		return result, fmt.Errorf("spawn recurrence for %s: generate id: %w", id, err)
 	}
@@ -740,6 +758,52 @@ func AnchorRecurrenceUpdate(oldIssue *types.Issue, updates map[string]interface{
 		return
 	}
 	updates["repeat_start"] = due.UTC()
+}
+
+// RealignCoupledRepeatStart handles an explicit first-date correction on an
+// established series. When --due alone moves a bead whose due_at previously
+// equaled repeat_start, the start bound moves with it so the series phase
+// stays coupled. Independently set bounds (start != due) are left alone, but a
+// new due before an explicit start is refused unless the caller also updates
+// --repeat-start. Runs after AnchorRecurrenceUpdate and before
+// ValidateRecurrenceUpdate.
+func RealignCoupledRepeatStart(oldIssue *types.Issue, updates map[string]interface{}) error {
+	rawDue, hasDue := updates["due_at"]
+	if !hasDue {
+		return nil
+	}
+	newDue, err := updateTimeValue("due_at", rawDue)
+	if err != nil {
+		return err
+	}
+	if newDue == nil {
+		return nil
+	}
+	pattern := oldIssue.RepeatPattern
+	if raw, ok := updates["repeat_pattern"].(string); ok {
+		pattern = raw
+	}
+	if pattern == "" {
+		return nil
+	}
+	if _, hasStart := updates["repeat_start"]; hasStart {
+		return nil
+	}
+	if oldIssue.RepeatStart == nil {
+		return nil
+	}
+	start := oldIssue.RepeatStart.UTC()
+	newDueUTC := newDue.UTC()
+	if oldIssue.DueAt != nil && oldIssue.DueAt.UTC().Equal(start) {
+		// Coupled first-date correction: due and start moved together.
+		updates["repeat_start"] = newDueUTC
+		return nil
+	}
+	if newDueUTC.Before(start) {
+		return fmt.Errorf("%w: --due %s is before --repeat-start %s; pass --repeat-start to move the bound, or pick a due on or after the start",
+			storage.ErrValidation, newDueUTC.Format(time.RFC3339), start.Format(time.RFC3339))
+	}
+	return nil
 }
 
 // ValidateRecurrenceUpdate checks the (repeat_pattern, repeat_start,

@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/steveyegge/beads/internal/config"
 	"github.com/steveyegge/beads/internal/configfile"
 	"github.com/steveyegge/beads/internal/gitignore"
 	"github.com/steveyegge/beads/internal/httpclient"
@@ -36,7 +37,8 @@ import (
 // as SaveTarget's own precondition. It DOES ensure both of this backend's
 // per-user filenames are covered by beadsDir's .gitignore
 // (gitignore.EnsurePatternIgnored): the sidecar, and
-// httpclient.LocalMetadataFileName, which the store writes on first use. That
+// httpclient.LocalMetadataFileName, which the store writes on first use, unless
+// the workspace sets gitignore.manage: false and so owns that file. That
 // is the same guarantee `bd connect` makes via doctor.EnsureGitignoreForBeadsDir
 // — but through a small, independent implementation here rather than
 // importing cmd/bd/doctor, whose package as a whole pulls in dolt and
@@ -50,30 +52,17 @@ import (
 // (`bd connect`'s own connectCmd.RunE, test/embedder's linkage proof) can call
 // this instead and stay correct across a future change to either file's shape.
 //
-// Attach refuses a workspace in a format this build cannot open — a
-// metadata.json graph_mode other than "dependency", or the
-// .beads/graph-preview-format marker — with *UnsupportedWorkspaceFormatError,
+// Attach refuses a historical SQLite workspace with *LegacyWorkspaceError,
 // the refusal every open and `bd connect` give it, and writes nothing. It
-// checks before its metadata read, which migrates a legacy config.json, and
-// again on what that read returned. Only a concurrent writer can change the
-// format between the two, and the second check cannot undo the read's
-// migration: a legacy config.json given a graph format in that window is
-// refused only after it was migrated into metadata.json. The Dolt store's
-// metadata-driven constructors share this window.
+// checks before its metadata read, which migrates a legacy config.json.
 func Attach(beadsDir string, target Target) error {
 	// Before Load, which migrates a legacy config.json into metadata.json.
-	if err := configfile.CheckDiscoveredWorkspaceFormat(beadsDir); err != nil {
+	if err := configfile.CheckDiscoveredForOpen(beadsDir); err != nil {
 		return err
 	}
 	cfg, err := configfile.Load(beadsDir)
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", configfile.ConfigFileName, err)
-	}
-	// Again on what Load returned, which a writer could have changed since
-	// the check above; the Dolt constructors re-check theirs the same way.
-	// This refuses such a workspace but cannot undo Load's migration of it.
-	if err := configfile.CheckWorkspaceFormat(cfg, beadsDir); err != nil {
-		return err
 	}
 	if cfg == nil {
 		cfg = configfile.DefaultConfig()
@@ -99,17 +88,20 @@ func Attach(beadsDir string, target Target) error {
 			target.PreviousBackend = cfg.GetBackend()
 		}
 	}
-	// The encoder itself: the format is checked above, against the metadata
-	// this saves alongside.
+	// The encoder itself: the workspace is checked above.
 	if err := httpclient.SaveTarget(beadsDir, target); err != nil {
 		return fmt.Errorf("writing %s: %w", httpclient.TargetFileName, err)
 	}
 	// Both of this backend's per-user files: the sidecar just written, and
 	// the local metadata file the store itself writes on first use, which
 	// never passes through here and so must be covered in advance.
-	for _, name := range []string{httpclient.TargetFileName, httpclient.LocalMetadataFileName} {
-		if err := gitignore.EnsurePatternIgnored(beadsDir, name); err != nil {
-			return fmt.Errorf("ensuring %s is gitignored: %w", name, err)
+	// A workspace that sets gitignore.manage: false owns its .gitignore, and
+	// covering these files is then its job.
+	if config.GitignoreManaged(beadsDir) {
+		for _, name := range []string{httpclient.TargetFileName, httpclient.LocalMetadataFileName} {
+			if err := gitignore.EnsurePatternIgnored(beadsDir, name); err != nil {
+				return fmt.Errorf("ensuring %s is gitignored: %w", name, err)
+			}
 		}
 	}
 	// Only the backend SELECTION changes here. cfg.Database/cfg.ProjectID (if
@@ -142,10 +134,11 @@ func Attach(beadsDir string, target Target) error {
 // different backend — those stay the command's own job; Connect's contract
 // is exactly "handshake, then attach".
 //
-// A workspace Attach would refuse for its format is refused before the
-// handshake, as `bd connect` refuses it, so Connect dials nothing for it.
+// A workspace Attach would refuse as a historical SQLite workspace is refused
+// before the handshake, as `bd connect` refuses it, so Connect dials nothing
+// for it.
 func Connect(ctx context.Context, beadsDir string, target Target, opts Options) (*ServerSnapshot, error) {
-	if err := configfile.CheckDiscoveredWorkspaceFormat(beadsDir); err != nil {
+	if err := configfile.CheckDiscoveredForOpen(beadsDir); err != nil {
 		return nil, err
 	}
 	snapshot, err := Handshake(ctx, target, opts)

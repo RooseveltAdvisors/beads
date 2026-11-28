@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 
 	"github.com/spf13/cobra"
 
 	"github.com/steveyegge/beads/internal/beads"
 	"github.com/steveyegge/beads/internal/metrics"
 	"github.com/steveyegge/beads/internal/migration"
+	"github.com/steveyegge/beads/internal/remedy"
 	"github.com/steveyegge/beads/internal/ui"
 )
 
@@ -53,6 +55,96 @@ func diagHint() string {
 
 func whereDiagHint() string {
 	return workspaceDiagHint(false)
+}
+
+// skippedUserGlobalBeadsNote returns the note naming the user-level beads
+// directory workspace discovery passed over (GH#4402), or "" when it passed
+// over none that holds a workspace (beads.SkippedUserGlobalBeadsDir).
+func skippedUserGlobalBeadsNote() string {
+	return userGlobalBeadsNote(runtime.GOOS, beads.SkippedUserGlobalBeadsDir())
+}
+
+// userGlobalBeadsNote is the note naming the skipped user-level directory dir
+// on goos, or "" when dir is "".
+//
+// It names BEADS_DIR for one command at a time, never as an export: BEADS_DIR
+// outranks every project's own .beads, so a shell that kept it exported
+// would send every project's writes to the global database. A POSIX shell
+// gets the per-command form to paste, with dir quoted for it
+// (remedy.CommandArg). cmd.exe and PowerShell have no per-command form, so
+// Windows gets the instruction alone.
+func userGlobalBeadsNote(goos, dir string) string {
+	if dir == "" {
+		return ""
+	}
+	note := "Note: " + remedy.PrintedValue(dir) + " is your user-level beads directory; bd uses it outside a project\n" +
+		"      only when BEADS_DIR names it. Name it for each command that should use it"
+	if goos == "windows" {
+		note += "."
+	} else {
+		arg, argNote := remedy.CommandArg(goos, dir, "<dir>")
+		note += ":\n      BEADS_DIR=" + arg + " bd <command>" + argNote
+	}
+	return note + "\n      (an exported BEADS_DIR overrides every project's own .beads)"
+}
+
+// printNoDatabaseRefusal prints the refusal a command that needs a workspace
+// gets when discovery selects none, with the note naming the user-level
+// directory discovery passed over, if any.
+func printNoDatabaseRefusal() {
+	fmt.Fprintf(os.Stderr, "Error: no beads database found\n")
+	fmt.Fprintf(os.Stderr, "Hint: %s\n", diagHint())
+	fmt.Fprintf(os.Stderr, "      or set BEADS_DIR to point to your .beads directory\n")
+	if note := skippedUserGlobalBeadsNote(); note != "" {
+		fmt.Fprintln(os.Stderr, remedy.PrintedText(note))
+	}
+	if note := beadsDirAtProjectRootNote(os.Getenv("BEADS_DIR")); note != "" {
+		fmt.Fprintln(os.Stderr, note)
+	}
+}
+
+// beadsDirAtProjectRootNote returns the note for a BEADS_DIR that names a
+// project root whose .beads directory holds the workspace (GH#7034), or ""
+// for any other value. The hint above it says to set BEADS_DIR, which here is
+// already set and is the cause, so the note names the value that was meant.
+func beadsDirAtProjectRootNote(named string) string {
+	workspace, ok := beads.ProjectRootNamedAsBeadsDir(named)
+	if !ok {
+		return ""
+	}
+	return "Note: BEADS_DIR is set to " + remedy.PrintedValue(named) + ", which holds no beads workspace;\n" +
+		"      " + remedy.PrintedValue(workspace) + " does. BEADS_DIR names the .beads directory itself:\n" +
+		"      set it to that path, or unset it."
+}
+
+// importRefusesBeadsDirAtProjectRoot reports whether bd import must refuse
+// because BEADS_DIR names the project root of an initialized workspace
+// instead of its .beads (GH#7034, beads.ProjectRootNamedAsBeadsDir).
+//
+// The root pre-run asks it before discovery, because discovery can route
+// such a root as a workspace with no store in it, and import's fallback,
+// which runs only when discovery finds nothing, is then never reached. In
+// server mode (BEADS_DOLT_SERVER_MODE, BEADS_DOLT_SHARED_SERVER, or
+// dolt.mode: server in the user's config) a config.json or metadata.json of
+// the project's own routes the root as a server workspace, and so does a
+// config.yaml of its own when the server host is not local; the metadata
+// load that follows moves such a config.json into a metadata.json and
+// removes it. Where discovery finds nothing, the fallback sets a workspace
+// up in the directory BEADS_DIR names, and an import that then fails for
+// want of a prefix leaves the empty store behind. Either way the import
+// lands in the project root, beside the real workspace.
+//
+// A store directory in the project root, an embeddeddolt an earlier import
+// left there or a dolt directory, makes no exception. Unless beads metadata
+// sits beside it, which already keeps ProjectRootNamedAsBeadsDir from
+// reporting the root, it is no workspace: an import let through there
+// landed in the real .beads, failed on the legacy-workspace guard, or moved
+// a config.json of the project's own into a metadata.json, removed it, and
+// failed on the empty store. Import refuses every root the helper reports,
+// as init and bootstrap do.
+func importRefusesBeadsDirAtProjectRoot() bool {
+	_, slip := beads.ProjectRootNamedAsBeadsDir(os.Getenv("BEADS_DIR"))
+	return slip
 }
 
 func workspaceDiagHint(includeWhere bool) string {
@@ -126,7 +218,7 @@ func HandleProxyCapabilityError(err error) error {
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(buildJSONCapabilityError(capErr))
 	} else {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", capErr.Message)
+		fmt.Fprintf(os.Stderr, "Error: %s\n", remedy.PrintedText(capErr.Message))
 	}
 	return &exitError{Code: code}
 }
@@ -143,8 +235,14 @@ func jsonStdoutError(message, hint string) {
 	_ = encoder.Encode(buildJSONError(message, hint))
 }
 
+// HandleError prints "Error: " and the formatted message to stderr, and
+// returns the exit error that reports it. Like every printer here it spells
+// the message through remedy.PrintedText: an error can repeat a value a
+// cloned repository sets (a routed path, a dial error naming dolt.host, a
+// clone error naming sync.remote), and a carriage return or escape in it
+// would redraw the line, and the remedy beside it, that the user reads.
 func HandleError(format string, args ...interface{}) error {
-	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", args...)
+	fmt.Fprintf(os.Stderr, "Error: %s\n", remedy.PrintedText(fmt.Sprintf(format, args...)))
 	return &exitError{Code: 1}
 }
 
@@ -160,8 +258,8 @@ func HandleErrorWithHint(message, hint string) error {
 	if jsonOutput {
 		jsonStderrError(message, hint)
 	} else {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", message) //nolint:gosec // G705: stderr, not a browser context
-		fmt.Fprintf(os.Stderr, "Hint: %s\n", hint)     //nolint:gosec // G705: stderr, not a browser context
+		fmt.Fprintf(os.Stderr, "Error: %s\n", remedy.PrintedText(message)) //nolint:gosec // G705: stderr, not a browser context
+		fmt.Fprintf(os.Stderr, "Hint: %s\n", remedy.PrintedText(hint))     //nolint:gosec // G705: stderr, not a browser context
 	}
 	return &exitError{Code: 1}
 }
@@ -170,8 +268,8 @@ func HandleErrorWithHintRespectJSON(message, hint string) error {
 	if jsonOutput {
 		jsonStdoutError(message, hint)
 	} else {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", message)
-		fmt.Fprintf(os.Stderr, "Hint: %s\n", hint)
+		fmt.Fprintf(os.Stderr, "Error: %s\n", remedy.PrintedText(message))
+		fmt.Fprintf(os.Stderr, "Hint: %s\n", remedy.PrintedText(hint))
 	}
 	return &exitError{Code: 1}
 }
@@ -181,7 +279,7 @@ func SilentExit() error {
 }
 
 func WarnError(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, "Warning: "+format+"\n", args...)
+	fmt.Fprintf(os.Stderr, "Warning: %s\n", remedy.PrintedText(fmt.Sprintf(format, args...)))
 }
 
 // ExitMigrationFrozen is the exit code for a write refused because a

@@ -43,6 +43,24 @@ type updateInput struct {
 	// --if-assignee guard rides the command; it also opts into the notes
 	// overwrite and close-policy bypasses (runCommandUpdateMutation).
 	force bool
+	// leaseTTL is --ttl, the lease length a --claim arms; 0 keeps the store's
+	// default.
+	leaseTTL time.Duration
+}
+
+// normalizeAssigneeInput folds the hidden-empty spellings of an assignee
+// value given to update, assign or batch (bd-wkcfuz, #8203) into the "" clear
+// sentinel that `--assignee ""` already uses: whitespace-only text and a "-"
+// with nothing but whitespace around it ("-", " - "). Stored verbatim, they
+// read as ASSIGNED to every emptiness check (claim, ready --unassigned, the
+// transfer fence), so a bead meant to go back to the pool stayed hooked. The
+// trim only decides whether a value is a clear: every other value passes
+// through byte-for-byte, spaced names (" alice ") included.
+func normalizeAssigneeInput(v string) string {
+	if t := strings.TrimSpace(v); t == "" || t == "-" {
+		return ""
+	}
+	return v
 }
 
 func gatherUpdateInput(ctx context.Context, cmd *cobra.Command) (*updateInput, error) {
@@ -57,7 +75,7 @@ func gatherUpdateInput(ctx context.Context, cmd *cobra.Command) (*updateInput, e
 		if status == "closed" {
 			session, _ := cmd.Flags().GetString("session")
 			if session == "" {
-				session = os.Getenv("CLAUDE_SESSION_ID")
+				session, _ = ambientSession()
 			}
 			if session != "" {
 				in.fields["closed_by_session"] = session
@@ -82,7 +100,7 @@ func gatherUpdateInput(ctx context.Context, cmd *cobra.Command) (*updateInput, e
 	}
 	if cmd.Flags().Changed("assignee") {
 		assignee, _ := cmd.Flags().GetString("assignee")
-		in.fields["assignee"] = assignee
+		in.fields["assignee"] = normalizeAssigneeInput(assignee)
 	}
 	in.force, _ = cmd.Flags().GetBool("force")
 	description, descChanged, err := getDescriptionFlag(cmd)
@@ -266,6 +284,9 @@ func gatherUpdateInput(ctx context.Context, cmd *cobra.Command) (*updateInput, e
 	in.unsetMetadata = unsetMetadataFlags
 
 	in.claim, _ = cmd.Flags().GetBool("claim")
+	// Already validated by updateCmd's RunE above the route dispatch
+	// (leaseTTLFromFlags); an absent --ttl reads as 0, the store's default.
+	in.leaseTTL, _ = cmd.Flags().GetDuration(leaseTTLFlagName)
 
 	// bd-wsqvw conditional-update guards, mirroring the non-proxied path's
 	// updateGuardsFromFlags rules: Changed()-detected presence (so

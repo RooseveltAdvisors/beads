@@ -72,18 +72,20 @@ const CommentsKeysetPredicate = `created_at >= ? AND ((created_at > ?) OR (id > 
 // the same transaction as a comment mutation. The max expressions preserve a
 // newer timestamp when an imported or replicated comment is backdated.
 //
+// It deliberately leaves row_lock alone: comments participate in list ordering
+// via updated_at / last_activity (house PR #7), but RowVersion / CAS stays
+// lifecycle-and-ownership only (upstream CommenterAdd holds the token).
+//
 //nolint:gosec // G201: issueTable comes from WispTableRouting (hardcoded constants)
 func TouchIssueActivityInTx(ctx context.Context, tx DBTX, issueID string, at time.Time) error {
 	isWisp := IsActiveWispInTx(ctx, tx, issueID)
 	issueTable, _, _, _ := WispTableRouting(isWisp)
 	stamp := FormatAuxTime(at.UTC())
-	rowLockClause, rowLockArgs := RowLockClause()
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE %s
 		SET updated_at = CASE WHEN updated_at < ? THEN ? ELSE updated_at END,
-			last_activity = CASE WHEN last_activity IS NULL OR last_activity < ? THEN ? ELSE last_activity END,
-			%s
-		WHERE id = ?`, issueTable, rowLockClause), append([]any{stamp, stamp, stamp, stamp}, append(rowLockArgs, issueID)...)...); err != nil {
+			last_activity = CASE WHEN last_activity IS NULL OR last_activity < ? THEN ? ELSE last_activity END
+		WHERE id = ?`, issueTable), stamp, stamp, stamp, stamp, issueID); err != nil {
 		return fmt.Errorf("touch issue activity: %w", err)
 	}
 	return nil
@@ -356,9 +358,7 @@ func DeleteIssueCommentInTx(ctx context.Context, tx DBTX, issueID, commentID, ac
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE issue_id = ? AND id = ?`, commentTable), issueID, commentID); err != nil {
 		return nil, fmt.Errorf("delete comment: %w", err)
 	}
-	if err := TouchIssueActivityInTx(ctx, tx, issueID, time.Now().UTC()); err != nil {
-		return nil, err
-	}
+	// Same as AddIssueCommentInTx: never write the anchor issue row.
 	if err := AddCommentEventInTx(ctx, tx, issueID, actor, "Deleted comment "+commentID); err != nil {
 		return nil, err
 	}

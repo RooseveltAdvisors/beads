@@ -39,16 +39,16 @@ const (
 var (
 	updateRequestMembers = []string{
 		"actor", updateClaimMember, "expected_assignee", "expected_status", "expected_version",
-		"due_clear_reason", "force_assignee_transfer", "force_close_policy", "force_notes_overwrite", "allow_template",
+		"due_clear_reason", "force_assignee_transfer", "force_claim_blocked", "force_close_policy", "force_notes_overwrite", "allow_template",
 		updatePatchMember,
 	}
 	issuePatchMembers = []string{
 		"title", "description", "design", "acceptance_criteria",
 		"notes", "append_notes", "priority", "issue_type", "status",
-		"assignee", "parent_id", "labels", "add_labels", "remove_labels", "metadata",
+		"assignee", "parent_id", "labels", "add_labels", "remove_labels", "remove_label_prefixes", "metadata",
 		"estimated_minutes", "external_ref", "due_at", "defer_until",
 		"repeat_pattern", "repeat_window", "repeat_start", "repeat_end",
-		"estimated_minutes", "external_ref", "due_at", "defer_until", "persistence",
+		"persistence",
 		"await_id", "waiters",
 	}
 	// nullablePatchMembers is the closed set on which explicit `null` CLEARS
@@ -189,6 +189,20 @@ func (s *Server) updateRequest(w http.ResponseWriter, r *http.Request, id string
 	if !ok {
 		return issueops.UpdateRequest{}, false
 	}
+	// force_claim_blocked is the claim's own bypass, so it is claim-only —
+	// the force_notes_overwrite rule, applied to a request-level member: a
+	// member that bypasses a refusal the request cannot earn is refused HERE
+	// rather than silently ignored, so a caller that meant `claim` never
+	// believes a bypass that did nothing.
+	forceClaimBlocked, ok := s.booleanMember(w, r, members, "force_claim_blocked")
+	if !ok {
+		return issueops.UpdateRequest{}, false
+	}
+	if forceClaimBlocked && !claim {
+		s.fail(w, r, InvalidArgument("force_claim_blocked", ReasonInvalidValue,
+			"`force_claim_blocked` bypasses the fence on a CLAIM; send `claim` with it"))
+		return issueops.UpdateRequest{}, false
+	}
 	// allow_template is passed through: the role owns the template guard and
 	// what standing it down means.
 	allowTemplate, ok := s.booleanMember(w, r, members, "allow_template")
@@ -261,6 +275,7 @@ func (s *Server) updateRequest(w http.ResponseWriter, r *http.Request, id string
 		ExpectedAssignee:      expectedAssignee,
 		ForceClosePolicy:      forceClosePolicy,
 		ForceAssigneeTransfer: forceAssigneeTransfer,
+		ForceClaimBlocked:     forceClaimBlocked,
 		ForceNotesOverwrite:   forceNotesOverwrite,
 		AllowTemplate:         allowTemplate,
 		DueClearReason:        dueClearReason,
@@ -478,8 +493,9 @@ func (s *Server) issuePatch(w http.ResponseWriter, r *http.Request, id string, m
 		}
 		patch.Metadata = metadata
 	}
-	// THE THREE LABEL MEMBERS ARE ONE PATCH, assembled together because the role
-	// models them as one: LabelPatch applies Replace, then Add, then Remove, so
+	// THE FOUR LABEL MEMBERS ARE ONE PATCH, assembled together because the role
+	// models them as one: LabelPatch applies Replace, then RemovePrefixes, then
+	// Add, then Remove, so
 	// removal wins where a label appears in more than one of them. They are NOT
 	// mutually exclusive, which is the difference from `notes`/`append_notes`
 	// above — that pair is a contradiction the role refuses, and this trio has a
@@ -501,6 +517,9 @@ func (s *Server) issuePatch(w http.ResponseWriter, r *http.Request, id string, m
 		}},
 		{"add_labels", wire.AddLabels, func(v []string) { labelEdit.Add = v }},
 		{"remove_labels", wire.RemoveLabels, func(v []string) { labelEdit.Remove = v }},
+		// Dimension removal, applied after `labels` and before `add_labels`
+		// (LabelPatch's own order); bounded like the other three.
+		{"remove_label_prefixes", wire.RemoveLabelPrefixes, func(v []string) { labelEdit.RemovePrefixes = v }},
 	} {
 		if !set(member.name) {
 			continue
@@ -647,6 +666,22 @@ func (s *Server) failUpdate(w http.ResponseWriter, r *http.Request, request issu
 	// `patch.assignee` and steers toward a force this request cannot send.
 	case request.Claim && (errors.Is(err, storage.ErrAlreadyClaimed) || errors.Is(err, storage.ErrNotClaimable)):
 		s.fail(w, r, named(claimRefusal(err), updateClaimMember))
+
+	// The claim's LOCAL-BLOCKER refusal, the third way a claim is answered:
+	// `not_claimable` naming `claim` with the blockers in the `blockers`
+	// member — the member that tells a client which refusal this is, where the
+	// status's own not_claimable carries `issue_status` instead. Matched as
+	// its own arm because it shares NEITHER sentinel with the close-policy
+	// refusal below (ErrCloseBlocked) nor the claim-conflict vocabulary above:
+	// the same BlockedError type carries all three families' blockers, and the
+	// sentinel is the only thing that tells them apart. `force_claim_blocked`
+	// is the bypass, and it never gets here: the role skips the guard when the
+	// request sends it.
+	case request.Claim && errors.Is(err, storage.ErrClaimBlocked):
+		refused()
+		s.fail(w, r, named(claimBlockedResult(err,
+			"clear the blocker, or send `force_claim_blocked`"),
+			updateClaimMember))
 
 	case errors.Is(err, issueops.ErrCloseOpenChildren):
 		res := named(newResult(CodeNotClosable,

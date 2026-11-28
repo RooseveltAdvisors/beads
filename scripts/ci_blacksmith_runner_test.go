@@ -57,21 +57,34 @@ const blacksmithWindows2vcpuRunsOn = "${{ 'windows-latest' }}"
 const blacksmithWindows4vcpuRunsOn = "${{ 'windows-latest' }}"
 
 // bazel.yml's lanes pick their runner from the rbe job's decision alone
-// (TestBazelRBEJobDecidesOnce): Blacksmith in mode remote, GitHub-hosted
-// otherwise. bazelRemoteRunsOn builds that ternary for one Blacksmith size so
-// every lane's pinned runs-on is the same literal apart from the label.
+// (TestBazelRBEJobDecidesOnce): Blacksmith in modes remote and cache,
+// GitHub-hosted otherwise. Mode cache reads rbe-cache (rbe-west's anonymous
+// read-only cache), so an rbe=cache dispatch -- the only way into mode cache
+// -- needs the same primary runner as mode remote. bazelRemoteRunsOn builds
+// that ternary for one primary size so every lane's pinned runs-on is the same
+// literal apart from the label. Upstream passes its Blacksmith sizes here;
+// this fork passes its GitHub-hosted equivalents (144da5eca), which is why the
+// label argument is an ubuntu-* string rather than a blacksmith-* one.
 func bazelRemoteRunsOn(label string) string {
-	return "${{ needs.rbe.outputs.mode == 'remote' && '" + label + "' || 'ubuntu-latest' }}"
+	return "${{ (needs.rbe.outputs.mode == 'remote' || needs.rbe.outputs.mode == 'cache') && '" + label + "' || 'ubuntu-latest' }}"
 }
 
 // bazelRRCCacheReaderRunsOn is bazelRemoteRunsOn for the lanes that read the
 // remote repo contents cache in mode cache (isBazelRRCCacheReader): their
 // GitHub-hosted fallback is ubuntu-24.04, not ubuntu-latest, because the
 // cached trees come from a 24.04 host (design R2) and the image must not
-// move under them.
+// move under them. (Mode cache takes the primary runner, the same ternary
+// bazelRemoteRunsOn builds, so ubuntu-24.04 is only its fallback.)
 func bazelRRCCacheReaderRunsOn(label string) string {
-	return "${{ needs.rbe.outputs.mode == 'remote' && '" + label + "' || 'ubuntu-24.04' }}"
+	return "${{ (needs.rbe.outputs.mode == 'remote' || needs.rbe.outputs.mode == 'cache') && '" + label + "' || 'ubuntu-24.04' }}"
 }
+
+// bazelBlacksmithModes: the modes in which bazelRemoteRunsOn picks the lane's
+// primary runner rather than its GitHub-hosted fallback (the name is
+// upstream's; upstream's primary is its Blacksmith label, this fork's is its
+// GitHub-hosted equivalent because the blacksmith-* pool stopped accepting jobs
+// for this org on 2026-10-13, 144da5eca).
+var bazelBlacksmithModes = map[string]bool{"remote": true, "cache": true}
 
 // isBazelRRCCacheReader: a remote repo contents cache reader
 // (bazelRRCReadLanes) that also runs in mode cache (not remote-only).
@@ -491,7 +504,7 @@ func mustEvalGHRunsOn(t *testing.T, expr string, ctx map[string]string) string {
 // `||`, a wrong field name) fails this test even if a hand-rolled Go mirror
 // would have been edited to match it.
 func TestSameRepoBlacksmithExpressionSemantics(t *testing.T) {
-	const ownRepo = "steveyegge/beads"
+	const ownRepo = "gastownhall/beads"
 	type tc struct {
 		name       string
 		event      string
@@ -546,7 +559,7 @@ func TestSameRepoBlacksmithExpressionSemantics(t *testing.T) {
 // resolve to Blacksmith on every event shape, forks and Dependabot included;
 // there is no GitHub-hosted fallback left to drift to.
 func TestBlacksmithWindowsMacOSRunsOnEveryEvent(t *testing.T) {
-	const ownRepo = "steveyegge/beads"
+	const ownRepo = "gastownhall/beads"
 	events := []struct{ name, event, headRepo, actor string }{
 		{"same-repo PR", "pull_request", ownRepo, "alice"},
 		{"merge_group", "merge_group", "", ""},
@@ -580,11 +593,81 @@ func TestBlacksmithWindowsMacOSRunsOnEveryEvent(t *testing.T) {
 	}
 }
 
+// TestBazelRBERunnerOutsideGastownhall evaluates bazel.yml's real rbe job
+// runs-on: in gastownhall (github.repository_owner_id gastownhallOwnerID,
+// whatever the org is called) the same-repo events get Blacksmith and fork,
+// Dependabot and pull_request_target runs GitHub-hosted; in a fork
+// repository's own CI, which has no Blacksmith, every event is
+// GitHub-hosted, so its pushes and dispatches reach mode local instead of
+// queueing for a day. (The lanes follow the decided mode, local there:
+// TestBlacksmithBazelRunnerSizes.)
+func TestBazelRBERunnerOutsideGastownhall(t *testing.T) {
+	rbe := readCIWorkflow(t, bazelWorkflowName).job(t, bazelRBEJobName)
+	runsOn := rbe.RunsOn
+	forkRepo := rbe.step(t, "Decide remote execution").Env["FORK_REPO"]
+	events := []struct {
+		name, event, headRepo, actor string
+		blacksmith                   bool // in gastownhall
+	}{
+		{"push", "push", "", "alice", true},
+		{"workflow_dispatch", "workflow_dispatch", "", "alice", true},
+		{"schedule", "schedule", "", "", true},
+		{"merge_group", "merge_group", "", "github-merge-queue[bot]", true},
+		{"same-repo PR", "pull_request", "<own>", "alice", true},
+		{"fork PR", "pull_request", "someone-else/beads", "alice", false},
+		{"Dependabot PR", "pull_request", "<own>", "dependabot[bot]", false},
+		{"pull_request_target", "pull_request_target", "someone-else/beads", "alice", false},
+	}
+	for _, owner := range []struct {
+		repo, name, id string
+		upstream       bool
+	}{
+		{"gastownhall/beads", "gastownhall", gastownhallOwnerID, true},
+		{"gastowntown/beads", "gastowntown", gastownhallOwnerID, true}, // renamed org
+		{"someone/beads", "someone", "31337", false},
+		{"gastownhall/beads-fork", "gastownhall", "31337", false}, // a look-alike name
+	} {
+		// The decision's FORK_REPO reads the same id: mode local exactly
+		// outside gastownhall.
+		v, err := evalGHExpr(forkRepo, map[string]string{"github.repository_owner": owner.name, "github.repository_owner_id": owner.id})
+		if err != nil {
+			t.Fatalf("FORK_REPO %q: %v", forkRepo, err)
+		}
+		if got, want := ghTruthy(v), !owner.upstream; got != want {
+			t.Errorf("%s (owner id %s): FORK_REPO %q = %v, want %v", owner.repo, owner.id, forkRepo, got, want)
+		}
+		for _, e := range events {
+			head := e.headRepo
+			if head == "<own>" {
+				head = owner.repo
+			}
+			ctx := map[string]string{
+				"github.event_name":                             e.event,
+				"github.event.pull_request.head.repo.full_name": head,
+				"github.repository":                             owner.repo,
+				"github.repository_owner":                       owner.name,
+				"github.repository_owner_id":                    owner.id,
+				"github.actor":                                  e.actor,
+			}
+			want := "ubuntu-latest"
+			if owner.upstream && e.blacksmith {
+				want = "blacksmith-2vcpu-ubuntu-2404"
+			}
+			if got := mustEvalGHRunsOn(t, runsOn.String(), ctx); got != want {
+				t.Errorf("%s in %s (owner id %s): rbe runs-on %q, want %q", e.name, owner.repo, owner.id, got, want)
+			}
+		}
+	}
+}
+
 // TestBlacksmithBazelRunnerSizes evaluates every bazel.yml lane's real
-// runs-on (and package-mcp's xdist worker count) under each rbe mode: mode
-// remote gets the lane's Blacksmith size, every other mode the GitHub-hosted
-// runner, and package-mcp runs 16 xdist workers exactly when it is on its
-// 8 vCPU runner (8 everywhere else, package-mcp.sh's default).
+// runs-on (and package-mcp's xdist worker count) under each rbe mode: every
+// mode expects the GitHub-hosted runner, because the blacksmith-* pool stopped
+// accepting jobs for this org on 2026-10-13 and every label moved to its
+// GitHub-hosted equivalent (144da5eca; flip back when the pool picks up jobs
+// again). package-mcp runs 16 xdist workers on that 8 vCPU runner and 8
+// everywhere else (package-mcp.sh's default), which is why
+// BEADS_MCP_PYTEST_WORKERS is the constant '16' rather than a mode ternary.
 func TestBlacksmithBazelRunnerSizes(t *testing.T) {
 	workflow := readCIWorkflow(t, bazelWorkflowName)
 	wantRemote := map[string]string{
@@ -607,7 +690,7 @@ func TestBlacksmithBazelRunnerSizes(t *testing.T) {
 			if isBazelRRCCacheReader(name) {
 				want = "ubuntu-24.04"
 			}
-			if mode == "remote" {
+			if bazelBlacksmithModes[mode] {
 				want = "ubuntu-latest"
 				if label, ok := wantRemote[name]; ok {
 					want = label

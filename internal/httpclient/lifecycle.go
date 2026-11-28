@@ -90,6 +90,12 @@ func (l *httpLifecycle) Create(ctx context.Context, req issueops.CreateRequest) 
 		if req.Issue != nil && req.Issue.ID != "" && errors.Is(err, issueops.ErrAlreadyExists) {
 			return issueops.CreateResult{}, fmt.Errorf("%s: %w", req.Issue.ID, err)
 		}
+		// The same for a retired id: the 410 names the member, not the id, so
+		// the typed refusal gets the caller's own id back.
+		var expired *issueops.IdempotencyExpiredError
+		if req.Issue != nil && errors.As(err, &expired) && expired.ID == "" {
+			expired.ID = req.Issue.ID
+		}
 		return issueops.CreateResult{}, err
 	}
 	return issueops.CreateResult{Issue: issue}, nil
@@ -410,6 +416,22 @@ func (l *httpLifecycle) Update(ctx context.Context, req issueops.UpdateRequest) 
 			return issueops.UpdateResult{}, err
 		}
 	}
+	if patchCarriesLabelPrefixes(req.Patch) {
+		if err := l.store.requireCapabilityBeforeDial(ctx, wire.OpUpdateIssue, wire.CapIssuesUpdateLabelPrefixes); err != nil {
+			return issueops.UpdateResult{}, err
+		}
+	}
+	// Read BEFORE the `claim` fallback below: a force_claim_blocked request
+	// cannot ride claimIssue (the fallback serves a claim ALONE, and the
+	// member would be refused as unknown there), so a server that predates
+	// the member gets the refusal here rather than a dial that would only
+	// skew-400 — or, through a server that predates the REFUSAL too, a claim
+	// of a blocked issue nobody meant to allow.
+	if req.ForceClaimBlocked {
+		if err := l.store.requireCapabilityBeforeDial(ctx, wire.OpUpdateIssue, wire.CapIssuesUpdateForceClaimBlocked); err != nil {
+			return issueops.UpdateResult{}, err
+		}
+	}
 	if req.Claim {
 		served, err := l.store.servesCapability(ctx, wire.CapIssuesUpdateClaim)
 		if err != nil {
@@ -467,13 +489,14 @@ func updateGuards(req issueops.UpdateRequest) wire.UpdateGuards {
 	return guards
 }
 
-// updateFlags carries the claim and the three force overrides onto the wire.
+// updateFlags carries the claim and the four force overrides onto the wire.
 // The wire sends each only when true, so a request that sets none of them is
 // byte-identical to one built before any of them was carried.
 func updateFlags(req issueops.UpdateRequest) wire.UpdateFlags {
 	return wire.UpdateFlags{
 		Claim:                 req.Claim,
 		ForceAssigneeTransfer: req.ForceAssigneeTransfer,
+		ForceClaimBlocked:     req.ForceClaimBlocked,
 		ForceClosePolicy:      req.ForceClosePolicy,
 		ForceNotesOverwrite:   req.ForceNotesOverwrite,
 		AllowTemplate:         req.AllowTemplate,
@@ -563,6 +586,27 @@ func (s *Store) requireCapabilityBeforeDial(ctx context.Context, op, token strin
 func patchCarriesGates(patch issueops.IssuePatch) bool {
 	return patch.AwaitID.Set || patch.Waiters.Set
 }
+
+// patchCarriesLabelPrefixes reports whether a patch names a prefix removal
+// (LabelPatch.RemovePrefixes, GH#5657), which both patch documents carry only
+// to a server advertising issues.update.labelPrefixes. It is the encoders' own
+// condition: they send a non-empty list and omit an empty one. An older server
+// answers the member with its unknown-member 400, and dropping it would leave
+// the old values of the dimension beside the new one, so the client refuses
+// instead.
+func patchCarriesLabelPrefixes(patch issueops.IssuePatch) bool {
+	return len(patch.Labels.RemovePrefixes) > 0
+}
+
+// ServesLabelPrefixPatch implements storage.LabelPrefixPatchProber from the
+// handshake: whether this server takes LabelPatch.RemovePrefixes
+// (issues.update.labelPrefixes). `bd set-state` asks before it writes its
+// event, and against a server that does not sends the exact labels it read.
+func (s *Store) ServesLabelPrefixPatch(ctx context.Context) (bool, error) {
+	return s.servesCapability(ctx, wire.CapIssuesUpdateLabelPrefixes)
+}
+
+var _ storage.LabelPrefixPatchProber = (*Store)(nil)
 
 // gateFieldRefusal rebuilds the role's *issueops.GateFieldError from the 400
 // a gate member past its bound earns. The server answers the role's refusal
@@ -892,6 +936,7 @@ func (l *httpLifecycle) claimOnlyUpdate(ctx context.Context, req issueops.Update
 func isClaimOnlyUpdate(req issueops.UpdateRequest) bool {
 	return reflect.DeepEqual(req.Patch, issueops.IssuePatch{}) &&
 		!req.ForceAssigneeTransfer &&
+		!req.ForceClaimBlocked &&
 		!req.ForceClosePolicy &&
 		!req.ForceNotesOverwrite &&
 		!req.AllowTemplate &&
@@ -915,8 +960,8 @@ func isWispIssue(issue *types.Issue) bool {
 // refuseUnwirableUpdateMembers walks the UpdateRequest members the wire's
 // updateIssue body has no place for.
 //
-// The claim and the three force overrides are NOT on this switch: updateIssue
-// publishes all four (internal/httpapi/apigen's UpdateIssueRequest), the
+// The claim and the four force overrides are NOT on this switch: updateIssue
+// publishes all five (internal/httpapi/apigen's UpdateIssueRequest), the
 // server reads them (internal/httpapi/update.go), and Update sends them beside
 // the patch as wire.UpdateFlags. Their W-UpdateRequest rows are RETIRED.
 //
@@ -1018,13 +1063,14 @@ func encodeIssuePatch(patch issueops.IssuePatch) (map[string]any, error) {
 	setNullableTime(out, "due_at", patch.DueAt)
 	setNullableTime(out, "defer_until", patch.DeferUntil)
 
-	// THE ORDERED LABEL EDIT, whole. The wire spells it as three FLAT members
-	// where applyBatch nests them under one object, and the difference is
-	// historical rather than meaningful: `labels` shipped as a bare array, and
-	// nesting it now would re-type a published member. What both spell is the
-	// role's own algebra — replace, then add, then remove, so REMOVAL WINS where
-	// a label appears in more than one — and the server assembles all three into
-	// ONE issueops.LabelPatch, so the order is never this client's to arrange.
+	// THE ORDERED LABEL EDIT, whole. The wire spells it as FLAT members where
+	// applyBatch nests them under one object, and the difference is historical
+	// rather than meaningful: `labels` shipped as a bare array, and nesting it
+	// now would re-type a published member. What both spell is the role's own
+	// algebra — replace, then the prefix removal, then add, then remove, so
+	// REMOVAL WINS where a label appears in more than one — and the server
+	// assembles them into ONE issueops.LabelPatch, so the order is never this
+	// client's to arrange.
 	//
 	// AN INCREMENTAL EDIT USED TO REFUSE HERE (W-IssuePatch.Labels), and it is
 	// worth saying what the refusal was protecting: a client that degraded an add
@@ -1052,6 +1098,12 @@ func encodeIssuePatch(patch issueops.IssuePatch) (map[string]any, error) {
 	}
 	if len(patch.Labels.Remove) > 0 {
 		out["remove_labels"] = append([]string(nil), patch.Labels.Remove...)
+	}
+	// The prefix removal (issues.update.labelPrefixes). Update has already
+	// refused it, before the dial, against a server that does not advertise
+	// the token; this only spells it.
+	if len(patch.Labels.RemovePrefixes) > 0 {
+		out["remove_label_prefixes"] = append([]string(nil), patch.Labels.RemovePrefixes...)
 	}
 	return out, nil
 }

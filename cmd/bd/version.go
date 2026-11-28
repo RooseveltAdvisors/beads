@@ -12,11 +12,12 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/beads/internal/beads"
 	"github.com/steveyegge/beads/internal/metrics"
+	"github.com/steveyegge/beads/internal/storage/schema"
 )
 
 var (
 	// Version is the current version of bd (overridden by ldflags at build time)
-	Version = "1.3.1"
+	Version = "1.3.4"
 	// Build can be set via ldflags at compile time
 	Build = "dev"
 	// Commit and branch the git revision the binary was built from (optional ldflag)
@@ -53,9 +54,20 @@ var versionCmd = &cobra.Command{
 		branch := resolveBranch()
 
 		if jsonOutput {
+			// latest_schema_migration and latest_ignored_schema_migration are
+			// the newest migration this binary embeds in each series: the
+			// number a database's schema_migrations and
+			// ignored_schema_migrations cursors reach once this binary has
+			// migrated it. They come from the embedded migration files, so a
+			// script can compare a candidate binary with a database's cursor
+			// before any command of that binary opens the database. (The
+			// schema_version key outputJSON adds is the JSON contract version,
+			// not a database schema version.)
 			result := map[string]interface{}{
-				"version": Version,
-				"build":   Build,
+				"version":                         Version,
+				"build":                           Build,
+				"latest_schema_migration":         schema.LatestVersion(),
+				"latest_ignored_schema_migration": schema.LatestIgnoredVersion(),
 			}
 			if commit != "" {
 				result["commit"] = commit

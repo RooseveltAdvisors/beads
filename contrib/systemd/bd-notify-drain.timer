@@ -1,6 +1,6 @@
 [Unit]
 Description=Periodically drain beads notify outbox
-Documentation=https://github.com/steveyegge/beads/blob/main/contrib/systemd/README.md
+Documentation=https://github.com/gastownhall/beads/blob/main/contrib/systemd/README.md
 
 [Timer]
 # Short cadence: sweep is the clock; drain is delivery lag bound.

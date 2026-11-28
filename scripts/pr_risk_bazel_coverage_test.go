@@ -30,6 +30,14 @@ const (
 	prRiskDependabotValue = "${{ github.actor == 'dependabot[bot]' }}"
 	// pr.yml's gate id for "the Bazel lanes ran remotely".
 	bazelRemoteGateID = "BAZEL_REMOTE"
+	// The decision's fork-repository test: a fork repository's own CI
+	// (not a fork PR into beads) is mode local, so it never reads rbe-cache.
+	// The owner's id, not its name: an org rename keeps upstream upstream.
+	bazelForkRepoValue = "${{ github.repository_owner_id != '" + gastownhallOwnerID + "' }}"
+	// The gastownhall org's account id (gh api orgs/gastownhall --jq .id):
+	// github.repository_owner_id, and $GITHUB_REPOSITORY_OWNER_ID, in its
+	// runs.
+	gastownhallOwnerID = "255961667"
 )
 
 // rbeFacts: what GitHub evaluates bazel.yml's rbe step's env expressions on.
@@ -43,11 +51,15 @@ type rbeFacts struct {
 	// What rbe-fork-mint's /v1/status answers this run (bazelTestMintEnv;
 	// "" = unreachable). Only fork and Dependabot pull_request runs ask.
 	mint string
+	// github.repository_owner is not gastownhall: the run is a fork
+	// repository's own CI (a push to the fork, a PR within it), never a
+	// fork PR into beads.
+	forkRepo bool
 }
 
 func (f rbeFacts) String() string {
-	return fmt.Sprintf("event=%s var=%q secret=%v fork=%v dependabot=%v mint=%q",
-		f.event, f.rbeVar, f.secret != "", f.fork, f.dependabot, f.mint)
+	return fmt.Sprintf("event=%s var=%q secret=%v fork=%v dependabot=%v mint=%q fork-repo=%v",
+		f.event, f.rbeVar, f.secret != "", f.fork, f.dependabot, f.mint, f.forkRepo)
 }
 
 // forkPR: a run that asks rbe-fork-mint (bazel.yml's rbe job).
@@ -73,7 +85,7 @@ func rbeGateFactsMatrix() []rbeFacts {
 			for _, secret := range rbeSecrets {
 				for _, fork := range []bool{false, true} {
 					for _, dependabot := range []bool{false, true} {
-						f := rbeFacts{event, v, secret, fork, dependabot, ""}
+						f := rbeFacts{event, v, secret, fork, dependabot, "", false}
 						if !f.forkPR() {
 							out = append(out, f)
 							continue
@@ -121,6 +133,8 @@ func evalRBEExpr(t *testing.T, expr string, f rbeFacts, with map[string]string) 
 		return strconv.FormatBool(strings.EqualFold(input("rbe", "on"), "cache"))
 	case "${{ github.event.pull_request.head.repo.fork == true }}":
 		return strconv.FormatBool(f.fork)
+	case bazelForkRepoValue:
+		return strconv.FormatBool(f.forkRepo)
 	case bazelForkFarmValue:
 		return strconv.FormatBool(strings.EqualFold(input("fork-farm", "off"), "authorized") &&
 			f.event == "pull_request_target" && input("checkout-sha", "") != "")
@@ -236,7 +250,12 @@ func TestPRGateRequiresRemoteBazelLanes(t *testing.T) {
 			t.Errorf("%v: mode %s, every lane that runs in it passed: gate pass = %v, want %v", f, mode, pass, bazelRemoteModes[mode])
 		}
 	}
-	for _, mode := range []string{"remote", "fork-ro", "fork-rw", "cache", "skip"} {
+	// Never mode cache: rbe-cache refuses GitHub-hosted runners, so only an
+	// rbe=cache dispatch reaches it, never a pull_request or merge group.
+	if saw["cache"] {
+		t.Errorf("the fact matrix reached mode cache on a pull_request or merge group: %v", saw)
+	}
+	for _, mode := range []string{"remote", "fork-ro", "fork-rw", "local", "skip"} {
 		if !saw[mode] {
 			t.Errorf("the fact matrix never reached mode %s: %v", mode, saw)
 		}
@@ -249,18 +268,22 @@ func TestPRGateRequiresRemoteBazelLanes(t *testing.T) {
 		mode string
 		pass bool
 	}{
-		{"same-repo PR, farm on", rbeFacts{"pull_request", "true", "x", false, false, ""}, "remote", true},
-		{"same-repo PR, kill switch (var unset)", rbeFacts{"pull_request", "", "x", false, false, ""}, "skip", false},
-		{"same-repo PR, executor secret missing", rbeFacts{"pull_request", "true", "", false, false, ""}, "cache", false},
-		{"fork PR, rbe-fork ro", rbeFacts{"pull_request", "true", "", true, false, "ro"}, "fork-ro", true},
-		{"fork PR, rbe-fork rw", rbeFacts{"pull_request", "", "", true, false, "rw"}, "fork-rw", true},
-		{"fork PR, rbe-fork closed", rbeFacts{"pull_request", "true", "", true, false, "closed"}, "cache", false},
-		{"fork PR, mint unreachable", rbeFacts{"pull_request", "true", "", true, false, ""}, "cache", false},
-		{"Dependabot PR, rbe-fork ro", rbeFacts{"pull_request", "true", "", false, true, "ro"}, "fork-ro", true},
-		{"Dependabot PR, rbe-fork closed", rbeFacts{"pull_request", "", "", false, true, "closed"}, "cache", false},
-		{"merge_group", rbeFacts{"merge_group", "true", "x", false, false, ""}, "remote", true},
-		{"merge_group, kill switch (var unset)", rbeFacts{"merge_group", "", "x", false, false, ""}, "skip", false},
-		{"merge_group, executor secret missing", rbeFacts{"merge_group", "true", "", false, false, ""}, "cache", false},
+		{"same-repo PR, farm on", rbeFacts{"pull_request", "true", "x", false, false, "", false}, "remote", true},
+		{"same-repo PR, kill switch (var unset)", rbeFacts{"pull_request", "", "x", false, false, "", false}, "skip", false},
+		{"same-repo PR, executor secret missing", rbeFacts{"pull_request", "true", "", false, false, "", false}, "local", false},
+		{"fork PR, rbe-fork ro", rbeFacts{"pull_request", "true", "", true, false, "ro", false}, "fork-ro", true},
+		{"fork PR, rbe-fork rw", rbeFacts{"pull_request", "", "", true, false, "rw", false}, "fork-rw", true},
+		{"fork PR, rbe-fork closed", rbeFacts{"pull_request", "true", "", true, false, "closed", false}, "local", false},
+		{"fork PR, mint unreachable", rbeFacts{"pull_request", "true", "", true, false, "", false}, "local", false},
+		{"Dependabot PR, rbe-fork ro", rbeFacts{"pull_request", "true", "", false, true, "ro", false}, "fork-ro", true},
+		{"Dependabot PR, rbe-fork closed", rbeFacts{"pull_request", "", "", false, true, "closed", false}, "local", false},
+		{"merge_group", rbeFacts{"merge_group", "true", "x", false, false, "", false}, "remote", true},
+		{"merge_group, kill switch (var unset)", rbeFacts{"merge_group", "", "x", false, false, "", false}, "skip", false},
+		{"merge_group, executor secret missing", rbeFacts{"merge_group", "true", "", false, false, "", false}, "local", false},
+		// A fork repository's own CI: local, never rbe-cache or the mint
+		// (red, as every non-remote mode is).
+		{"fork repository's own PR, mint would say ro", rbeFacts{"pull_request", "", "", true, false, "ro", true}, "local", false},
+		{"fork repository's own PR, var and secret set", rbeFacts{"pull_request", "true", "x", false, false, "", true}, "local", false},
 	} {
 		out, err := runDecisionStep(t, rbeStep, c.f, call.With)
 		if err != nil {
@@ -271,6 +294,24 @@ func TestPRGateRequiresRemoteBazelLanes(t *testing.T) {
 		}
 		if pass, log := runPRGateStep(t, gateStep, prGateFor(t, lanesFor[c.f.event], c.f.event, out["mode"])); pass != c.pass {
 			t.Errorf("%s: pr.yml gate pass = %v, want %v\n%s", c.name, pass, c.pass, log)
+		}
+	}
+
+	// A red BAZEL_REMOTE says what to do: in a fork repository's own CI
+	// (always mode local, FORK_REPO) a re-run never helps, so the message
+	// names that case instead of asking for one; in gastownhall a local run
+	// means rbe-fork was closed or refused, and a later re-run may pass.
+	for _, c := range []struct {
+		name, repo, ownerID, want, not string
+	}{
+		{"fork repository's own PR", "someone/beads", "31337", "this is a fork repository's own CI (someone/beads)", "re-run all jobs later"},
+		{"fork PR into beads, rbe-fork closed", mergeQueueOwnRepo, gastownhallOwnerID, "re-run all jobs later", "fork repository's own CI"},
+	} {
+		sc := prGateFor(t, lanes, "pull_request", "local")
+		sc.flags = map[string]string{"GITHUB_REPOSITORY": c.repo, "GITHUB_REPOSITORY_OWNER_ID": c.ownerID}
+		pass, log := runPRGateStep(t, gateStep, sc)
+		if pass || !strings.Contains(log, c.want) || strings.Contains(log, c.not) {
+			t.Errorf("%s: gate pass %v, log lacks %q or says %q:\n%s", c.name, pass, c.want, c.not, log)
 		}
 	}
 
@@ -966,6 +1007,13 @@ func TestBazelRetiredLanesCannotBeNarrowed(t *testing.T) {
 				"BEADS_TEST_REQUIRE_DOLT_CONTAINER": "1", "BEADS_TEST_SUBPROCESS_BINARY": "$(rlocationpath :dolt_race_off)", "GOMAXPROCS": "4",
 			},
 		},
+		// No legacy job's: the server storage tier's one target that PR Risk
+		// never ran, the whole versioncontrolops_test binary on a required
+		// local dolt sql-server (its Compact tests skip everywhere else).
+		"//internal/storage/versioncontrolops:versioncontrolops_dolt_test": {
+			[]string{"$(rootpath :versioncontrolops_test)"},
+			map[string]string{"BEADS_TEST_DOLT_SERVER": "local", "BEADS_TEST_REQUIRE_DOLT_CONTAINER": "1"},
+		},
 	}
 	laneTags := regexp.MustCompile(`"(embedded|dolt-server-proxied|dolt-server-integration)"`)
 	quoted := regexp.MustCompile(`"([^"]*)"`)
@@ -1029,6 +1077,17 @@ func TestBazelRetiredLanesCannotBeNarrowed(t *testing.T) {
 			"-test.count=1",
 			"-test.run=^(TestDocFreshness.*|TestRequiredSuiteContract)$$",
 			"-required-suite=doc-freshness",
+		},
+		// The served write roles through bd serve's production Provider arm (C6
+		// of the bringup test plan): a second run, on the provider source, of
+		// tests httpclient_served_test runs in full on the roles source. The
+		// env is pinned by scripts/served_provider_lane_test.go.
+		"//internal/httpclient:httpclient_served_provider_test": {
+			"$(rootpath :httpclient_test)",
+			"-test.v",
+			"-test.count=1",
+			"-test.timeout=14m",
+			"-test.run=^(TestServedDeleter|TestServedLifecycle|TestServedMetadataCAS|TestServedClaimer|TestServedReleaser|TestServedReadyClaimer|TestServedBatchCloser|TestServedTierServesFromTheSourceItNames)",
 		},
 	}
 	err = walkBazelFiles(root, true, func(path string, d os.DirEntry) error {

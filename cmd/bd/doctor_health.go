@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/beads/cmd/bd/doctor"
+	"github.com/steveyegge/beads/internal/config"
 	"github.com/steveyegge/beads/internal/configfile"
 	"github.com/steveyegge/beads/internal/doltserver"
 	"github.com/steveyegge/beads/internal/storage/doltutil"
@@ -27,16 +28,19 @@ func runCheckHealth(path string) error {
 
 	cfg, err := configfile.Load(beadsDir)
 	if err != nil || cfg == nil {
-		if issue := doctor.CheckHooksQuick(Version); issue != "" {
+		if issue := checkHooksQuickFor(beadsDir); issue != "" {
 			return printCheckHealthHint([]string{issue})
 		}
 		return nil
 	}
 
 	host := cfg.GetDoltServerHost()
-	port := doltserver.DefaultConfig(beadsDir).Port
+	// The port the store dials (doltserver.ResolveEndpoint): its rule, the
+	// legacy BEADS_DOLT_PORT included, which DefaultConfig leaves out.
+	ep := doltserver.ResolveEndpoint(beadsDir, cfg)
+	port := ep.Port
 	if port == 0 {
-		if issue := doctor.CheckHooksQuick(Version); issue != "" {
+		if issue := checkHooksQuickFor(beadsDir); issue != "" {
 			return printCheckHealthHint([]string{issue})
 		}
 		return nil
@@ -49,7 +53,7 @@ func runCheckHealth(path string) error {
 		Host:     host,
 		Port:     port,
 		User:     cfg.GetDoltServerUser(),
-		Password: cfg.GetDoltServerPasswordForPort(port),
+		Password: ep.Password(),
 		Database: database,
 		Timeout:  2 * time.Second,
 		TLS:      cfg.GetDoltServerTLS(),
@@ -67,7 +71,7 @@ func runCheckHealth(path string) error {
 		}
 	}
 
-	if issue := doctor.CheckHooksQuick(Version); issue != "" {
+	if issue := checkHooksQuickFor(beadsDir); issue != "" {
 		issues = append(issues, issue)
 	}
 
@@ -75,6 +79,17 @@ func runCheckHealth(path string) error {
 		return printCheckHealthHint(issues)
 	}
 	return nil
+}
+
+// checkHooksQuickFor is doctor.CheckHooksQuick for the workspace at beadsDir,
+// which reports nothing when that workspace sets hooks.manage: false: bd never
+// refreshes those hooks, so after an upgrade every bd section in them reads as
+// outdated, and the --fix the hint advises leaves them alone.
+func checkHooksQuickFor(beadsDir string) string {
+	if !config.HooksManaged(beadsDir) {
+		return ""
+	}
+	return doctor.CheckHooksQuick(Version)
 }
 
 // runDeepValidation runs full graph integrity validation
@@ -128,6 +143,7 @@ func printServerHealthResult(result doctor.ServerHealthResult) {
 	var warnings []doctor.DoctorCheck
 
 	for _, check := range result.Checks {
+		check = check.Printed()
 		var statusIcon string
 		switch check.Status {
 		case statusOK:

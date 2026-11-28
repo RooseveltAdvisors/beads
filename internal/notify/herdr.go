@@ -8,9 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/steveyegge/beads/internal/remedy"
 )
 
 // Instance is one live herdr-hosted agent of any harness (pi, claude, codex, …).
@@ -222,7 +225,8 @@ func DefaultPrompt(rec Record) string {
 		rec.Kind, rec.IssueID, prioTag, rec.Seat, title,
 	)
 	fmt.Fprintf(&b, "%s\n\n", reminderLine(rec.Kind))
-	fmt.Fprintf(&b, "Read the thread: bd comments %s   (full detail: bd show %s)\n\n", rec.IssueID, rec.IssueID)
+	idArg, idNote := remedy.CommandArg(runtime.GOOS, rec.IssueID, "<issue-id>")
+	fmt.Fprintf(&b, "Read the thread: bd comments %s%s   (full detail: bd show %s)\n\n", idArg, idNote, idArg)
 	b.WriteString(reminderFooter)
 	return b.String()
 }

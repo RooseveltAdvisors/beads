@@ -139,8 +139,9 @@ Array output carries no top-level `schema_version` field:
 
 ### Error output
 
-Errors with `--json` active emit JSON — most error paths write it to stderr,
-though some command-result error paths emit the same shape to stdout:
+With `--json` active, a failing command reports its error either as JSON or
+as plain text, depending on the command and the failure. JSON errors go to
+stderr from some commands and to stdout from others, in this shape:
 
 ```json
 {
@@ -154,7 +155,40 @@ though some command-result error paths emit the same shape to stdout:
 `error` and `schema_version` are always present. In envelope mode
 (`BD_JSON_ENVELOPE=1`) the error payload moves inside the envelope:
 `{"schema_version": 1, "data": {"error": ..., "code": ..., "hint": ...}}`.
-JSON-mode errors exit with code 1.
+
+Many failures stay plain text on stderr even with `--json`, usually as
+`Error: <message>`. Flag-parsing errors, `--readonly` refusals and the
+migration freeze (below) are examples. A failure exits with code 1 unless its
+command documents another code; for example, `bd update` exits 13 when every
+failure is a stale `--if-assignee`/`--if-status` guard. Branch on the exit
+code, not on whether JSON appeared.
+
+A command refused by the proxied-server capability gate (for example
+`bd branch` on a proxied-server workspace) emits a typed refusal on stdout
+instead, also exiting 1, whose `{code, error, mutates}` members are a frozen
+contract:
+
+```json
+{
+  "schema_version": 1,
+  "code": "proxy.branch.unsupported",
+  "error": "...",
+  "mutates": false,
+  "reason": "design"
+}
+```
+
+`code` is stable and safe to branch on; `error` is informative prose.
+`mutates` is always `false` on a refusal. `reason` (`design` for a deliberate
+refusal, `unimplemented` for one not routed yet) is additive: every refusal
+from the capability registry carries it, as do `proxy.store.unrouted` and
+`proxy.migrate.external_endpoint`, while runtime-state refusals such as
+`proxy.migrate.invalid_state` omit it. Envelope mode moves the same members
+under `data`.
+
+A write refused because a migration freeze marker is active exits with code
+**14** and prints a plain-text refusal (naming the marker's path) to stderr,
+even with `--json`. Treat exit 14 as "retry later", not as a generic failure.
 
 ## Field Contracts by Command
 
@@ -163,9 +197,12 @@ JSON-mode errors exit with code 1.
 Required fields per item:
 - `id` (string): Issue ID (e.g., "beads-abc")
 - `title` (string): Issue title
-- `status` (string): open, in_progress, closed, deferred
+- `status` (string): open, in_progress, blocked, deferred, closed, pinned,
+  hooked, or a configured custom status (`status.custom`)
 - `priority` (number): 0-4
-- `issue_type` (string): bug, feature, task, epic, chore
+- `issue_type` (string): bug, feature, task, epic, chore, decision, message,
+  molecule, gate, spike, story, milestone, the internal `event` type, or a
+  type configured in `types.custom`
 - `created_at` (string): RFC3339 timestamp
 
 Optional fields:
@@ -220,6 +257,34 @@ items, plus:
   `bd ready` also withholds because a blocked parent blocks its children,
   carries no `gated_by`
 
+### bd show --head --json
+
+Returns the same top-level array, one element per requested ID, with each
+element cut down to a short view of a long issue. An element has the fields
+of `bd show --json`, with these differences:
+- `description`, `design` and `acceptance_criteria` are absent
+- `notes` (string): the last 1 KB of the field, cut on a line start where one
+  is near and never inside a character; absent when the field is empty
+- `comments` (object[]): the last 3 comments, returned without
+  `--include-comments` (which `--head` refuses); absent when the issue has
+  none. `--comments-tail N` changes the count and `0` keeps them all.
+  `comment_count` is still the count of all comments, and `comments_omitted`
+  is not set
+- `dependencies` (object[]): each record reduced to its identity fields, as
+  with `--brief-deps`
+- `withheld` (object): what the view left out. Always present, with every
+  member present, so its presence tells the short view from a full record,
+  and all five are `0` for an issue the view shows whole:
+  - `description_bytes`, `design_bytes`, `acceptance_criteria_bytes`
+    (number): the size of each absent field
+  - `notes_bytes` (number): the size of the earlier notes that were cut off
+  - `comments` (number): how many older comments were left out
+
+The view is cut from the answer that
+`bd show --json --include-comments --brief-deps` reads, so it adds no
+parameter to the read contract or the HTTP API. The output is short; the read
+still fetches every comment.
+
 ### bd close --json
 
 Returns a top-level JSON array with one entry per closed issue, in the order
@@ -245,20 +310,22 @@ the flag has nothing to report, the plain array is returned.
 
 ### `import --json`
 
-Returns a summary object when `--json` is active:
+Returns a summary object when `--json` is active. `source`, `created` and
+`skipped` are always present; every other member is omitted when it is zero,
+empty or false:
 - `source` (string): File path or "stdin"
 - `created` (number): Issues created
-- `updated` (number): Existing issues updated
+- `updated` (number, optional): Existing issues updated
 - `unchanged` (number, optional): Rows identical to local state, untouched
 - `skipped` (number): Issues skipped (stale rows + dedup)
-- `dedup_skipped` (number): Issues skipped by `--dedup` title match
-- `memories` (number): Memory records imported
-- `ids` (string[]): IDs of created issues
-- `updated_issues` (object[]): Per-issue summary of what an update changed
-- `tie_kept_local_ids` (string[]): Equal-`updated_at` rows where local state won
-- `stale_skipped_ids` (string[]): Rows older than the local issue, skipped
-- `skipped_dependencies` (string[]): Dependency edges whose target id was absent
-- `dry_run` (boolean): Whether `--dry-run` was active
+- `dedup_skipped` (number, optional): Issues skipped by `--dedup` title match
+- `memories` (number, optional): Memory records imported
+- `ids` (string[], optional): IDs of created issues
+- `updated_issues` (object[], optional): Per-issue summary of what an update changed
+- `tie_kept_local_ids` (string[], optional): Equal-`updated_at` rows where local state won
+- `stale_skipped_ids` (string[], optional): Rows older than the local issue, skipped
+- `skipped_dependencies` (string[], optional): Dependency edges whose target id was absent
+- `dry_run` (boolean, optional): Present (`true`) only when `--dry-run` was active
 
 ### bd export --json
 

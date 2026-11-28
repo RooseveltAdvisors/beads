@@ -3,12 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/steveyegge/beads/internal/config"
+	"github.com/steveyegge/beads/internal/remedy"
 	"github.com/steveyegge/beads/internal/types"
 	"github.com/steveyegge/beads/internal/ui"
 	"github.com/steveyegge/beads/internal/uimd"
@@ -161,7 +163,13 @@ func formatIssueMetadataWithGates(issue *types.Issue, gates []*types.Issue) stri
 	// Lease line: only when an active lease is held (in_progress + non-null
 	// lease_expires_at). row_lock is internal and never surfaced.
 	if issue.Status == types.StatusInProgress && issue.LeaseExpiresAt != nil {
+		// A lapsed lease that bd reclaim has not swept yet is still shown: say
+		// when it expired. formatTimeUntil answers a past time with the bare
+		// word "expired", which read "Lease: expires expired" here.
 		leaseLine := fmt.Sprintf("Lease: expires %s", formatTimeUntil(*issue.LeaseExpiresAt))
+		if !issue.LeaseExpiresAt.After(time.Now()) {
+			leaseLine = fmt.Sprintf("Lease: expired %s", formatTimeAgo(*issue.LeaseExpiresAt))
+		}
 		if issue.HeartbeatAt != nil {
 			leaseLine += fmt.Sprintf(" (heartbeat %s)", formatTimeAgo(*issue.HeartbeatAt))
 		}
@@ -385,7 +393,11 @@ func printComments(comments []*types.Comment, tailN int, formatTime func(time.Ti
 		if hidden == 1 {
 			noun = "comment"
 		}
-		fmt.Printf("  %s\n", ui.RenderMuted(fmt.Sprintf("… %d older %s hidden — bd show %s for the full record", hidden, noun, issueID)))
+		// issueID is read from the store (a partial-id argument resolves to
+		// it), so it goes into the bd show command as one shell word, or as a
+		// placeholder named escaped after it (remedy.CommandArg).
+		arg, note := remedy.CommandArg(runtime.GOOS, issueID, "<issue-id>")
+		fmt.Printf("  %s\n", ui.RenderMuted(fmt.Sprintf("… %d older %s hidden — bd show %s for the full record%s", hidden, noun, arg, note)))
 	}
 
 	for _, comment := range comments[start:] {

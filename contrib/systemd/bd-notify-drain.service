@@ -1,6 +1,6 @@
 [Unit]
 Description=Drain beads notify outbox to assignee seat transports
-Documentation=https://github.com/steveyegge/beads/blob/main/contrib/systemd/README.md
+Documentation=https://github.com/gastownhall/beads/blob/main/contrib/systemd/README.md
 After=bd-due-sweep.service
 
 [Service]

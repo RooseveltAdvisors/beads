@@ -19,6 +19,7 @@ import (
 	bdhttp "github.com/steveyegge/beads/backend/http"
 	"github.com/steveyegge/beads/internal/configfile"
 	"github.com/steveyegge/beads/internal/httpclient"
+	"github.com/steveyegge/beads/internal/testutil/legacyworkspace"
 )
 
 func mustAttachTestURL(t *testing.T, raw string) *url.URL {
@@ -237,79 +238,31 @@ func workspaceWriters() map[string]func(t *testing.T, beadsDir string, server *r
 	return writers
 }
 
-// TestAttachConnectAndSaveTargetRefuseAGraphWorkspace is this backend's half
-// of the graph workspace fence. Activation writes the sidecar, .gitignore and
-// metadata.json's backend selection, and its metadata read migrates a legacy
-// config.json, so a workspace whose metadata or graph-preview-format marker
-// declares a format this build cannot open is refused before any of that, as
-// every open and `bd connect` refuse it; SaveTarget, which an embedder can
-// call alone, refuses it before writing the sidecar. Connect refuses before
-// it dials: a handshake for a workspace it will not attach would only hand
-// the server a credential.
-func TestAttachConnectAndSaveTargetRefuseAGraphWorkspace(t *testing.T) {
+// TestAttachConnectAndSaveTargetRefuseAHistoricalSQLiteWorkspace pins that
+// this backend's activation refuses a historical SQLite workspace with the
+// refusal bd's command admission prints there, before it writes anything:
+// without it Attach migrated a pre-Dolt config.json, saved metadata.json
+// selecting backend http over the SQLite database, and wrote the sidecar and
+// .gitignore, after which bd itself no longer recognized the workspace as one
+// to migrate. Connect refuses before it dials.
+func TestAttachConnectAndSaveTargetRefuseAHistoricalSQLiteWorkspace(t *testing.T) {
 	hermeticEnv(t)
-	const marker = "link-preview-v9\n"
-	layouts := []struct {
-		name  string
-		files map[string]string
-		// mode and marker are the refusal's GraphMode and FormatMarker.
-		mode   string
-		marker bool
-	}{
-		{name: "graph_mode link", mode: "link", files: map[string]string{
-			configfile.ConfigFileName: `{"backend":"dolt","dolt_mode":"server","graph_mode":"link","graph_workspace":"w1","graph_schema_version":3,"graph_ready":true}`,
-		}},
-		{name: "unknown graph_mode", mode: "future-format", files: map[string]string{
-			configfile.ConfigFileName: `{"backend":"dolt","graph_mode":"future-format"}`,
-		}},
-		{name: "graph_mode in legacy config.json", mode: "link", files: map[string]string{
-			"config.json": `{"backend":"dolt","dolt_mode":"server","graph_mode":"link"}`,
-		}},
-		{name: "marker only", marker: true, files: map[string]string{
-			configfile.GraphFormatMarkerFile: marker,
-		}},
-		{name: "marker beside stripped metadata", marker: true, files: map[string]string{
-			configfile.ConfigFileName:        `{"backend":"dolt","dolt_mode":"server"}`,
-			configfile.GraphFormatMarkerFile: marker,
-		}},
-		{name: "marker beside dependency metadata", marker: true, files: map[string]string{
-			configfile.ConfigFileName:        `{"backend":"dolt","graph_mode":"dependency"}`,
-			configfile.GraphFormatMarkerFile: marker,
-		}},
-		{name: "marker beside unparseable metadata", marker: true, files: map[string]string{
-			configfile.ConfigFileName:        `{"backend":`,
-			configfile.GraphFormatMarkerFile: marker,
-		}},
-	}
-	for _, layout := range layouts {
+	for _, layout := range legacyworkspace.HistoricalSQLiteLayouts() {
 		for name, activate := range workspaceWriters() {
-			t.Run(layout.name+"/"+name, func(t *testing.T) {
+			t.Run(layout.Name+"/"+name, func(t *testing.T) {
 				root := t.TempDir()
 				beadsDir := filepath.Join(root, ".beads")
-				if err := os.MkdirAll(beadsDir, 0o700); err != nil {
-					t.Fatal(err)
-				}
-				for file, content := range layout.files {
-					if err := os.WriteFile(filepath.Join(beadsDir, file), []byte(content), 0o600); err != nil {
-						t.Fatal(err)
-					}
-				}
+				layout.Write(t, beadsDir)
 				before := workspaceTreeDigest(t, root)
 				server := newRecordingServer(t)
 
 				err := activate(t, beadsDir, server)
-				var formatErr *bdhttp.UnsupportedWorkspaceFormatError
-				if !errors.As(err, &formatErr) {
-					t.Fatalf("%s = %v, want *bdhttp.UnsupportedWorkspaceFormatError", name, err)
-				}
-				if formatErr.BeadsDir != beadsDir || formatErr.GraphMode != layout.mode || formatErr.FormatMarker != layout.marker {
-					t.Fatalf("refusal = %+v, want BeadsDir %q, GraphMode %q and FormatMarker %v", formatErr, beadsDir, layout.mode, layout.marker)
-				}
-				if !strings.Contains(err.Error(), configfile.BackendNotOpenedGuarantee) {
-					t.Errorf("refusal lacks the data-safety guarantee: %v", err)
-				}
 				if after := workspaceTreeDigest(t, root); !maps.Equal(after, before) {
 					t.Fatalf("%s changed the workspace: before %v, after %v", name, slices.Sorted(maps.Keys(before)), slices.Sorted(maps.Keys(after)))
+				}
+				var legacyErr *bdhttp.LegacyWorkspaceError
+				if !errors.As(err, &legacyErr) || err.Error() != legacyworkspace.HistoricalSQLiteRefusal {
+					t.Fatalf("%s = %v, want *bdhttp.LegacyWorkspaceError with admission's refusal %q", name, err, legacyworkspace.HistoricalSQLiteRefusal)
 				}
 				server.wantNoRequests(t)
 			})
@@ -317,33 +270,39 @@ func TestAttachConnectAndSaveTargetRefuseAGraphWorkspace(t *testing.T) {
 	}
 }
 
-// TestAttachAndConnectAdmitADependencyWorkspace is the other side of the
-// fence: an explicit "dependency" graph_mode is the ordinary Issue workspace,
-// so both doors activate it and keep the marker.
-func TestAttachAndConnectAdmitADependencyWorkspace(t *testing.T) {
-	hermeticEnv(t)
-	for name, activate := range activationDoors {
-		t.Run(name, func(t *testing.T) {
-			beadsDir := t.TempDir()
-			cfg := &configfile.Config{Backend: "dolt", Database: "beads.db", GraphMode: configfile.GraphModeDependency}
-			if err := cfg.Save(beadsDir); err != nil {
-				t.Fatalf("seed metadata.json: %v", err)
-			}
-			server := newRecordingServer(t)
+// TestAttachLeavesAnUnmanagedGitignoreAlone pins gitignore.manage: false
+// (bd-cxm9r): a workspace that owns its .beads/.gitignore keeps it
+// byte-identical through Attach, while one that leaves the key unset still
+// gets both per-user files covered.
+func TestAttachLeavesAnUnmanagedGitignoreAlone(t *testing.T) {
+	t.Setenv("BD_GITIGNORE_MANAGE", "")
+	os.Unsetenv("BD_GITIGNORE_MANAGE")
+	target := bdhttp.Target{BaseURL: mustAttachTestURL(t, "http://127.0.0.1:8080")}
 
-			if err := activate(t, beadsDir, server); err != nil {
-				t.Fatalf("%s: %v", name, err)
-			}
-			after, err := configfile.Load(beadsDir)
-			if err != nil {
-				t.Fatalf("reload metadata.json: %v", err)
-			}
-			if after.Backend != httpclient.Backend || after.GraphMode != configfile.GraphModeDependency {
-				t.Errorf("metadata.json after %s = backend %q, graph_mode %q; want %q, %q", name, after.Backend, after.GraphMode, httpclient.Backend, configfile.GraphModeDependency)
-			}
-			if _, err := bdhttp.LoadTarget(beadsDir); err != nil {
-				t.Errorf("LoadTarget after %s: %v", name, err)
-			}
-		})
+	owned := t.TempDir()
+	const ownGitignore = "# ours\n*.tmp\n"
+	if err := os.WriteFile(filepath.Join(owned, "config.yaml"), []byte("gitignore:\n  manage: false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(owned, ".gitignore"), []byte(ownGitignore), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := bdhttp.Attach(owned, target); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(owned, ".gitignore")); err != nil || string(got) != ownGitignore {
+		t.Fatalf(".gitignore changed under gitignore.manage: false (err %v):\n%s", err, got)
+	}
+
+	managed := t.TempDir()
+	if err := os.WriteFile(filepath.Join(managed, "config.yaml"), []byte("issue-prefix: demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := bdhttp.Attach(managed, target); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(managed, ".gitignore"))
+	if err != nil || !strings.Contains(string(got), httpclient.TargetFileName) {
+		t.Fatalf("with gitignore.manage unset Attach must still cover %s (err %v):\n%s", httpclient.TargetFileName, err, got)
 	}
 }

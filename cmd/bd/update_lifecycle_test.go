@@ -32,7 +32,7 @@ func TestRunDirectUpdateMutationBuildsLifecycleRequest(t *testing.T) {
 		want     issueops.UpdateRequest
 	}{
 		{
-			name: "force without assignee only overrides close policy",
+			name: "force with a claim and no assignee overrides close policy and the blocked claim",
 			mutation: commandUpdateMutation{
 				actor:            "writer",
 				issueID:          "bd-1",
@@ -43,13 +43,14 @@ func TestRunDirectUpdateMutationBuildsLifecycleRequest(t *testing.T) {
 				expectedStatus:   &expectedStatus,
 			},
 			want: issueops.UpdateRequest{
-				Actor:            "writer",
-				IssueID:          "bd-1",
-				Patch:            issueops.IssuePatch{Status: issueops.Field[issueops.Status]{Set: true, Value: issueops.StatusClosed}},
-				Claim:            true,
-				ForceClosePolicy: true,
-				ExpectedAssignee: &expectedAssignee,
-				ExpectedStatus:   &expectedStatus,
+				Actor:             "writer",
+				IssueID:           "bd-1",
+				Patch:             issueops.IssuePatch{Status: issueops.Field[issueops.Status]{Set: true, Value: issueops.StatusClosed}},
+				Claim:             true,
+				ForceClosePolicy:  true,
+				ForceClaimBlocked: true,
+				ExpectedAssignee:  &expectedAssignee,
+				ExpectedStatus:    &expectedStatus,
 			},
 		},
 		{
@@ -394,6 +395,35 @@ func TestReplacesExistingNotes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := replacesExistingNotes(tt.existing, tt.fields); got != tt.want {
 				t.Errorf("replacesExistingNotes(%q, %#v) = %t, want %t", tt.existing, tt.fields, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAmbientSession pins the helper the closing verbs read a session through
+// when --session is not typed (beads#5450). It carries no build tag, so the
+// lanes without cgo run it too; the per-verb pins are in
+// TestParityCloseVerbsReadAmbientSession.
+func TestAmbientSession(t *testing.T) {
+	cases := []struct {
+		name        string
+		own         string // CLAUDE_SESSION_ID
+		harness     string // CLAUDE_CODE_SESSION_ID
+		wantSession string
+		wantEnvVar  string
+	}{
+		{name: "neither variable"},
+		{name: "CLAUDE_CODE_SESSION_ID alone", harness: "harness-session", wantSession: "harness-session", wantEnvVar: "CLAUDE_CODE_SESSION_ID"},
+		{name: "CLAUDE_SESSION_ID alone", own: "own-session", wantSession: "own-session", wantEnvVar: "CLAUDE_SESSION_ID"},
+		{name: "CLAUDE_SESSION_ID wins over CLAUDE_CODE_SESSION_ID", own: "own-session", harness: "harness-session", wantSession: "own-session", wantEnvVar: "CLAUDE_SESSION_ID"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CLAUDE_SESSION_ID", tc.own)
+			t.Setenv("CLAUDE_CODE_SESSION_ID", tc.harness)
+			session, envVar := ambientSession()
+			if session != tc.wantSession || envVar != tc.wantEnvVar {
+				t.Errorf("ambientSession() = %q from %q, want %q from %q", session, envVar, tc.wantSession, tc.wantEnvVar)
 			}
 		})
 	}

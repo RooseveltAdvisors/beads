@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -14,9 +15,12 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/beads/internal/beads"
 	"github.com/steveyegge/beads/internal/configfile"
+	"github.com/steveyegge/beads/internal/doltserver"
+	"github.com/steveyegge/beads/internal/doltversion"
 	"github.com/steveyegge/beads/internal/git"
 	"github.com/steveyegge/beads/internal/storage/dolt"
 	"github.com/steveyegge/beads/internal/testutil"
@@ -2382,19 +2386,14 @@ func TestBareParentWorktreeCoreCommandsWithoutRedirect(t *testing.T) {
 	}
 }
 
-// initBackendTestEnv returns the process environment with all beads-specific
-// variables (BEADS_*, BD_*) removed and BEADS_DIR pinned to beadsDir. Pinning
+// initBackendTestEnv returns the process environment with the ambient
+// beads configuration removed (BEADS_*, BD_ROUTING_MODE and any inherited
+// BD_*; see filterAmbientEnv) and BEADS_DIR pinned to beadsDir. Pinning
 // BEADS_DIR isolates each subtest's workspace and stops bd from walking up into
 // an ambient .beads left by another test or tool; HOME is preserved so bd init's
 // git bootstrap still works.
 func initBackendTestEnv(beadsDir string) []string {
-	var env []string
-	for _, e := range os.Environ() {
-		if strings.HasPrefix(e, "BEADS_") || strings.HasPrefix(e, "BD_") {
-			continue
-		}
-		env = append(env, e)
-	}
+	env := filterAmbientEnv(os.Environ())
 	return append(env, "BEADS_DIR="+beadsDir)
 }
 
@@ -2627,4 +2626,42 @@ func sharedServerTestEnv(t *testing.T) []string {
 		"BEADS_DOLT_SHARED_SERVER=1",
 		"BEADS_DOLT_SERVER_PORT="+strconv.Itoa(port),
 	)
+}
+
+// TestEnsureGlobalDatabaseRefusesBelowRequiredMin pins the floor bd init
+// checks on a shared server before it creates beads_global there: with
+// doltversion.RequiredMin raised above the test server's version,
+// doltserver.EnsureGlobalDatabase refuses the server with the floor's error
+// (which bd init stops on) where it would otherwise create the database and
+// return nil, and beads_global does not exist afterwards. It runs against
+// its own server, so beads_global cannot already be there from another test.
+func TestEnsureGlobalDatabaseRefusesBelowRequiredMin(t *testing.T) {
+	server := testutil.StartIsolatedDoltContainerHandle(t)
+	port, err := strconv.Atoi(server.Port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raiseRequiredMinForTest(t)
+	err = doltserver.EnsureGlobalDatabase("127.0.0.1", port, "root", "")
+	if !errors.Is(err, doltversion.ErrBelowRequiredMin) {
+		t.Fatalf("EnsureGlobalDatabase = %v, want ErrBelowRequiredMin before CREATE DATABASE", err)
+	}
+	if want := "dolt sql-server at 127.0.0.1:" + server.Port + " is version"; !strings.Contains(err.Error(), want) {
+		t.Errorf("EnsureGlobalDatabase = %q, want it to contain %q", err, want)
+	}
+
+	admin, err := sql.Open("mysql", fmt.Sprintf("root@tcp(127.0.0.1:%d)/", port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	var name string
+	switch err := admin.QueryRowContext(ctx, "SELECT schema_name FROM information_schema.schemata WHERE schema_name = ?", doltserver.GlobalDatabaseName).Scan(&name); {
+	case err == nil:
+		t.Errorf("%s exists after the refused EnsureGlobalDatabase", doltserver.GlobalDatabaseName)
+	case !errors.Is(err, sql.ErrNoRows):
+		t.Fatalf("look for %s: %v", doltserver.GlobalDatabaseName, err)
+	}
 }

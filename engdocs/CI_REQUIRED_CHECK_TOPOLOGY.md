@@ -54,9 +54,19 @@ Current PR-related workflow names:
   `fork-ro` or `fork-rw` while it is open for the run, every lane executing
   remotely on `rbe-fork.ops.gascity.com:8444` with its own short-lived
   certificate (instance `oss-fork`, the fork pool; or `oss`, the OSS pool,
-  for allowlisted authors), else `cache`: local execution plus rbe-west's
-  anonymous read-only action cache, `.bazelrc`'s `fork-cache` config;
-  `local` for `rbe=off` dispatches; or `skip` while the `RBE_WEST_WORKERS`
+  for allowlisted authors), else `local`; `cache` only for `rbe=cache`
+  dispatches: local execution on the Blacksmith runner plus rbe-west's
+  anonymous read-only action cache (rbe-cache), `.bazelrc`'s `fork-cache`
+  config; `local` for `rbe=off` dispatches, fork and Dependabot PRs while
+  rbe-fork is closed or refuses the run, unauthorized
+  `pull_request_target` fork runs, same-repo runs without the executor
+  secret, and every run in a fork repository's own CI
+  (`github.repository_owner` is not `gastownhall`: a push to the fork or a
+  PR within it; fork PRs into beads run with `github.repository`
+  `gastownhall/beads`), so no run reads rbe-cache from a GitHub-hosted
+  runner, which rbe-cache refuses (infra `nativelink-cas/west` README
+  "rbe-cache", GitHub-hosted runners; every lane's `runs-on` is Blacksmith
+  in modes `remote` and `cache`); or `skip` while the `RBE_WEST_WORKERS`
   repo variable is unset) and exports it as the `rbe-mode` / `rbe-enabled`
   outputs (`rbe-enabled` is `true` in `remote`, `fork-ro` and `fork-rw`);
   every lane exports its
@@ -80,9 +90,10 @@ Current PR-related workflow names:
   requires `BAZEL_REMOTE`: the call's mode must be `remote`, `fork-ro` or
   `fork-rw`. `.github/scripts/bazel-gate.sh` reads the exported mode, never
   the variable or the fork flag: mode `skip` allows every Bazel id to skip,
-  mode `cache` the remote-only `BAZEL_EMBEDDED`, `BAZEL_PROXIED` and
-  `BAZEL_SERVER_STORAGE`, mode `local` (`rbe=off` dispatches) those and
-  `BAZEL_INTEGRATION`, and modes `remote`, `fork-ro` and `fork-rw` none;
+  mode `cache` (`rbe=cache` dispatches) the remote-only `BAZEL_EMBEDDED`,
+  `BAZEL_PROXIED` and `BAZEL_SERVER_STORAGE`, mode `local` (`rbe=off`
+  dispatches, fork and Dependabot PRs while rbe-fork is closed, a fork
+  repository's own CI) those and `BAZEL_INTEGRATION`, and modes `remote`, `fork-ro` and `fork-rw` none;
   on `pr.yml` the first three are red anyway through `BAZEL_REMOTE`.
   A lane that should run and fails, is cancelled, or reports no result fails
   the gate, and so does a missing or invalid mode.
@@ -90,19 +101,19 @@ Current PR-related workflow names:
   successor of `main.yml`'s former Linux integration shards) is required on every PR:
   `pr.yml` passes `integration: "on"` (policy-pinned), so it runs in modes
   `remote` (same-repo PRs) and `fork-ro`/`fork-rw` (fork and Dependabot PRs
-  while rbe-fork is open), and in mode `cache` (fork and Dependabot PRs
-  while it is closed, locally on the GitHub-hosted runner with the
-  read-only cache), and a
+  while rbe-fork is open), and in mode `cache` (`rbe=cache` dispatches,
+  locally on the Blacksmith runner with the read-only cache), and a
   failure, cancellation or missing result turns the gate red. Its legacy
   twins still run only on push to `main`, so this lane is the only PR-time
   run of the full integration-tagged suite. In mode `cache` every action
   trusted CI already ran is a cache hit, so the runner builds and tests only
-  what the PR changed. Simulated on a 4-CPU runner (2026-10-02): about 2.5
+  what changed. Simulated on a 4-CPU runner (2026-10-02): about 2.5
   minutes warm, 3 to 5 for a `cmd/bd` change, and about 30 with the cache
   closed. Its step timeout (75 minutes) covers that cold local run with
   room to spare, and so also a remote cold compile plus the 1200 s
-  per-action cap (both policy-tested). Mode `local` (`rbe=off`) still
-  skips it.
+  per-action cap (both policy-tested). Mode `local` (`rbe=off`; fork and
+  Dependabot PRs while rbe-fork is closed, red anyway through
+  `BAZEL_REMOTE`) skips it.
   `scripts/ci_workflow_test.go` fails when a new `bazel.yml` job has neither
   a gate id nor an advisory entry.
   Runbook: if `main`'s Bazel BUILD files drift (every PR's Bazel lanes go
@@ -113,8 +124,8 @@ Current PR-related workflow names:
   to fall back to: unsetting the `RBE_WEST_WORKERS` repo variable (mode
   `skip`) turns `CI Gate / Required` red on every PR and merge group
   (`BAZEL_REMOTE`), by design. If rbe-west closes the read-only cache (the
-  farm's kill switch; the client has none), runs in mode `cache` execute
-  locally and are red through `BAZEL_REMOTE` as well. If it
+  farm's kill switch; the client has none), runs in mode `cache`
+  (`rbe=cache` dispatches) execute locally. If it
   is slow rather than closed, each lookup gives up after `fork-cache`'s
   15 s `--remote_timeout` (times its retries), and Bazel's failure circuit
   breaker (`--experimental_circuit_breaker_strategy=failure`) stops calling
@@ -161,12 +172,13 @@ Current PR-related workflow names:
   Runs on pushes to `main`. Contains only what rbe-west cannot run: the macOS
   `go test -race -short` suite and the Windows smoke build on Blacksmith, and
   the push-to-main savers of the GOCACHEs pr.yml's Windows and macOS jobs
-  restore. Every Linux check it used to repeat (migration hygiene, build
-  tags, versions, doc flags, gofmt, the PR policy wrapper, the package gates
-  and the Linux cache seeders) is gated before the merge by the merge
-  queue's `pr.yml` run of the same commit, the Nix flake check runs in
-  `pr-risk.yml`'s push run, and `bazel.yml`'s push run re-runs the Bazel
-  targets (ga-96smfk.22).
+  restore and of the Make toolchains `windows-make-shell` installs offline
+  (`windows-make-shell-toolchains`). Every Linux check it used to repeat
+  (migration hygiene, build tags, versions, doc flags, gofmt, the PR policy
+  wrapper, the package gates and the Linux cache seeders) is gated before
+  the merge by the merge queue's `pr.yml` run of the same commit, the Nix
+  flake check runs in `pr-risk.yml`'s push run, and `bazel.yml`'s push run
+  re-runs the Bazel targets (ga-96smfk.22).
 - `.github/workflows/nightly.yml`: `Nightly`
   Runs at 02:00 UTC. Calls `bazel.yml` with `fresh-test-results: true` (every
   test re-executed, no cached results) and checks the rbe-west worker-env
@@ -228,9 +240,12 @@ enforced there.
 
 ## Trusted-Author Fork PRs (Bazel Farm)
 
-Fork PRs get no Actions secrets, so `pr.yml`'s Bazel call runs them in mode
-`cache` (local execution with the anonymous read-only cache, slower; the
-remote-only embedded, proxied-server and server-storage tiers skip). `bazel-farm.yml` gives the
+Fork PRs get no Actions secrets, so `pr.yml`'s Bazel call runs them
+through rbe-fork (modes `fork-ro`/`fork-rw`) or, while it is closed or
+refuses the run, in mode `local` (local execution on the GitHub-hosted
+runner, slower; the remote-only embedded, proxied-server and
+server-storage tiers and integration skip; never rbe-cache, which refuses
+GitHub-hosted runners). `bazel-farm.yml` gives the
 remote-execution farm to fork PRs from an allowlist of trusted authors
 (`.github/bazel-farm-allowlist.txt`: the numeric user ids of the same four
 people as gascity's `.github/blacksmith-allowlist.txt`). Everyone else's
@@ -396,7 +411,7 @@ What anyone else can do: nothing new.
   the base allowlist and says no. `farm` is skipped, and no secret or PR
   code is involved.
 - Fork `pull_request` runs still get no secrets, and `bazel.yml` keeps them
-  local (mode `cache`) even if the fork's `pr.yml` passes `fork-farm`,
+  local (mode `local`) even if the fork's `pr.yml` passes `fork-farm`,
   because the event is not `pull_request_target`.
 
 Attacks considered:
@@ -668,8 +683,10 @@ copy of gascity main's manifest (`tools/rbe/worker-env.txt`) and its pin
 (`platforms/BUILD.bazel`). When a gascity PR that re-pins (a Go, dolt or
 library bump) merges, new workers advertise the new pin at once, and every
 beads PR's `Bazel / execution mode` preflight (`tools/rbe/worker-env-sync`)
-fails until beads' copy lands. On Oct 21, gascity#8165 merged at 01:09:31Z
-and the copy, #7746, landed at 02:38:04Z: 89 minutes of red beads PRs.
+fails until beads' copy lands, unless the
+[grace window](#rbe-worker-env-grace-window) covers it. On Oct 21,
+gascity#8165 merged at 01:09:31Z and the copy, #7746, landed at 02:38:04Z:
+89 minutes of red beads PRs.
 
 The sync, end to end:
 
@@ -784,21 +801,63 @@ GitHub's side, and nothing the guard queues stays armed for the new head to
 inherit; the refusal and its comment come with the next `workflow_run` (the
 pushed head's own CI finishing) or the 15-minute run instead of at once.
 
+### rbe worker-env Grace Window
+
+A re-pin gascity can roll back (a Go release: the manifest's go line alone)
+need not turn beads PRs red while the sync PR is on its way. gascity
+publishes a record, `worker-env-grace.txt` alone on its
+`rbe/worker-env-grace` branch (gascity `tools/rbe/worker-env-grace`), with
+the pin before the re-pin and a window: beads may keep that previous pin
+for at most two hours, and rbe-west keeps workers of it an hour longer, for
+the runs beads accepted last. While the repository variable
+`RBE_WORKER_ENV_GRACE` is `true`, the preflight in mode `remote` runs
+`tools/rbe/worker-env-sync` with `WORKER_ENV_SYNC_GRACE=1`: a copy that
+still pins the record's previous pin, inside its window, exits 3, and the
+job proceeds with a notice naming the window's end, so the lanes run on the
+previous-pin workers until the sync PR lands. gascity publishes the record
+about a minute after the re-pin lands on its main, and until then the branch
+holds an earlier re-pin's record, so a record for another pin (or one that
+could not be read) is read again every 15 seconds for up to 150 seconds
+from the script's start (`WORKER_ENV_SYNC_GRACE_WAIT`, inside the job's 5
+minutes) before the preflight decides. Anything else fails the preflight as
+before, with one more line saying why the window does not apply: no record;
+a malformed one (anything but at most 64 KiB of printable ASCII in the exact
+`key value` form, or a window over two hours); an unreadable one after the
+wait; another pin after the wait; `previous none`; a previous pin other than
+beads'; a gascity manifest that moved more than the go line, a Go other than
+beads', or one whose rolled-back manifest does not hash to the previous pin;
+or a window not yet open or closed. Mode `remote` only: `fork-ro` executes
+on the separate `oss-fork` pool, which has no previous-pin workers, and fork
+runs see no variables. The nightly check, the autosync and the guard's
+verifier never ask for the window (`TestWorkerEnvSyncGraceStaysInThePreflight`),
+so the sync PR still opens and lands as above.
+
+Turning it on, once gascity publishes the record and rbe-west serves the
+previous pin (gastownhall/gascity#8271 merged, gascity/infra#2452 deployed):
+`gh variable set RBE_WORKER_ENV_GRACE --repo gastownhall/beads --body true`.
+Rollback: `gh variable delete RBE_WORKER_ENV_GRACE --repo
+gastownhall/beads`; the next run's preflight is strict again. Delete it too
+whenever rbe-west stops serving previous pins (its grace switch off or
+rolled back): beads would otherwise accept a pin no worker serves, and its
+lanes would queue instead of failing fast.
+
 ## dolt-race Union Lane
 
 In mode `remote`, `bazel.yml`'s `bazel-dolt-race` job (check name
 `Bazel / dolt-race`) runs the dolt-server and proxied-server tiers in one
 `bazel test //... --config=dolt-race`, in place of the `bazel-doltserver`
 (`dolt-server lane`) and `bazel-proxied` (`proxied-server tier`) jobs.
-`--config=dolt-race` is exactly the union of `--config=doltserver` and
-`--config=doltserver-proxied`, with one tag filter for both tiers, so every
-member target's test action is unchanged (`bazel aquery` at the cutover: the
-27 + 35 = 62 `TestRunner` actions were byte-identical under the member
-configs and the union; there are 27 + 37 = 64 since
-`//cmd/bd:bd_managed_local_test` runs as 3 shards, and all must fit the
-union's `--jobs=64` at once, `scripts/bazel_dolt_race_test.go`, which leaves
-no headroom: another test action in either tier needs a `--jobs` or
-shard-count change first). One client
+`--config=dolt-race` is the union of `--config=doltserver` and
+`--config=doltserver-proxied`, with one tag filter for both tiers, plus one
+line of its own, `test:dolt-race --jobs=70` (`bazelDoltRaceJobs`); `--jobs` is
+in no action key, so every member target's test action is unchanged (`bazel
+aquery` at the cutover: the 27 + 35 = 62 `TestRunner` actions were
+byte-identical under the member configs and the union; there were 27 + 37 =
+64 once `//cmd/bd:bd_managed_local_test` ran as 3 shards, and 33 + 37 = 70
+since `//internal/httpclient:httpclient_served_provider_test`'s 6 shards
+joined the dolt-server tier). All must fit the union's `--jobs=70` at once
+(`scripts/bazel_dolt_race_test.go`), which leaves no headroom: another test
+action in either tier needs a `--jobs` or shard-count change first. One client
 waits on rbe-west for both tiers at once, so the job ends with the slower
 tier and the other tier's runner is saved.
 
@@ -835,8 +894,11 @@ In mode `remote`, `bazel.yml`'s `bazel-dolt-int` job (check name
 (`server-storage lane`) and `bazel-cmd-dolt` (`cmd-dolt tier`) jobs.
 `--config=dolt-int` is exactly the union of `--config=doltserver-integration`
 and `--config=doltserver-cmd`, with one tag filter for both tiers. The final
-argv and environment Bazel assembles for all 63 `TestRunner` actions (17
-server-storage + 46 cmd-dolt) are unchanged under the union, so the remote
+argv and environment Bazel assembles for all 63 `TestRunner` actions at the
+cutover (17 server-storage + 46 cmd-dolt; 64 since
+`//internal/storage/versioncontrolops:versioncontrolops_dolt_test` joined
+server-storage, which leaves the union no room under `--jobs=64`) are
+unchanged under the union, so the remote
 action digest -- what RBE's cache keys on -- is unaffected and cached results
 should carry over (confirmed in practice by the first merge group's
 `tests_cached == tests_total` in ci-analytics, not claimed here as already
@@ -916,7 +978,7 @@ what a pull request's gate requires.
   `bazel-server-storage`/`bazel-cmd-dolt` result today -- and the per-mode
   skips are the members' as before.
 - `check_testcases.py` runs twice over the union's BEP, once per tier
-  (`check-ss`, scoped with `--label` to server-storage's two targets; `check-cd`,
+  (`check-ss`, scoped with `--label` to server-storage's three targets; `check-cd`,
   scoped to cmd-dolt's two), each with `continue-on-error: true` so a
   zero-testcase shard in one tier reaches only that tier's classify result
   (must-fix 2 of PR #7535's review), not the other's and not the job
@@ -973,8 +1035,10 @@ compared with the cached entries by `tools/bazel/rrc_verify.py`; a mismatch
 fails the job and opens an `rrc-verify` issue, which lists the containment
 steps below.
 
-Mode `cache` lanes (fork PRs while rbe-fork is closed, `rbe=cache`
-dispatches) see no repository variables. The jobs with a reader step above
+Mode `cache` lanes (`rbe=cache` dispatches; no fork or Dependabot PR
+reaches mode `cache`, since rbe-cache refuses GitHub-hosted runners) do
+not follow the variable (the rbe job's `rrc` output is `off` outside mode
+`remote`). The jobs with a reader step above
 pass `BAZEL_RRC_READ: 'true'` to setup-bazel, and only those: their configs
 are the ones `rrc-lane-commands.txt` seeds (`bazel-release-cross` builds for
 other platforms and does not opt in). In mode `cache` they read the same
@@ -983,7 +1047,9 @@ adds the same two lines to its rc whenever
 `.github/actions/setup-bazel/cache-rrc-probe.sh` gets a GetCapabilities
 answer from rbe-cache, then NOT_FOUND for a GetActionResult key no action
 has and for a ByteStream Read of a blob the CAS does not hold. The reader
-lanes that run in mode `cache` use a pinned `ubuntu-24.04` runner there,
+lanes that run in mode `cache` run there on Blacksmith's `ubuntu-2404`
+image, the family `rrc-seed` writes from; their GitHub-hosted fallback (the
+other non-remote modes, which do not read) is a pinned `ubuntu-24.04`,
 not `ubuntu-latest`. Each job's step summary records whether it reads, and
 rbe-cache's TCP connect time (DNS lookup excluded). rbe-cache refuses every
 write, and fork-cache uploads nothing.
@@ -1415,7 +1481,7 @@ Required` requires them to have run remotely and passed.
   `gh-readonly-queue/*` branch with the CI secrets) `pr.yml`'s gate requires
   `BAZEL_REMOTE` (the call's mode is `remote`, `fork-ro` or `fork-rw`) and
   every lane's own id (a merge group every lane's but the Dolt tiers', which
-  main's push run runs: see [Merge Queue](#merge-queue)). Mode `skip` (the farm switch off) and mode `cache`
+  main's push run runs: see [Merge Queue](#merge-queue)). Mode `skip` (the farm switch off) and mode `local`
   (the executor secret missing, or rbe-fork closed or refusing a fork run)
   are red, never a silent pass with fewer tests.
   `scripts/pr_risk_bazel_coverage_test.go`
@@ -1621,6 +1687,7 @@ changes. They gate through `BAZEL_TEST`; pinned by
 | --- | --- |
 | fast-checks: `check-build-tags.sh` | `//scripts/repochecks:build_tags_test` |
 | fast-checks: `check-go-install-guidance.sh` | `//scripts/repochecks:go_install_guidance_test` |
+| (new, GH#3059) `check-legacy-repo-refs.sh` | `//scripts/repochecks:legacy_repo_refs_test` |
 | fast-checks: `check-winget-portable-alias.sh` | `//scripts/repochecks:winget_portable_alias_test` |
 | fast-checks: `check-versions.sh` | `//internal/versioncheck:versioncheck_test` (same `versioncheck.Check` over the release metadata) |
 | fast-checks: migration hygiene checks A and B | `//scripts/repochecks:migration_hygiene_test` (`MIGRATION_HYGIENE_SCOPE=tree`) |
@@ -1694,8 +1761,24 @@ macOS jobs; `release.yml` stays on `macos-latest`.
   `scripts/ci/warm-non-race-cache.sh`. main.yml's `test` job (the macOS
   full suite) runs on the same label and restores its caches. main.yml's
   `test-windows` seeds the Windows legs the same way.
+- **Toolchains.** `windows-make-shell` installs nothing from the network on
+  the common path (`scripts/ci/windows-make-shell/`): native GNU Make is the
+  image's MinGW-w64 `mingw32-make.exe` 4.4.1, else Chocolatey's make 4.4.1
+  binary from a cache, else `choco install` with retries, either one only
+  with its pinned SHA-256;
+  MSYS2 is the image's `C:\msys64`, with `git` and `make` installed from
+  cached, signature-checked package files resolved against the image's own
+  sync database; Cygwin installs offline from a cached package tree (signed
+  `setup.zst`, Authenticode-checked setup), else through
+  cygwin-install-action as before. main.yml's `windows-make-shell-toolchains`
+  is the only writer of those caches: same label, push-to-main-only guard,
+  keys that change only with the pinned binary, the image's MSYS2 sync
+  database and the UTC month, and a save only after its seed step proved
+  the cache holds what an install needs (for MSYS2, every package file the
+  install resolves to, even one the image already has installed).
 - **Pins.** `TestBlacksmithWindowsMacOSRunsOnEveryEvent`,
   `TestBlacksmithMacOSSaverMatchesPRLegs`,
+  `TestWindowsMakeShellToolchainSaverMatchesPRJob`,
   `TestBlacksmithSaverJobsGuardedAgainstPullRequest`,
   `TestBlacksmithSaverCacheKeysAreNotPerCommit`,
   `TestBlacksmithReachablePRJobsDisableDefaultCachingActions` and
@@ -1705,7 +1788,11 @@ macOS jobs; `release.yml` stays on `macos-latest`.
 
 Retired from `pr-risk.yml` (ga-96smfk.22): `bazel.yml`'s `bazel-server-storage`
 lane runs `//internal/storage/dolt:dolt_server_full_test` (16 shards) and
-`:dolt_server_conformance_test` against hermetic dolt sql-servers.
+`:dolt_server_conformance_test` against hermetic dolt sql-servers. It also
+runs `//internal/storage/versioncontrolops:versioncontrolops_dolt_test`, that
+package's tests against a hermetic dolt sql-server, which no PR Risk job ran.
+It is like the dolt-server lane's targets, but that lane's union with the
+proxied tier (`dolt-race`) already fills its `--jobs`.
 
 - `.github/scripts/server-storage-test-shard.sh` discovers top-level
   `Test*` functions from `internal/storage/dolt/*_test.go` (excluding
@@ -1863,7 +1950,7 @@ workflows run on that commit like a same-repo PR, but only the fast set.
   That decision is pending.
 - The gate requires the fast set's Bazel lanes to have run remotely and
   passed (`BAZEL_REMOTE`), exactly as on a PR: with the farm switch off
-  (mode `skip`) or a missing executor secret (mode `cache`) it is red.
+  (mode `skip`) or a missing executor secret (mode `local`) it is red.
   `bazel-integration` and the package gates run as on a PR. The Dolt-tier
   ids (`BAZEL_EMBEDDED`, `BAZEL_DOLTSERVER`, `BAZEL_PROXIED`,
   `BAZEL_SERVER_STORAGE`, `BAZEL_CMD_DOLT`) may skip only because
@@ -1871,14 +1958,19 @@ workflows run on that commit like a same-repo PR, but only the fast set.
   call reports `dolt-tiers` `off`. A Dolt-tier lane that ran anyway and
   failed still reds the gate.
 - Diff bases: a merge group has no `pull_request` payload and no
-  `base_ref`. The migration-hygiene `BASE_SHA`, the package gates'
+  `base_ref`. The migration-hygiene step, the package gates'
   `PR_BASE_SHA`/`PR_HEAD_SHA`, the `.beads/issues.jsonl` guard and the
   CLI-docs drift attribution (`BD_DOCS_DIFF_BASE`; without a base it would
-  fail every entry on drift already on `main`) fall back to
-  `github.event.merge_group.base_sha`/`head_sha`; every other
+  fail every entry on drift already on `main`) take
+  `github.event.merge_group.base_sha`/`head_sha` there; every other
   `github.event.pull_request.*` read is classified in
   `TestMergeQueuePullRequestFieldsHandleMergeGroup` (null is correct
-  there: fork facts, the rbe-fork PR number, autofix metadata). With
+  there: fork facts, the rbe-fork PR number, autofix metadata). On
+  `pull_request` the migration-hygiene step and the `.beads/issues.jsonl`
+  guard diff against `origin/<base branch>`, the tip the checkout is merged
+  into, and not `pull_request.base.sha`, which stays behind when the base
+  branch moves: from there the base branch's own migration changes count
+  as the pull request's (#6588, `TestMergeQueueMigrationHygieneBase`). With
   ALLGREEN every entry must pass, so each entry's own diff from its base
   commit is enough (the base is `main` or the entry ahead of it). With
   HEADGREEN only the batch head would have to pass and a path-filtered
@@ -1950,8 +2042,8 @@ Caveats:
 - Mode `remote`. The complement assumes `bazel.yml`'s push run takes mode
   `remote`, as the merge group did (its gate requires it, `BAZEL_REMOTE`).
   A push run in mode `skip` (the farm switch turned off) runs no lane, and
-  one in mode `cache` (the executor secret gone) skips the remote-only
-  tiers; both stay green on what they skipped. Only a change of the switch
+  one in mode `local` (the executor secret gone) skips the remote-only
+  tiers and integration; both stay green on what they skipped. Only a change of the switch
   or the secret between a merge group and its push gets there.
 
 ### How a red main surfaces

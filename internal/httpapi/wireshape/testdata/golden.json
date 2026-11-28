@@ -483,6 +483,13 @@
     },
     {
       "schema": "ApplyLabelPatch",
+      "member": "remove_prefixes",
+      "type": "array",
+      "required": false,
+      "item_type": "string"
+    },
+    {
+      "schema": "ApplyLabelPatch",
       "member": "replace",
       "type": "array",
       "required": false,
@@ -870,6 +877,13 @@
     },
     {
       "schema": "BatchGetIssue",
+      "member": "arrival_seq",
+      "type": "integer",
+      "format": "int64",
+      "required": false
+    },
+    {
+      "schema": "BatchGetIssue",
       "member": "assignee",
       "type": "string",
       "required": false
@@ -1244,6 +1258,13 @@
       "schema": "BlockedIssue",
       "member": "actor",
       "type": "string",
+      "required": false
+    },
+    {
+      "schema": "BlockedIssue",
+      "member": "arrival_seq",
+      "type": "integer",
+      "format": "int64",
       "required": false
     },
     {
@@ -2337,6 +2358,13 @@
     },
     {
       "schema": "DeleteIssuesResult",
+      "member": "deleted_ids",
+      "type": "array",
+      "required": false,
+      "item_type": "string"
+    },
+    {
+      "schema": "DeleteIssuesResult",
       "member": "dependencies",
       "type": "integer",
       "required": true
@@ -2594,6 +2622,13 @@
       "schema": "Issue",
       "member": "actor",
       "type": "string",
+      "required": false
+    },
+    {
+      "schema": "Issue",
+      "member": "arrival_seq",
+      "type": "integer",
+      "format": "int64",
       "required": false
     },
     {
@@ -3035,6 +3070,13 @@
       "schema": "IssueDetails",
       "member": "actor",
       "type": "string",
+      "required": false
+    },
+    {
+      "schema": "IssueDetails",
+      "member": "arrival_seq",
+      "type": "integer",
+      "format": "int64",
       "required": false
     },
     {
@@ -3641,6 +3683,13 @@
     },
     {
       "schema": "IssuePatchBody",
+      "member": "remove_label_prefixes",
+      "type": "array",
+      "required": false,
+      "item_type": "string"
+    },
+    {
+      "schema": "IssuePatchBody",
       "member": "remove_labels",
       "type": "array",
       "required": false,
@@ -3703,6 +3752,13 @@
       "schema": "IssueWithCounts",
       "member": "actor",
       "type": "string",
+      "required": false
+    },
+    {
+      "schema": "IssueWithCounts",
+      "member": "arrival_seq",
+      "type": "integer",
+      "format": "int64",
       "required": false
     },
     {
@@ -4128,6 +4184,13 @@
       "schema": "IssueWithDependencyMetadata",
       "member": "actor",
       "type": "string",
+      "required": false
+    },
+    {
+      "schema": "IssueWithDependencyMetadata",
+      "member": "arrival_seq",
+      "type": "integer",
+      "format": "int64",
       "required": false
     },
     {
@@ -4620,6 +4683,13 @@
     },
     {
       "schema": "Problem",
+      "member": "closed_at",
+      "type": "string",
+      "format": "date-time",
+      "required": false
+    },
+    {
+      "schema": "Problem",
       "member": "code",
       "type": "string",
       "required": true
@@ -4838,6 +4908,12 @@
     },
     {
       "schema": "ReclaimIssuesRequest",
+      "member": "dry_run",
+      "type": "boolean",
+      "required": false
+    },
+    {
+      "schema": "ReclaimIssuesRequest",
       "member": "exclude_labels",
       "type": "array",
       "required": false,
@@ -4870,6 +4946,12 @@
       "type": "number",
       "format": "double",
       "required": false
+    },
+    {
+      "schema": "ReclaimIssuesResult",
+      "member": "dry_run",
+      "type": "boolean",
+      "required": true
     },
     {
       "schema": "ReclaimIssuesResult",
@@ -5222,6 +5304,12 @@
     },
     {
       "schema": "SweepRequest",
+      "member": "retain_ids",
+      "type": "boolean",
+      "required": false
+    },
+    {
+      "schema": "SweepRequest",
       "member": "tier",
       "type": "string",
       "enum": [
@@ -5271,6 +5359,12 @@
     },
     {
       "schema": "SweepResult",
+      "member": "retain_ids",
+      "type": "boolean",
+      "required": false
+    },
+    {
+      "schema": "SweepResult",
       "member": "skipped",
       "type": "object",
       "required": true
@@ -5313,6 +5407,12 @@
     },
     {
       "schema": "SweepSkips",
+      "member": "retention_required",
+      "type": "integer",
+      "required": false
+    },
+    {
+      "schema": "SweepSkips",
       "member": "unknown_closed_at",
       "type": "integer",
       "required": true
@@ -5333,6 +5433,13 @@
       "schema": "TreeNode",
       "member": "actor",
       "type": "string",
+      "required": false
+    },
+    {
+      "schema": "TreeNode",
+      "member": "arrival_seq",
+      "type": "integer",
+      "format": "int64",
       "required": false
     },
     {
@@ -5422,6 +5529,12 @@
       "schema": "TreeNode",
       "member": "created_by",
       "type": "string",
+      "required": false
+    },
+    {
+      "schema": "TreeNode",
+      "member": "deduped",
+      "type": "boolean",
       "required": false
     },
     {
@@ -5787,6 +5900,12 @@
     {
       "schema": "UpdateIssueRequest",
       "member": "force_assignee_transfer",
+      "type": "boolean",
+      "required": false
+    },
+    {
+      "schema": "UpdateIssueRequest",
+      "member": "force_claim_blocked",
       "type": "boolean",
       "required": false
     },
@@ -7454,6 +7573,7 @@
     "ApplyLabelPatch": "request",
     "ApplyLabelPatch.add[]": "request",
     "ApplyLabelPatch.remove[]": "request",
+    "ApplyLabelPatch.remove_prefixes[]": "request",
     "ApplyLabelPatch.replace[]": "request",
     "ApplyMetadataPatch": "request",
     "ApplyMetadataPatch.set": "request",
@@ -7509,6 +7629,7 @@
     "DeleteIssuesRequest": "request",
     "DeleteIssuesRequest.ids[]": "request",
     "DeleteIssuesResult": "response",
+    "DeleteIssuesResult.deleted_ids[]": "response",
     "DeleteIssuesResult.orphaned[]": "response",
     "Dependency": "response",
     "DependencyEdge": "both",
@@ -7542,6 +7663,7 @@
     "IssuePatchBody": "request",
     "IssuePatchBody.add_labels[]": "request",
     "IssuePatchBody.labels[]": "request",
+    "IssuePatchBody.remove_label_prefixes[]": "request",
     "IssuePatchBody.remove_labels[]": "request",
     "IssuePatchBody.waiters[]": "request",
     "IssueWithCounts": "response",

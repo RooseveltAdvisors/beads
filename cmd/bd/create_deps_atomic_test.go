@@ -27,18 +27,13 @@ import (
 )
 
 // createDepsTestEnv returns a hermetic environment for the subprocess bd
-// commands. It strips ambient BEADS_/BD_ configuration so a developer or CI
+// commands. It filters ambient BEADS_/BD_ configuration so a developer or CI
 // shell pointing at a shared Dolt server (BEADS_DOLT_SERVER_*) or a real
-// workspace (BEADS_DIR) cannot leak in, then pins BEADS_DIR at the isolated
+// workspace (BEADS_DIR) cannot leak in (filterAmbientEnv drops an inherited
+// BD_* and keeps one this suite set), then pins BEADS_DIR at the isolated
 // per-test workspace and keeps the child non-interactive.
 func createDepsTestEnv(dir string) []string {
-	var env []string
-	for _, e := range os.Environ() {
-		if strings.HasPrefix(e, "BEADS_") || strings.HasPrefix(e, "BD_") {
-			continue
-		}
-		env = append(env, e)
-	}
+	env := filterAmbientEnv(os.Environ())
 	return append(env,
 		"BEADS_DIR="+filepath.Join(dir, ".beads"),
 		"BD_NON_INTERACTIVE=1",

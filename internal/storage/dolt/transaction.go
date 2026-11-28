@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -41,6 +42,13 @@ type doltTransaction struct {
 	// journal collapsed the two planes into one transaction, so the finish path
 	// must not commit or roll it back a second time.
 	journalPinned bool
+	// ignoredDirty records the durable tables a write on a separate ignoredTx
+	// changed: a durable dependent's or child's is_blocked that a wisp write
+	// recomputed (issues), and the durable edges that pointed at a deleted
+	// wisp (dependencies). That session commits after the Dolt commit, so the
+	// rows cannot ride it; finishDoltTransaction publishes them once the
+	// session has committed (GH#6647).
+	ignoredDirty versioncontrolops.DirtyTableTracker
 }
 
 func (t *doltTransaction) txFor(table string) *sql.Tx {
@@ -49,6 +57,27 @@ func (t *doltTransaction) txFor(table string) *sql.Tx {
 		return t.ignoredTx
 	}
 	return t.regularTx
+}
+
+// markChanged records that a write on writeTable's session changed table. On
+// the regular session it stages table for the transaction's Dolt commit. On a
+// separate ignored session it does not: that session commits after the Dolt
+// commit, so staging table there would commit it without this write's rows,
+// and only sweep up whatever else was pending. finishDoltTransaction
+// publishes it instead, once the session has committed. A dolt-ignored table
+// is dropped either way (DirtyTableTracker.MarkDirty).
+func (t *doltTransaction) markChanged(writeTable, table string) {
+	if t.txFor(writeTable) == t.regularTx {
+		t.dirty.MarkDirty(table)
+		return
+	}
+	t.ignoredDirty.MarkDirty(table)
+}
+
+// markIssuesChanged records that a write on writeTable's session changed a
+// durable issues row (an IssueRowsChanged result).
+func (t *doltTransaction) markIssuesChanged(writeTable string) {
+	t.markChanged(writeTable, "issues")
 }
 
 // isActiveWisp checks if an ID exists in the wisps table within the transaction.
@@ -244,6 +273,18 @@ func (s *DoltStore) runDoltTransactionRecording(ctx context.Context, commitMsg s
 	defer clearSeats()
 	clearJournalScope := issueops.ScopeEventsJournalTransaction(regularTx, journalEnabled)
 	defer clearJournalScope()
+	// Shape counterpart of the activation switch just above (PR A1):
+	// insertEventRow/readEventsRowsInTx reach this store's probed shape only
+	// through a tx-scoped value, never through the store itself, so without
+	// this call every write on this path — CreateIssue, UpdateIssue, comments,
+	// the whole doltTransaction mutator surface reached from
+	// runDoltTransactionRecording — would silently fall back to
+	// canonicalJournalShape and defeat adaptive I/O for this store's main
+	// write path. The switch does not depend on the shape: a nil shape (no
+	// probe result) writes canonically, as scopeEventsJournalTransaction
+	// explains.
+	clearJournalShape := issueops.ScopeEventsJournalShape(regularTx, s.journalShape.Load())
+	defer clearJournalShape()
 	// Versioned history binds to the SAME regular transaction the mutation runs
 	// in, for the same reason the journal does: RecordVersionInTx no-ops unless
 	// this scope is set. Without it every issues-plane mutation routed through
@@ -356,7 +397,21 @@ func (s *DoltStore) finishDoltTransaction(ctx context.Context, conn *sql.Conn, t
 	if err := tx.ignoredTx.Commit(); err != nil {
 		return fmt.Errorf("sql commit (ignored, regular already committed): %w: %w", err, ErrCommitIndeterminate)
 	}
+	s.publishIgnoredDirty(ctx, conn, tx, commitMsg)
 	return nil
+}
+
+// publishIgnoredDirty commits the durable rows tx's ignored session changed
+// (markChanged), now that the session has committed them. It runs on conn,
+// the transaction's own pinned connection, because a MaxOpenConns=1 pool has
+// no other one to give while conn is held. Every row is already durable, so a
+// failure is counted and logged like the other post-commit history commits,
+// never returned: the rows ride the next Dolt commit on the branch.
+func (s *DoltStore) publishIgnoredDirty(ctx context.Context, conn *sql.Conn, tx *doltTransaction, commitMsg string) {
+	if err := versioncontrolops.StageAndCommit(ctx, conn, tx.ignoredDirty.DirtyTables(), commitMsg, s.commitAuthorString()); err != nil {
+		doltMetrics.postTxCommitDropped.Add(ctx, 1)
+		log.Printf("dolt: post-tx dolt commit failed for %q (data already committed; change rides the next dolt commit): %v", commitMsg, err)
+	}
 }
 
 // ignoredTxBorrowTimeout bounds how long a borrow of a second warm connection
@@ -577,8 +632,14 @@ func (t *doltTransaction) CreateIssues(ctx context.Context, issues []*types.Issu
 	}
 
 	if len(wispIssues) > 0 {
-		if _, err := issueops.CreateIssuesInTxWithContext(ctx, t.ignoredTx, bc, wispIssues, actor); err != nil {
+		result, err := issueops.CreateIssuesInTxWithContext(ctx, t.ignoredTx, bc, wispIssues, actor)
+		if err != nil {
 			return err
+		}
+		// A wisp's create-time edge can flip a durable row's is_blocked: a
+		// waiter on the wisp's durable spawner.
+		if result.ChangedTables["issues"] {
+			t.markIssuesChanged("wisps")
 		}
 	}
 	return nil
@@ -841,6 +902,10 @@ func (t *doltTransaction) UpdateIssue(ctx context.Context, id string, updates ma
 	for spawnTable := range result.Spawned.ChangedTables {
 		t.dirty.MarkDirty(spawnTable)
 	}
+	// A wisp's status change can recompute a durable dependent.
+	if result.IssueRowsChanged {
+		t.markIssuesChanged(table)
+	}
 	return nil
 }
 
@@ -862,7 +927,7 @@ func (t *doltTransaction) CloseIssue(ctx context.Context, id string, reason stri
 	t.dirty.MarkDirty(table)
 	t.dirty.MarkDirty(eventTable)
 	if result.IssueRowsChanged {
-		t.dirty.MarkDirty("issues")
+		t.markIssuesChanged(table)
 	}
 	// A recurring close filed its successor in this transaction; its labels
 	// live in their own table, so mark what the spawn actually wrote.
@@ -887,7 +952,7 @@ func (t *doltTransaction) ReopenIssueWithResult(ctx context.Context, id string, 
 		t.dirty.MarkDirty(table)
 		t.dirty.MarkDirty(eventTable)
 		if result.IssueRowsChanged {
-			t.dirty.MarkDirty("issues")
+			t.markIssuesChanged(table)
 		}
 	}
 	return result.Changed, nil
@@ -901,14 +966,25 @@ func (t *doltTransaction) DeleteIssue(ctx context.Context, id string) error {
 	}
 	// storage.Tx.DeleteIssue carries no actor (it is the actorless system
 	// surface), so the journal rows record none — 0066's "system/unknown".
-	if err := issueops.DeleteIssueInTx(ctx, t.txFor(table), id, ""); err != nil {
+	result, err := issueops.DeleteIssueInTxWithResult(ctx, t.txFor(table), id, issueops.NoRequestActor)
+	if err != nil {
 		return wrapExecError("delete issue in tx", err)
 	}
 	// Mark every table the ON DELETE CASCADE fans out to, not just the row's
 	// own table: the cascaded deletions are invisible to the SQL we issue, so
-	// staging only `issues` leaves them uncommitted in the working set.
+	// staging only `issues` leaves them uncommitted in the working set. They
+	// are marked on the session that deleted them: a wisp's delete also
+	// removes the durable edges that pointed at it.
 	for _, cascaded := range issueops.DeleteCascadeTables(isWisp) {
-		t.dirty.MarkDirty(cascaded)
+		t.markChanged(table, cascaded)
+	}
+	// Deleting a wisp can unblock a durable dependent.
+	if result.IssueRowsChanged {
+		t.markIssuesChanged(table)
+	}
+	// The suffix reservation's counter (GH#4750), on the session that wrote it.
+	for changed := range result.ChangedTables {
+		t.markChanged(table, changed)
 	}
 	return nil
 }
@@ -983,11 +1059,11 @@ func (t *doltTransaction) AddDependencyWithOptions(ctx context.Context, dep *typ
 	}
 
 	var addErr error
-	var eventWritten bool
+	var written issueops.DependencyWriteResult
 	if opts.PrecheckedTarget != nil && table == "wisp_dependencies" && kind == issueops.DepTargetIssue {
-		eventWritten, addErr = t.addWispDepSuspendingIssueTargetFK(ctx, dep, actor, opts)
+		written, addErr = t.addWispDepSuspendingIssueTargetFK(ctx, dep, actor, opts)
 	} else {
-		eventWritten, addErr = issueops.AddDependencyInTx(ctx, t.txFor(table), dep, actor, opts)
+		written, addErr = issueops.AddDependencyInTxWithResult(ctx, t.txFor(table), dep, actor, opts)
 	}
 	if addErr != nil {
 		return addErr
@@ -998,8 +1074,14 @@ func (t *doltTransaction) AddDependencyWithOptions(ctx context.Context, dep *typ
 	// so StageAndCommit commits the event with the edge (a torn write otherwise
 	// leaves the event in the working set, dropped on reset). A structural or
 	// idempotent add writes no event, so leave eventTable unstaged.
-	if eventWritten {
+	if written.EventWritten {
 		t.dirty.MarkDirty(eventTable)
+	}
+	// A blocking edge flips the source's or a descendant's is_blocked; a
+	// durable row it flipped is committed with the edge (GH#6647), and an edge
+	// that flipped none stages no `issues` (GH#2455).
+	if written.Blocked.IssueRowsChanged {
+		t.markIssuesChanged(table)
 	}
 	t.recordDepTierWrite(table)
 	return nil
@@ -1037,15 +1119,15 @@ func (t *doltTransaction) recordDepTierWrite(writeTable string) {
 // target's existence was just validated on the regular tx. The regular tx
 // commits before the ignored tx, so the committed end-state always satisfies
 // the FK; suspend the session's FK checks around this one statement scope.
-func (t *doltTransaction) addWispDepSuspendingIssueTargetFK(ctx context.Context, dep *types.Dependency, actor string, opts issueops.AddDependencyOpts) (bool, error) {
+func (t *doltTransaction) addWispDepSuspendingIssueTargetFK(ctx context.Context, dep *types.Dependency, actor string, opts issueops.AddDependencyOpts) (issueops.DependencyWriteResult, error) {
 	if _, err := t.ignoredTx.ExecContext(ctx, "SET foreign_key_checks = 0"); err != nil {
-		return false, fmt.Errorf("suspend foreign key checks for cross-tier dependency: %w", err)
+		return issueops.DependencyWriteResult{}, fmt.Errorf("suspend foreign key checks for cross-tier dependency: %w", err)
 	}
-	eventWritten, addErr := issueops.AddDependencyInTx(ctx, t.ignoredTx, dep, actor, opts)
+	written, addErr := issueops.AddDependencyInTxWithResult(ctx, t.ignoredTx, dep, actor, opts)
 	if _, err := t.ignoredTx.ExecContext(ctx, "SET foreign_key_checks = 1"); err != nil && addErr == nil {
 		addErr = fmt.Errorf("restore foreign key checks after cross-tier dependency: %w", err)
 	}
-	return eventWritten, addErr
+	return written, addErr
 }
 
 // readDepTargetForPrecheck validates a dependency target on the transaction
@@ -1152,7 +1234,7 @@ func (t *doltTransaction) RemoveDependencyWithOptions(ctx context.Context, issue
 		table = "wisp_dependencies"
 		eventTable = "wisp_events"
 	}
-	eventWritten, err := issueops.RemoveDependencyInTx(ctx, t.txFor(table), issueID, dependsOnID, actor, rmOpts.EmitEvent)
+	written, err := issueops.RemoveDependencyInTxWithResult(ctx, t.txFor(table), issueID, dependsOnID, actor, rmOpts.EmitEvent)
 	if err != nil {
 		return wrapExecError("remove dependency in tx", err)
 	}
@@ -1161,8 +1243,13 @@ func (t *doltTransaction) RemoveDependencyWithOptions(ctx context.Context, issue
 	// event table only for a genuine emit (explicit verb + edge removal); stage
 	// that table so it commits with the edge. A structural or missing-edge remove
 	// writes no event, so leave eventTable unstaged.
-	if eventWritten {
+	if written.EventWritten {
 		t.dirty.MarkDirty(eventTable)
+	}
+	// The removal's recompute can clear the source's or a descendant's
+	// is_blocked; that unblock is committed with the removal (GH#6647).
+	if written.Blocked.IssueRowsChanged {
+		t.markIssuesChanged(table)
 	}
 	return nil
 }

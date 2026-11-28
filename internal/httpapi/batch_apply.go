@@ -103,7 +103,7 @@ var (
 		"repeat_end", "repeat_pattern", "repeat_start", "repeat_window", "status", "title",
 		"status", "title", "waiters",
 	}
-	applyLabelPatchMembers    = []string{"add", "remove", "replace"}
+	applyLabelPatchMembers    = []string{"add", "remove", "remove_prefixes", "replace"}
 	applyMetadataPatchMembers = []string{"merge", "replace", "set", "unset"}
 	applyCloseItemMembers     = []string{"expected_version", "force", "reason", "session", "target"}
 	applyDepAddItemMembers    = []string{"has_spawner", "metadata", "source", "target", "thread_id", "type"}
@@ -708,6 +708,7 @@ func applyLabelPatch(prefix string, encoded json.RawMessage) (issueops.LabelPatc
 		}},
 		{"add", wire.Add, func(v []string) { patch.Add = v }},
 		{"remove", wire.Remove, func(v []string) { patch.Remove = v }},
+		{"remove_prefixes", wire.RemovePrefixes, func(v []string) { patch.RemovePrefixes = v }},
 	} {
 		if _, present := raw[edit.member]; !present {
 			continue
@@ -980,6 +981,7 @@ func (s *Server) failApplyBatch(w http.ResponseWriter, r *http.Request, request 
 		endpoint     *issueops.DependencyEndpointNotFoundError
 		openChildren *issueops.CloseOpenChildrenError
 		claimed      *issueops.ClaimConflictError
+		expired      *issueops.IdempotencyExpiredError
 	)
 	// The item wrapper is read once and shared by every branch below: a refusal
 	// that names an item names it whatever the inner sentinel turns out to be.
@@ -1050,6 +1052,21 @@ func (s *Server) failApplyBatch(w http.ResponseWriter, r *http.Request, request 
 	case errors.Is(err, issueops.ErrSelfDependency):
 		s.refusedApplyBatch(r, err)
 		s.fail(w, r, at(InvalidArgument("", ReasonInvalidValue, "an issue cannot depend on itself"), "target"))
+
+	// A RETIRED explicit id on a create item is a 410, by its own type and
+	// ahead of the occupied-id and validation arms, for failCreateIssue's
+	// reason.
+	case errors.As(err, &expired):
+		s.refusedApplyBatch(r, err)
+		if itemErr != nil && itemErr.IssueID == "" {
+			// A create refused before its id was minted names no id on the
+			// item; this refusal is ABOUT the id the caller sent, so it is the
+			// one `item_issue_id` can and should carry.
+			itemErr.IssueID = expired.ID
+		}
+		s.fail(w, r, at(newResult(CodeIdempotencyExpired,
+			"a create item's `id` was retired by a retention sweep; the create that used it already happened and nothing was written").
+			WithClosedAt(expired.ClosedAt), "id"))
 
 	// An occupied explicit id is a 409: the body is well-formed and stays
 	// well-formed, and what refuses it is STATE the client cannot see without

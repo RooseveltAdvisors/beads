@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/steveyegge/beads/internal/notify"
 	"github.com/steveyegge/beads/internal/seats"
 )
@@ -36,18 +37,10 @@ func bindSeatIdentity(cmd *cobra.Command, beadsDir string, write bool) error {
 	}
 	for _, key := range []string{"assignee", "owner", "if-assignee"} {
 		flag := cmd.Flags().Lookup(key)
-		if flag == nil || flag.Value.String() == "" {
+		if flag == nil {
 			continue
 		}
-		id, err := r.Resolve(flag.Value.String())
-		if err != nil {
-			return err
-		}
-		if write && key == "assignee" && id != "" && !seats.IsUUID(id) && seats.MachineActor(id) == "" {
-			return fmt.Errorf("assignee seat %q resolves to non-UUID identity %q: agent seat must be minted with a UUID (bd seat register --alias %s)", flag.Value.String(), id, flag.Value.String())
-		}
-		_ = flag.Value.Set("")
-		if err := flag.Value.Set(id); err != nil {
+		if err := bindSeatIdentityFlag(flag, r, write); err != nil {
 			return err
 		}
 	}
@@ -70,6 +63,49 @@ func bindSeatIdentity(cmd *cobra.Command, beadsDir string, write bool) error {
 	}
 	actor = id
 	return nil
+}
+
+func bindSeatIdentityFlag(flag *pflag.Flag, r seats.Registry, write bool) error {
+	resolve := func(name string) (string, error) {
+		id, err := r.Resolve(name)
+		if err != nil {
+			return "", err
+		}
+		if write && flag.Name == "assignee" && id != "" && !seats.IsUUID(id) && seats.MachineActor(id) == "" {
+			return "", fmt.Errorf("assignee seat %q resolves to non-UUID identity %q: agent seat must be minted with a UUID (bd seat register --alias %s)", name, id, name)
+		}
+		return id, nil
+	}
+	if values, ok := flag.Value.(pflag.SliceValue); ok {
+		// reclaim accepts several assignees. Resolve the parsed names, not their
+		// bracketed display string. Leave empty-scope validation to the command.
+		names := values.GetSlice()
+		if len(names) == 0 {
+			return nil
+		}
+		ids := make([]string, 0, len(names))
+		for _, name := range names {
+			id, err := resolve(name)
+			if err != nil {
+				return err
+			}
+			ids = append(ids, id)
+		}
+		return values.Replace(ids)
+	}
+	name := flag.Value.String()
+	if name == "" {
+		return nil
+	}
+	id, err := resolve(name)
+	if err != nil {
+		return err
+	}
+	// The single-value list filter needs a reset before it can take the UUID.
+	if err := flag.Value.Set(""); err != nil {
+		return err
+	}
+	return flag.Value.Set(id)
 }
 
 func seatDisplay(id string) string {

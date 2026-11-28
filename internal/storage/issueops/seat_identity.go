@@ -3,7 +3,9 @@ package issueops
 import (
 	"context"
 	"fmt"
+	"runtime"
 
+	"github.com/steveyegge/beads/internal/remedy"
 	"github.com/steveyegge/beads/internal/seats"
 	"github.com/steveyegge/beads/internal/types"
 	publicops "github.com/steveyegge/beads/issueops"
@@ -35,7 +37,8 @@ func ResolveIssueSeats(ctx context.Context, issue *types.Issue) error {
 	}
 	issue.AssigneeID, issue.Assignee = id, id
 	if id != "" && !seats.IsUUID(id) && seats.MachineActor(id) == "" {
-		return fmt.Errorf("assignee seat %q resolves to non-UUID identity %q: agent seat must be minted with a UUID (bd seat register --alias %s)", assignment, id, assignment)
+		aliasArg, aliasNote := remedy.CommandArg(runtime.GOOS, assignment, "<alias>")
+		return fmt.Errorf("assignee seat %q resolves to non-UUID identity %q: agent seat must be minted with a UUID (bd seat register --alias %s)%s", assignment, id, aliasArg, aliasNote)
 	}
 	for _, field := range []*string{&issue.CreatedBy, &issue.Owner, &issue.Actor} {
 		value, err := r.Resolve(*field)
@@ -112,7 +115,8 @@ func ResolveSeatUpdates(ctx context.Context, updates map[string]interface{}) err
 		if key == "assignee" {
 			updates["assignee_id"] = id
 			if id != "" && !seats.IsUUID(id) && seats.MachineActor(id) == "" {
-				return fmt.Errorf("assignee seat %q resolves to non-UUID identity %q: agent seat must be minted with a UUID (bd seat register --alias %s)", value, id, value)
+				aliasArg, aliasNote := remedy.CommandArg(runtime.GOOS, value, "<alias>")
+				return fmt.Errorf("assignee seat %q resolves to non-UUID identity %q: agent seat must be minted with a UUID (bd seat register --alias %s)%s", value, id, aliasArg, aliasNote)
 			}
 		}
 		if (key == "created_by" || key == "actor") && id != "" && !seats.IsUUID(id) && seats.MachineActor(id) == "" {
