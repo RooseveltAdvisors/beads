@@ -2,11 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 
+	"github.com/steveyegge/beads/internal/seats"
 	"github.com/steveyegge/beads/internal/types"
 )
 
@@ -30,6 +33,59 @@ func TestReclaimFilterFromFlagsUnset(t *testing.T) {
 	}
 	if !filter.IsEmpty() {
 		t.Fatalf("no flags => filter %+v, want empty (global sweep)", filter)
+	}
+}
+
+func TestReclaimSeatFiltersInStrictWorkspace(t *testing.T) {
+	const first = "00000000-0000-4000-8000-000000000001"
+	const second = "00000000-0000-4000-8000-000000000002"
+	dir := t.TempDir()
+	if err := seats.Save(filepath.Join(dir, "notify"), seats.Registry{
+		first: {Aliases: []string{"pilot"}, Liveness: seats.Live}, second: {Aliases: []string{"scribe"}, Liveness: seats.Live},
+		"legacy": {Liveness: seats.Live},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldCtx, oldActor := rootCtx, actor
+	t.Cleanup(func() { rootCtx, actor = oldCtx, oldActor })
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		write   bool
+		want    []string
+		wantErr string
+	}{
+		{name: "omitted"},
+		{name: "repeated aliases", args: []string{"--assignee", "pilot", "--assignee", "scribe"}, write: true, want: []string{first, second}},
+		{name: "comma separated", args: []string{"--assignee", "scribe,pilot"}, want: []string{second, first}},
+		{name: "unknown member", args: []string{"--assignee", "pilot,missing"}, wantErr: `unknown seat "missing"`},
+		{name: "explicitly empty", args: []string{"--assignee="}, wantErr: "no usable value"},
+		{name: "non-UUID write", args: []string{"--assignee", "pilot,legacy"}, write: true, wantErr: "non-UUID identity"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rootCtx, actor = t.Context(), first
+			cmd := newReclaimTestCmd()
+			if err := cmd.ParseFlags(append([]string{"--id", "qa-one"}, tc.args...)); err != nil {
+				t.Fatal(err)
+			}
+			var filter types.ReclaimFilter
+			err := bindSeatIdentity(cmd, dir, tc.write)
+			if err == nil {
+				filter, err = reclaimFilterFromFlags(cmd)
+			}
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("scope error = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(filter.Assignees, tc.want) || !slices.Equal(filter.IDs, []string{"qa-one"}) {
+				t.Errorf("scope = %+v, want assignees %v and id qa-one", filter, tc.want)
+			}
+		})
 	}
 }
 
