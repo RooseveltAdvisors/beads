@@ -189,6 +189,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`--ttl <duration>` on `bd update --claim`, `bd ready --claim` and
+  `bd heartbeat`: a worker chooses its lease length.** A claim's lease
+  expires the default lease length after the claim or the last heartbeat,
+  and a worker that shells out to bd had no flag to change that for its own
+  claims: it had to heartbeat within the default or lose its claim to
+  `bd reclaim`. `--ttl` takes a Go duration (`30m`, `2h`) and sets the
+  lease the command arms or refreshes to expire that long from now. The
+  length is per call: a heartbeat without `--ttl` resets the expiry to now
+  plus the default length, so a worker that claimed with `--ttl 2h` passes
+  `--ttl 2h` on every heartbeat. A zero or negative duration, and `--ttl`
+  without `--claim` on `bd update` or `bd ready`, are usage errors. A
+  re-claim of an issue the actor already holds leaves the lease as it was
+  and says so on stderr; so does a claim of a wisp (an ephemeral or
+  no-history issue, which has no lease) through either command. The flag is
+  honored on the embedded, Dolt server and proxied-server routes, and
+  refused on the remote `bd serve` backend, whose claim and heartbeat
+  requests carry no lease length (divergence ledger rows `F-update-ttl`,
+  `F-ready-ttl` and `F-heartbeat-ttl`). Without the flag nothing changes.
+
+- **`bd version --json` reports the newest schema migration the binary
+  carries.** Two new integer fields, `latest_schema_migration` and
+  `latest_ignored_schema_migration`, give the highest migration number the
+  binary embeds in each series: the values a database's `schema_migrations`
+  and `ignored_schema_migrations` cursors reach once this binary has migrated
+  it. `bd version` opens no database, so an upgrade script can ask a candidate
+  binary for its numbers and compare them with a database's cursors before any
+  command of that binary runs against the database; until now the numbers
+  could only be read from the source tree. They are not the existing
+  `schema_version` field, which is the version of the JSON output contract and
+  is unchanged. The text form of `bd version` is unchanged. Binaries released
+  before this change do not print the two fields, so a script should treat a
+  missing field as unknown, not as 0.
+
 - **`hooks.manage` and `gitignore.manage`: per-repository opt-outs from bd's
   hook and .gitignore management.** A repository that runs its own hook manager
   or keeps its own `.beads/.gitignore` had no durable way to stop bd writing
@@ -737,10 +770,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   state is last. One line after the comments names what was withheld and its
   size, or says that nothing was. The header, labels, metadata and both
   dependency lists print as before, and a comment is never cut, so the view
-  is short but has no fixed size. Text output only: `--head` is refused with
-  `--json`, `--short`, `--long`, `--refs`, `--children`, `--thread`,
-  `--as-of` and `--watch`. Nothing is stored or moved, and `bd show` without
+  is short but has no fixed size. `--head` is refused with `--short`,
+  `--long`, `--refs`, `--children`, `--thread`, `--as-of`, `--watch` and
+  `--include-comments`. Nothing is stored or moved, and `bd show` without
   the flag prints what it printed before.
+- **`bd show --head --json`** returns the same short view as JSON
+  ([#7187](https://github.com/gastownhall/beads/issues/7187)): one object
+  per issue with the keys of `bd show --json`, where `description`, `design`
+  and `acceptance_criteria` are absent, `notes` is the last 1 KB of the
+  field, and `comments` holds the last 3 comment bodies (`--comments-tail N`
+  changes the count, and `0` keeps them all; `--include-comments` is refused
+  with `--head`, because it asks for every body). Each dependency row is
+  reduced as by `--brief-deps`, because a full row carries that issue's own
+  description and notes. A `withheld` object counts what was left out
+  (`description_bytes`, `design_bytes`, `notes_bytes`,
+  `acceptance_criteria_bytes`, `comments`). It is always present, and all
+  zero for an issue the view shows whole, so a reader can tell the short
+  view from a full record. `comment_count` is still the count of all
+  comments. The view is cut from the answer that
+  `bd show --json --include-comments --brief-deps` reads, so the read
+  contract and the HTTP API are unchanged: the output is short, and the read
+  still fetches every comment. `bd show --json` without `--head` returns
+  what it returned before.
 - `GET /v0/beads/issues` accepts `no_assignee`, `title` and a repeatable `id`
   (one id per value, at most 200), each behind its own new capability token
   (`issues.list.noAssignee`, `issues.list.title`, `issues.list.ids`; additive,
@@ -1643,11 +1694,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`bd dep list` with many ids no longer costs a search and an issue read
+  per id** outside proxied-server mode. The multi-id listing resolved its
+  arguments one at a time before it read their edges: against a Dolt server,
+  5000 ids took about 20 seconds where a proxied-server workspace on the same
+  database took under one. It now settles every argument that names a stored
+  issue exactly as typed in the one read that brings its edges back, and
+  resolves only the rest one at a time (a partial id, an id routed to another
+  database, an id that names nothing). The output and the warnings are
+  unchanged. A workspace connected to a `bd serve` backend gains the same way:
+  the batch sends one `listDependencies` request where it also sent a
+  `getIssue` per id.
+
+- **`bd close` and `bd update -s closed` record the session under Claude
+  Code.** Both verbs fill `closed_by_session` from `--session` or, without
+  it, from the `CLAUDE_SESSION_ID` environment variable. Claude Code exports
+  `CLAUDE_CODE_SESSION_ID` to the commands it runs and does not export
+  `CLAUDE_SESSION_ID`, so the column stayed empty on every close an agent
+  made unless a hook copied one variable to the other. bd now reads
+  `CLAUDE_CODE_SESSION_ID` when `CLAUDE_SESSION_ID` is unset or empty, so
+  every close made from a Claude Code session now records that session's ID:
+  it appears as `closed_by_session` in `--json` output and exports and as the
+  "Closed by session" line of `bd show --long`. `--session` and
+  `CLAUDE_SESSION_ID` keep their precedence, so a setup that sets either one
+  sees no change. On an http workspace, where `bd update -s
+  closed` cannot carry the session, the one-line notice on stderr now also
+  appears under Claude Code, and it names the variable the session came
+  from. (#5450)
+
 - **`bd show` no longer prints `Lease: expires expired` for a lapsed lease.**
   An in_progress issue keeps its lease row after the lease runs out, until
   `bd reclaim` sweeps it, and the lease line then printed the verb twice and
   no time. It now reads `Lease: expired 3 hours ago`; a live lease still reads
   `Lease: expires in 3 mins`.
+
+- **`bd init` refuses a `BEADS_DIR` that names the project root of an
+  initialized workspace** ([#7034](https://github.com/gastownhall/beads/issues/7034),
+  first fixed for `bd init` by @rjgeng in #7047).
+  Since an explicit `BEADS_DIR` became authoritative (#6938), `bd init` with
+  `BEADS_DIR` set to the project root, instead of to its `.beads`, exited 0
+  and wrote `metadata.json`, `config.yaml`, `README.md` and a second database
+  into the project root, beside the real workspace. Init now refuses with
+  exit 1 before it creates anything, `--force` included, and names the
+  `.beads` directory that was meant. A project root whose `.beads` holds only
+  a redirect to a workspace is refused the same way, and so is a project root
+  that holds files of its own which discovery reads as workspace files (a
+  `config.yaml`, a `metadata.json` that is not beads metadata, a `*.db`
+  file). A `metadata.json` or `config.json` of the project's own is not
+  taken for beads metadata because it has a `database` or `backend` setting
+  (`{"database": "postgres://localhost/app"}`). In the same situation
+  the "no beads database found" error of every other command now adds a note
+  that `BEADS_DIR` is set to a directory with no workspace and names the
+  `.beads` directory inside it. A `BEADS_DIR` that names a new or empty
+  directory is initialized as before. `bd import` with `BEADS_DIR` at such a
+  project root gets the same "no beads database found" refusal and note,
+  the project roots with files of their own included, and in server mode
+  as well: it used to create an empty `embeddeddolt` store in the project
+  root, fail with "issue_prefix config is missing", and leave the store
+  behind, after which the other commands run with the same `BEADS_DIR`
+  were no longer refused. In server mode (`BEADS_DOLT_SERVER_MODE=1`, for
+  example, or `dolt.mode: server` in the user's config), and in any mode
+  once the project root held such a store, it took a `config.json` of the
+  project's own for the workspace's metadata instead, moved it into a
+  `metadata.json` and removed it. A store directory in the project root
+  (`embeddeddolt`, or `dolt`) does not turn the refusal off. With `--json`
+  the refusal is on stderr, as for the other commands. `bd bootstrap` with
+  `BEADS_DIR` at such a project root gets the same refusal and note, with
+  exit 1, `--dry-run` included. A project root that held nothing but its
+  `.beads`, with no `refs/dolt/data` on `origin`, was refused before, with
+  "No active beads workspace found" and no word about `BEADS_DIR`. In the
+  other shapes bootstrap took the project root as its target and read the
+  metadata of the workspace in the directory above it. Where that directory held one, bootstrap cloned a database into
+  the project root when `origin` carried `refs/dolt/data`, and created a
+  fresh one there, named for the workspace above, when the project root held
+  a file of its own that discovery reads as a workspace file; `--dry-run`
+  printed that plan and exited 0. Where the directory above held none,
+  bootstrap failed with "not a beads workspace: .beads directory not found"
+  for that directory. A `config.json` of the project's own beside such a
+  file was taken for legacy beads metadata, replaced by a `metadata.json`
+  and removed, by `--dry-run` too. With `--json`, `bd bootstrap` prints its
+  no-workspace payload with a `suggestion` that names the `.beads` directory
+  meant.
 
 - **`bd gc` and `bd doctor --fix` no longer skip a delete that collides with
   a concurrent write.** On a Dolt sql-server, deleting an issue while another
